@@ -55,8 +55,8 @@ Free apart from the reps' normal phone plans. Calls go out on the rep's own SIM,
 - WhatsApp Business API for real message tracking (paid, about ₹0.12–0.86 per message).
 
 ## Limits
-- Android only.
+- Android phones only (the Windows app dials through the rep's Android phone).
 - Recording depends on the phone's built-in recorder; some models block it.
-- Calls are made from mobiles, not laptops.
+- Calls are made from the rep's mobile. Reps can start them from the Windows app (UIC Dialer) and talk on the PC through Phone Link and Bluetooth; see [desktop-app.md](desktop-app.md).
 - WhatsApp via `wa.me` only logs that a chat was opened, not the messages.
 - Android does not tell the app exactly when a call opened with `ACTION_DIAL` ends, so the outcome prompt appears when the rep comes back to the app.

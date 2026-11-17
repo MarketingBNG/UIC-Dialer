@@ -4,6 +4,8 @@ import { NavLink, Navigate, Route, Routes } from "react-router";
 import { ApiError, api, isManager, type Me } from "./api";
 import { FirefliesBanner } from "./components/Fireflies";
 import { CallDetailPage } from "./pages/CallDetail";
+import { DialerProvider } from "./dialer";
+import { DialerPage } from "./pages/Dialer";
 import { AuditPage } from "./pages/Audit";
 import { CallsPage } from "./pages/Calls";
 import { ContactDetailPage } from "./pages/ContactDetail";
@@ -47,13 +49,16 @@ export function App() {
 
   return (
     <MeContext.Provider value={me.data}>
-      <Shell me={me.data} />
+      <DialerProvider>
+        <Shell me={me.data} />
+      </DialerProvider>
     </MeContext.Provider>
   );
 }
 
 function navItems(me: Me) {
   const items = [
+    { to: "/dialer", label: "Dialer" },
     { to: "/calls", label: "Calls" },
     { to: "/activity", label: "Activity Tracker" },
   ];
@@ -147,6 +152,7 @@ function Shell({ me }: { me: Me }) {
         {isManager(me.role) && <FirefliesBanner />}
         <Routes>
           <Route path="/" element={<Navigate to="/calls" replace />} />
+          <Route path="/dialer" element={<DialerPage />} />
           <Route path="/calls" element={<CallsPage />} />
           <Route path="/calls/:id" element={<CallDetailPage />} />
           <Route path="/activity" element={<ContactsPage />} />

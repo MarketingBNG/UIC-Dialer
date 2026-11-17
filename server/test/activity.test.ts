@@ -309,3 +309,30 @@ describe("dashboard", () => {
     });
   });
 });
+
+describe("POST /api/activities (desktop dialer)", () => {
+  it("logs an outcome with a session, links the rep's recorded call, and is idempotent", async () => {
+    const email = uniqueEmail("agent");
+    const s = await t.loginDevice(email);
+    const phone = randomMobile();
+    const at = new Date(Date.now() - minutes(5));
+    const callId = await registerCall(s.headers, phone, at);
+    const h = await t.sessionFor(email);
+    const body = { clientId: randomUUID(), phone, type: "CALL", outcome: "INTERESTED", occurredAt: iso(at) };
+    const res = await t.app.inject({ method: "POST", url: "/api/activities", headers: h, payload: body });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().contact).toMatchObject({ status: "INTERESTED" });
+    const row = await t.db.activity.findUniqueOrThrow({ where: { clientId: body.clientId } });
+    expect(row.callId).toBe(callId);
+    const again = await t.app.inject({ method: "POST", url: "/api/activities", headers: h, payload: body });
+    expect(again.json().activity.id).toBe(res.json().activity.id);
+  });
+
+  it("needs our origin", async () => {
+    const email = uniqueEmail("agent");
+    await t.loginDevice(email);
+    const h = { ...(await t.sessionFor(email)), origin: "https://evil.example" };
+    const body = { clientId: randomUUID(), phone: randomMobile(), type: "CALL", occurredAt: iso(new Date()) };
+    expect((await t.app.inject({ method: "POST", url: "/api/activities", headers: h, payload: body })).statusCode).toBe(403);
+  });
+});

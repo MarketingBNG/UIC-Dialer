@@ -145,6 +145,16 @@ export async function activityRoutes(app: FastifyInstance, deps: Deps) {
     return { results };
   });
 
+  // ---- Dashboard / desktop dialer ----
+
+  /** Call outcome logged from the desktop dialer (same rules and idempotency as the phone's). */
+  app.post("/api/activities", anyone, async (req) => {
+    const activity = await saveFromPhone(currentUser(req).id, ActivityBody.parse(req.body));
+    const fresh = await deps.db.contact.findUniqueOrThrow({ where: { id: activity.contactId }, include: contactInclude });
+    const { callId: _callId, ...dto } = activityDto(activity);
+    return { activity: dto, contact: contactDto(fresh) };
+  });
+
   app.get("/v1/contacts", device, async (req) => {
     const q = DeviceListQuery.parse(req.query);
     const rows = await deps.db.contact.findMany({

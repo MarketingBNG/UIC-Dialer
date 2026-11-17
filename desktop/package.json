@@ -1,0 +1,33 @@
+{
+  "name": "uic-dialer-desktop",
+  "productName": "UIC Dialer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "UIC Dialer for Windows: the dashboard plus click-to-call through Phone Link.",
+  "author": "USA India CFO",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check src/main.js",
+    "dist": "electron-builder --win nsis --publish never"
+  },
+  "devDependencies": {
+    "electron": "45.3.3",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "com.usaindiacfo.uicdialer",
+    "productName": "UIC Dialer",
+    "artifactName": "UIC-Dialer-Setup-${version}.${ext}",
+    "files": ["src/**/*", "package.json"],
+    "directories": { "output": "dist" },
+    "protocols": [{ "name": "UIC Dialer sign-in", "schemes": ["uicdialer"] }],
+    "win": { "target": ["nsis"] },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "createDesktopShortcut": true,
+      "shortcutName": "UIC Dialer"
+    }
+  }
+}

@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { claimsToIdentity } from "../auth/google.js";
 import { SESSION_COOKIE, SESSION_TTL_S } from "../auth/guards.js";
@@ -16,6 +17,15 @@ const GoogleLogin = z.object({
     appVersion: z.string().max(40).optional(),
   }),
 });
+/** Desktop app (UIC Dialer) sign-in: PKCE-style S256 challenge from the app; the code comes back via uicdialer://. */
+export const DESKTOP_SCHEME = "uicdialer";
+const DESKTOP_CODE_TTL_S = 120;
+const Challenge = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
+const DesktopStart = z.object({ desktop: Challenge.optional() });
+const DesktopExchange = z.object({ code: z.string().min(20).max(4096), verifier: z.string().regex(/^[A-Za-z0-9_-]{43,128}$/) });
+const s256 = (v: string) => createHash("sha256").update(v).digest("base64url");
+const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
 const RefreshBody = z.object({ refreshToken: z.string().min(20).max(200) });
 
 const publicUser = (u: { id: string; email: string; name: string | null; role: string }) => ({
@@ -85,10 +95,14 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
   const secure = deps.config.NODE_ENV === "production";
   const cookieOpts = { httpOnly: true, secure, sameSite: "lax" as const, path: "/" };
 
-  app.get("/auth/google", strict, async (_req, reply) => {
+  // Desktop exchange codes already used (single uic-api instance; entries expire with the code).
+  const usedCodes = new Map<string, number>();
+
+  app.get("/auth/google", strict, async (req, reply) => {
     if (!deps.oidc) throw new HttpError(503, "Dashboard sign-in is not configured");
+    const { desktop } = DesktopStart.parse(req.query);
     const { url, verifier, state, nonce } = await deps.oidc.start();
-    const sealed = await deps.tokens.seal({ verifier, state, nonce }, 600);
+    const sealed = await deps.tokens.seal({ verifier, state, nonce, ...(desktop ? { desktop } : {}) }, 600);
     reply.setCookie(OIDC_COOKIE, sealed, { ...cookieOpts, maxAge: 600 });
     return reply.redirect(url);
   });
@@ -107,6 +121,19 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
         nonce: String(checks["nonce"]),
       });
       const user = await resolveUser(deps.db, deps.config, claimsToIdentity(claims));
+      if (typeof checks["desktop"] === "string") {
+        // Signed in from the desktop app's browser tab: hand a one-time code back to the app instead of a cookie.
+        const code = await deps.tokens.seal({ uid: user.id, ch: checks["desktop"], jti: randomUUID() }, DESKTOP_CODE_TTL_S);
+        const target = escapeHtml(`${DESKTOP_SCHEME}://auth?code=${encodeURIComponent(code)}`);
+        return reply
+          .type("text/html; charset=utf-8")
+          .header("cache-control", "no-store")
+          .send(
+            `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="refresh" content="0;url=${target}">` +
+              `<title>UIC Dialer</title><body style="font:16px system-ui;margin:3rem auto;max-width:28rem;text-align:center">` +
+              `<p>Signed in. Returning to UIC Dialer…</p><p><a href="${target}">Open UIC Dialer</a></p><p>You can close this tab.</p>`,
+          );
+      }
       const session = await deps.tokens.seal({ uid: user.id }, SESSION_TTL_S);
       reply.setCookie(SESSION_COOKIE, session, { ...cookieOpts, maxAge: SESSION_TTL_S });
       return reply.redirect("/");
@@ -115,6 +142,29 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
       const reason = e instanceof AccessDeniedError ? "denied" : "failed";
       return reply.redirect(`/?error=${reason}`);
     }
+  });
+
+  app.get("/auth/desktop/exchange", strict, async (req, reply) => {
+    const { code, verifier } = DesktopExchange.parse(req.query);
+    let claims;
+    try {
+      claims = await deps.tokens.unseal(code);
+    } catch {
+      return reply.redirect("/?error=expired");
+    }
+    const { uid, ch, jti } = claims;
+    if (typeof uid !== "string" || typeof ch !== "string" || typeof jti !== "string" || s256(verifier) !== ch) {
+      return reply.redirect("/?error=failed");
+    }
+    const now = Date.now();
+    for (const [k, exp] of usedCodes) if (exp < now) usedCodes.delete(k);
+    if (usedCodes.has(jti)) return reply.redirect("/?error=expired");
+    usedCodes.set(jti, now + DESKTOP_CODE_TTL_S * 1000);
+    const user = await deps.db.user.findUnique({ where: { id: uid } });
+    if (!user?.active) return reply.redirect("/?error=denied");
+    const session = await deps.tokens.seal({ uid: user.id }, SESSION_TTL_S);
+    reply.setCookie(SESSION_COOKIE, session, { ...cookieOpts, maxAge: SESSION_TTL_S });
+    return reply.redirect("/");
   });
 
   app.post("/auth/logout", async (req, reply) => {

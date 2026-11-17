@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { setupTestApp, uniqueEmail } from "./helpers.js";
 
@@ -127,5 +127,38 @@ describe("app uses the dashboard API with its token", () => {
     expect((await t.app.inject({ method: "GET", url: "/api/users", headers: admin.headers })).statusCode).toBe(200);
     const bad = { authorization: "Bearer nope" };
     expect((await t.app.inject({ method: "GET", url: "/api/me", headers: bad })).statusCode).toBe(401);
+  });
+});
+
+describe("desktop app sign-in handoff", () => {
+  const verifier = "v".repeat(20) + randomUUID().replace(/-/g, "");
+  const challenge = createHash("sha256").update(verifier).digest("base64url");
+  const codeFor = async (uid: string, ch = challenge) => t.tokens.seal({ uid, ch, jti: randomUUID() }, 120);
+  const exchange = (code: string, v = verifier) =>
+    t.app.inject({ method: "GET", url: `/auth/desktop/exchange?code=${encodeURIComponent(code)}&verifier=${v}` });
+
+  it("sets a session cookie for the right verifier, once", async () => {
+    const user = await t.db.user.create({ data: { email: uniqueEmail() } });
+    const code = await codeFor(user.id);
+    const res = await exchange(code);
+    expect(res.statusCode).toBe(302);
+    expect(res.headers.location).toBe("/");
+    expect(String(res.headers["set-cookie"])).toContain("uic_session=");
+    const again = await exchange(code);
+    expect(again.headers.location).toBe("/?error=expired");
+    expect(again.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("rejects a wrong verifier", async () => {
+    const user = await t.db.user.create({ data: { email: uniqueEmail() } });
+    const res = await exchange(await codeFor(user.id), "w".repeat(43));
+    expect(res.headers.location).toBe("/?error=failed");
+    expect(res.headers["set-cookie"]).toBeUndefined();
+  });
+
+  it("rejects deactivated users and garbage codes", async () => {
+    const user = await t.db.user.create({ data: { email: uniqueEmail(), active: false } });
+    expect((await exchange(await codeFor(user.id))).headers.location).toBe("/?error=denied");
+    expect((await exchange("x".repeat(40))).headers.location).toBe("/?error=expired");
   });
 });

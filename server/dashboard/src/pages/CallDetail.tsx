@@ -4,6 +4,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { api, ApiError, isManager, type CallCrm, type CallDetail, type SpeakerRole } from "../api";
 import { useMe } from "../App";
 import { formatBytes, formatDuration, formatWhen, parseSegments, personName } from "../format";
+import { CallButton } from "../dialer";
 import { ConfirmDialog, DirectionTag, ErrorBox, Spinner, StatusBadge } from "../ui";
 
 const SPEEDS = [1, 1.25, 1.5, 2];
@@ -107,7 +108,10 @@ export function CallDetailPage() {
             </a>
           )}
         </div>
-        <StatusBadge status={c.status} />
+        <div className="flex items-center gap-2">
+          <CallButton phone={number} label={c.contactName || number || undefined} />
+          <StatusBadge status={c.status} />
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">

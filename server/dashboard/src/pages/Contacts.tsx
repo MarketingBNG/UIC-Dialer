@@ -4,6 +4,7 @@ import { Link, useLocation, useSearchParams } from "react-router";
 import { api, isManager, qs, type ContactPage, type ContactStatus, type User } from "../api";
 import { useMe } from "../App";
 import { CONTACT_STATUS_LABEL, formatShortWhen, isOverdue, personName } from "../format";
+import { CallButton } from "../dialer";
 import { ContactStatusBadge, Empty, ErrorBox, PageHeader, Spinner } from "../ui";
 
 function useDebounced<T>(value: T, ms: number) {
@@ -196,9 +197,9 @@ export function ContactsPage() {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800">
                 <tr>
-                  {["Phone", "Name", "Company", "Owner", "Status", "Last activity", "Next follow-up"].map((h) => (
-                    <th key={h} scope="col" className="px-4 py-3 font-medium">
-                      {h}
+                  {["Phone", "Name", "Company", "Owner", "Status", "Last activity", "Next follow-up", ""].map((h, i) => (
+                    <th key={i} scope="col" className="px-4 py-3 font-medium">
+                      {h || <span className="sr-only">Call</span>}
                     </th>
                   ))}
                 </tr>
@@ -219,6 +220,9 @@ export function ContactsPage() {
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">{c.lastActivityAt ? formatShortWhen(c.lastActivityAt) : "—"}</td>
                     <td className="whitespace-nowrap px-4 py-3">{followUp(c.nextFollowUpAt)}</td>
+                    <td className="px-4 py-2 text-right">
+                      <CallButton phone={c.phoneE164} label={c.name || c.phoneE164} className="btn-ghost" />
+                    </td>
                   </tr>
                 ))}
               </tbody>

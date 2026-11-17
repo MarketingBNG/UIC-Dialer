@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router";
 import { api, isManager, type Activity, type ContactDetail, type ContactPatch, type ContactStatus, type TimelineItem, type User } from "../api";
 import { useMe } from "../App";
 import { CONTACT_STATUS_LABEL, OUTCOME_LABEL, formatDuration, formatWhen, fromLocalInput, isOverdue, personName, toLocalInput } from "../format";
+import { CallButton } from "../dialer";
 import { Badge, ContactStatusBadge, DirectionTag, ErrorBox, PageHeader, Spinner, StatusBadge } from "../ui";
 
 export function ContactDetailPage() {
@@ -28,6 +29,7 @@ export function ContactDetailPage() {
             <ContactStatusBadge status={contact.status} />
           </span>
         }
+        actions={<CallButton phone={contact.phoneE164} label={contact.name || contact.phoneE164} className="btn-primary" />}
       />
       <div className="grid gap-4 lg:grid-cols-[22rem_1fr]">
         <div className="space-y-4">
