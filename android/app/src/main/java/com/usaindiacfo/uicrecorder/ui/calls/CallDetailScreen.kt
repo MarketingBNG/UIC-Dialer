@@ -193,6 +193,7 @@ private fun Meta(call: CallDetail) {
         call.durationS?.let { MetaLine("Duration", formatDuration(it)) }
         call.crm?.label()?.let { MetaLine("Zoho CRM", it) }
         MetaLine("Person", call.user.name ?: call.user.email)
+        com.usaindiacfo.uicrecorder.ui.dialer.viaLabel(call.viaName)?.let { MetaLine("Dialled", it) }
         call.transcript?.language?.let { MetaLine("Language", it) }
     }
 }
@@ -322,3 +323,5 @@ private suspend fun downloadRecording(context: Context, container: AppContainer,
         .onSuccess { Toast.makeText(context, "Downloading to Downloads", Toast.LENGTH_SHORT).show() }
         .onFailure { Toast.makeText(context, "Download failed: ${it.message}", Toast.LENGTH_LONG).show() }
 }
+
+internal val CallDetail.viaName: String? get() = via?.name

@@ -183,6 +183,18 @@ class ApiClient(
     /** Follow-ups due by the end of today (IST), oldest first. */
     suspend fun followups(): ContactList = get("/v1/contacts/followups")
 
+    // ---- Follow-ups (stage 1) ----
+
+    /** Today's follow-ups and missed-call tasks, plus the next 24 h of follow-ups (for reminders). 404 on older servers. */
+    suspend fun followupsToday(): FollowUpsToday = get("/v1/followups/today")
+
+    /** Up to 50 missed calls; idempotent by clientId, each item reports its own result. */
+    suspend fun postMissed(items: List<MissedCallItem>): MissedCallResponse =
+        post("/v1/followups/missed", MissedCallBatch(items))
+
+    suspend fun patchFollowUp(taskId: String, patch: FollowUpPatch): FollowUpItem =
+        json.decodeFromString(send(jsonRequest("/v1/followups/$taskId", "PATCH", json.encodeToString(patch))))
+
     suspend fun contactByPhone(phone: String): ContactByPhone = get("/v1/contacts/by-phone", mapOf("phone" to phone))
 
     /** Sends both fields; null clears a field (blank text is sent as null). */

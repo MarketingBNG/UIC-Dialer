@@ -105,11 +105,37 @@ object SetupChecks {
     val audioPermission: String =
         if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
 
-    /** Permissions the sync needs (audio + call log). Contacts and notifications are optional. */
+    /** Permissions the sync needs (audio + call log). Contacts, notifications and phone state are optional. */
     val requiredPermissions = listOf(audioPermission, Manifest.permission.READ_CALL_LOG)
     val optionalPermissions = buildList {
         add(Manifest.permission.READ_CONTACTS)
         if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
+        add(Manifest.permission.READ_PHONE_STATE) // caller card
+    }
+
+    /** Contacts + notifications (one setup step); phone state has its own caller-card step. */
+    val contactsAndNotifications = optionalPermissions - Manifest.permission.READ_PHONE_STATE
+
+    fun notificationsGranted(context: Context) =
+        Build.VERSION.SDK_INT < 33 || granted(context, Manifest.permission.POST_NOTIFICATIONS)
+
+    /** Caller card needs to see the phone ring; the overlay is optional (falls back to a notification). */
+    fun phoneStateGranted(context: Context) = granted(context, Manifest.permission.READ_PHONE_STATE)
+
+    fun canDrawOverlays(context: Context) = Settings.canDrawOverlays(context)
+
+    fun openOverlaySettings(context: Context) {
+        if (!tryStart(context, Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:${context.packageName}")))) openAppDetails(context)
+    }
+
+    /** Android 12+ asks for exact alarms separately; without it reminders may come up to 10 minutes late. */
+    val exactAlarmApplies get() = Build.VERSION.SDK_INT >= 31
+
+    fun canExactAlarms(context: Context) = com.usaindiacfo.uicrecorder.reminders.ReminderScheduler.canExact(context)
+
+    fun openExactAlarmSettings(context: Context) {
+        if (Build.VERSION.SDK_INT < 31) return
+        if (!tryStart(context, Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:${context.packageName}")))) openAppDetails(context)
     }
 
     fun granted(context: Context, permission: String) =

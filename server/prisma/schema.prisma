@@ -87,6 +87,8 @@ model User {
 
   ownedContacts Contact[]  @relation("ContactOwner")
   activities    Activity[]
+  followUpTasks FollowUpTask[]
+  dialIntents   DialIntent[]
 
   @@map("users")
 }
@@ -175,6 +177,8 @@ model Call {
   crmNextAttemptAt DateTime? @map("crm_next_attempt_at")
   // Lease held while one server syncs the call (see CrmSync.claim).
   crmLockedUntil   DateTime? @map("crm_locked_until")
+  // How an OUTGOING call was dialled (src/activity/via.ts); null for incoming/missed and old rows.
+  via              DialVia?  @map("via")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 
@@ -388,6 +392,7 @@ model Contact {
 
   owner      User?      @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   activities Activity[]
+  followUpTasks FollowUpTask[]
 
   @@index([ownerId])
   @@index([nextFollowUpAt])
@@ -409,6 +414,7 @@ model Activity {
   occurredAt DateTime     @map("occurred_at")
   // The rep's recorded Call with the same number within 10 minutes, linked from either side.
   callId     String?      @map("call_id") @db.Uuid
+  via        DialVia?     @map("via")
   createdAt  DateTime     @default(now()) @map("created_at")
 
   contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
@@ -419,4 +425,58 @@ model Activity {
   @@index([userId, occurredAt(sort: Desc)])
   @@index([callId])
   @@map("activities")
+}
+
+// Stage 1: how a call was dialled, missed-call follow-up tasks, desktop click-to-call intents.
+enum DialVia {
+  LAPTOP
+  APP
+  PHONE_DIALER
+}
+
+enum FollowUpKind {
+  MISSED_CALL
+}
+
+enum FollowUpState {
+  OPEN
+  DONE
+  DISMISSED
+}
+
+// Desktop click-to-call: one row per tel: click; matched to the rep's next outgoing Call on that number.
+model DialIntent {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  clientId  String   @unique @map("client_id") // the dashboard PendingCall.clientId (UUID)
+  userId    String   @map("user_id") @db.Uuid
+  phoneE164 String   @map("phone_e164")
+  createdAt DateTime @default(now()) @map("created_at")
+  callId    String?  @unique @map("call_id") @db.Uuid // set when matched
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, phoneE164, createdAt])
+  @@map("dial_intents")
+}
+
+// Missed call -> task (stage 1 only MISSED_CALL). Contact follow-ups stay on Contact.nextFollowUpAt.
+model FollowUpTask {
+  id         String        @id @default(uuid(7)) @db.Uuid
+  clientId   String        @unique @map("client_id") // "missed:<callLogDateMs>:<last10>" from the phone
+  userId     String        @map("user_id") @db.Uuid
+  contactId  String?       @map("contact_id") @db.Uuid // set when a Contact exists for phoneE164
+  phoneE164  String        @map("phone_e164")
+  callerName String?       @map("caller_name") // call-log cached name
+  kind       FollowUpKind  @default(MISSED_CALL)
+  state      FollowUpState @default(OPEN)
+  occurredAt DateTime      @map("occurred_at") // missed call time
+  dueAt      DateTime      @map("due_at") // = occurredAt; snooze moves it
+  doneAt     DateTime?     @map("done_at")
+  createdAt  DateTime      @default(now()) @map("created_at")
+  updatedAt  DateTime      @updatedAt @map("updated_at")
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  contact    Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([userId, state, dueAt])
+  @@index([phoneE164])
+  @@map("follow_up_tasks")
 }

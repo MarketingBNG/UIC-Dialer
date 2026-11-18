@@ -72,3 +72,23 @@ fun pickFollowUp(context: Context, initialMs: Long?, onPicked: (Long) -> Unit) {
 fun friendlyError(e: java.io.IOException): String =
     if (e is com.usaindiacfo.uicrecorder.data.api.ApiException && e.fromServer && !e.isTransient) e.message ?: "Something went wrong"
     else "Can't reach the server right now. You can still call; outcomes are saved on the phone and sent when it's back."
+
+/** "via laptop" / "via app" / "via phone dialer" from a DialVia name; null (old rows) shows no label. */
+fun viaLabel(via: String?): String? = when (via) {
+    "LAPTOP" -> "via laptop"
+    "APP" -> "via app"
+    "PHONE_DIALER" -> "via phone dialer"
+    else -> null
+}
+
+/** Two letters for an avatar: "Rahul Mehta" -> "RM", "+91 98765…" -> "#". */
+fun initials(name: String?): String {
+    val words = name?.trim()?.split(Regex("\\s+"))?.filter { w -> w.firstOrNull()?.isLetter() == true }.orEmpty()
+    return when {
+        words.isEmpty() -> "#"
+        words.size == 1 -> words[0].take(1).uppercase()
+        else -> (words[0].take(1) + words.last().take(1)).uppercase()
+    }
+}
+
+val com.usaindiacfo.uicrecorder.data.api.ActivityDto.viaName: String? get() = via?.name

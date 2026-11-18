@@ -167,7 +167,7 @@ describe("device contact endpoints", () => {
     const byPhone = (await t.app.inject({ url: `/v1/contacts/by-phone?phone=0${phone}`, headers: a.headers })).json();
     expect(byPhone.contact.id).toBe(contact.id);
     expect(byPhone.activities).toHaveLength(1);
-    expect((await t.app.inject({ url: `/v1/contacts/by-phone?phone=${phone}`, headers: b.headers })).json()).toEqual({ contact: null, activities: [] });
+    expect((await t.app.inject({ url: `/v1/contacts/by-phone?phone=${phone}`, headers: b.headers })).json()).toEqual({ contact: null, activities: [], lastSummary: null });
 
     const patch = await t.app.inject({ method: "PATCH", url: `/v1/contacts/${contact.id}`, headers: a.headers, payload: { company: "NewCo", name: null } });
     expect(patch.json()).toMatchObject({ company: "NewCo", name: null });

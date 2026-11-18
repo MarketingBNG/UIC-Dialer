@@ -204,7 +204,7 @@ private fun CallList(
     LazyColumn(Modifier.fillMaxSize()) {
         items(items.itemCount, key = items.itemKey { it.id }, contentType = { "call" }) { i ->
             items[i]?.let { CallRowItem(it, showPerson) { onOpenCall(it.id) } }
-            HorizontalDivider()
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         }
         if (items.loadState.append is LoadState.Loading) item(key = "loading", contentType = "footer") {
             Box(Modifier.fillMaxWidth().padding(16.dp), Alignment.Center) { CircularProgressIndicator(Modifier.size(24.dp)) }
@@ -219,6 +219,7 @@ private fun CallList(
 private fun CallRowItem(row: CallRow, showPerson: Boolean, onClick: () -> Unit) {
     ListItem(
         modifier = Modifier.clickable(onClick = onClick),
+        colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.background),
         leadingContent = { DirectionIcon(row.direction) },
         headlineContent = { Text(row.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
@@ -230,7 +231,12 @@ private fun CallRowItem(row: CallRow, showPerson: Boolean, onClick: () -> Unit) 
             )
             Text(parts.joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis)
         },
-        trailingContent = { StatusBadge(row.status) },
+        trailingContent = {
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                StatusBadge(row.status)
+                com.usaindiacfo.uicrecorder.ui.dialer.ViaChip(row.via)
+            }
+        },
     )
 }
 

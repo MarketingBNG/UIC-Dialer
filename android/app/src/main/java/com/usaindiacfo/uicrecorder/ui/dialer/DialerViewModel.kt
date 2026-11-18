@@ -16,15 +16,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.io.IOException
 
-enum class DialerTab { RECENT, FOLLOW_UPS }
-
 data class DialerState(
     val number: String = "",
-    val tab: DialerTab = DialerTab.RECENT,
-    val contacts: List<ContactDto> = emptyList(),
-    val followUps: List<ContactDto> = emptyList(),
-    val loading: Boolean = false,
-    val error: String? = null,
+    /** Saved contacts matching what's typed; the first is shown above the keypad. */
+    val matches: List<ContactDto> = emptyList(),
 )
 
 @OptIn(FlowPreview::class)
@@ -35,16 +30,7 @@ class DialerViewModel(private val c: AppContainer) : ViewModel() {
 
     init {
         viewModelScope.launch {
-            query.debounce(350).distinctUntilChanged().collectLatest { loadContacts(it) }
-        }
-        // An outcome is saved on the phone first and sent in the background; reload once it has reached
-        // the server (the queue shrinks), so a newly called number shows up in Recent and Follow-ups.
-        viewModelScope.launch {
-            var last = Int.MAX_VALUE
-            c.db.pendingActivities().observePendingCount().collect { n ->
-                if (n < last) refresh()
-                last = n
-            }
+            query.debounce(350).distinctUntilChanged().collectLatest { lookup(it) }
         }
     }
 
@@ -53,41 +39,20 @@ class DialerViewModel(private val c: AppContainer) : ViewModel() {
         query.value = n
     }
 
-    fun setTab(t: DialerTab) {
-        _state.update { it.copy(tab = t) }
-        if (t == DialerTab.FOLLOW_UPS) loadFollowUps()
-    }
-
-    /** On resume: outcomes saved since may have changed statuses and follow-ups. */
-    fun refresh() {
-        viewModelScope.launch { loadContacts(query.value) }
-        if (_state.value.tab == DialerTab.FOLLOW_UPS) loadFollowUps()
-    }
-
     fun logWhatsApp(phone: String) = viewModelScope.launch { c.activityRepository.log(phone, ActivityType.WHATSAPP) }
 
-    private suspend fun loadContacts(q: String) {
-        _state.update { it.copy(loading = true) }
-        try {
-            val page = c.apiClient.contacts(q = q.trim().ifEmpty { null })
-            if (q.isBlank()) c.contactCache.recent = page.items
-            _state.update { it.copy(contacts = page.items, loading = false, error = null) }
-        } catch (e: IOException) {
-            // Offline: fall back to the last list this phone loaded (filtered locally when searching).
-            val saved = c.contactCache.recent.filter { matchesQuery(it, q) }
-            _state.update { it.copy(contacts = it.contacts.ifEmpty { saved }, loading = false, error = friendlyError(e)) }
+    private suspend fun lookup(q: String) {
+        // Short input matches too much; wait for a few digits or letters.
+        if (q.trim().length < 3) {
+            _state.update { it.copy(matches = emptyList()) }
+            return
         }
-    }
-
-    private fun loadFollowUps() = viewModelScope.launch {
-        _state.update { it.copy(loading = true) }
-        try {
-            val list = c.apiClient.followups()
-            c.contactCache.followUps = list.items
-            _state.update { it.copy(followUps = list.items, loading = false, error = null) }
+        val found = try {
+            c.apiClient.contacts(q = q.trim(), limit = 5).items
         } catch (e: IOException) {
-            _state.update { it.copy(followUps = it.followUps.ifEmpty { c.contactCache.followUps }, loading = false, error = friendlyError(e)) }
+            c.contactCache.recent.filter { matchesQuery(it, q) } // offline: the saved list
         }
+        _state.update { it.copy(matches = found) }
     }
 }
 

@@ -5,7 +5,7 @@ import { api, isManager, type Activity, type ContactDetail, type ContactPatch, t
 import { useMe } from "../App";
 import { CONTACT_STATUS_LABEL, OUTCOME_LABEL, formatDuration, formatWhen, fromLocalInput, isOverdue, personName, toLocalInput } from "../format";
 import { CallButton } from "../dialer";
-import { Badge, ContactStatusBadge, DirectionTag, ErrorBox, PageHeader, Spinner, StatusBadge } from "../ui";
+import { Badge, ContactStatusBadge, DirectionTag, ErrorBox, PageHeader, Spinner, StatusBadge, ViaTag } from "../ui";
 
 export function ContactDetailPage() {
   const { id = "" } = useParams();
@@ -245,6 +245,7 @@ function CallEntry({ item }: { item: Extract<TimelineItem, { kind: "call" }> }) 
           Recorded call
         </Link>
         <DirectionTag direction={item.direction} />
+        <ViaTag via={item.via} />
         <span className="text-sm tabular-nums">{formatDuration(item.durationS)}</span>
         <StatusBadge status={item.status} />
         {!item.hasAudio && <Badge>No audio</Badge>}
@@ -262,6 +263,7 @@ function ActivityEntry({ item }: { item: Extract<TimelineItem, { kind: "activity
         <span className="font-medium">{TYPE_LABEL[item.type]}</span>
         {item.outcome && <Badge tone={item.outcome === "INTERESTED" ? "green" : item.outcome === "NOT_INTERESTED" ? "red" : item.outcome === "NO_ANSWER" ? "amber" : "blue"}>{OUTCOME_LABEL[item.outcome]}</Badge>}
         {item.type === "CALL" && item.durationS != null && <span className="text-sm tabular-nums">{formatDuration(item.durationS)}</span>}
+        {item.type === "CALL" && <ViaTag via={item.via} />}
         {item.call && (
           <>
             <Link to={`/calls/${item.call.id}`} className="text-sm text-brand-700 hover:underline dark:text-brand-100">

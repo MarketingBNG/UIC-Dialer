@@ -21,11 +21,23 @@ class DialPrefs(context: Context) {
         }
         set(v) {
             val e = prefs.edit()
-            if (v == null) e.clear() else e.putString(KEY_NUMBER, v.number).putLong(KEY_AT, v.dialedAtMs).putString(KEY_ID, v.clientId)
+            // Remove only the pending keys: the same file holds the app-dial log.
+            if (v == null) e.remove(KEY_NUMBER).remove(KEY_AT).remove(KEY_ID) else e.putString(KEY_NUMBER, v.number).putLong(KEY_AT, v.dialedAtMs).putString(KEY_ID, v.clientId)
             e.commit() // written before the dialer opens, so a process kill can't lose it
         }
 
+    /** Calls started from the app in the last 24 h (number to tap time), newest last; used to report via=APP. */
+    val recentAppDials: List<Pair<String, Long>>
+        get() = DialLogic.decodeDials(prefs.getString(KEY_DIALS, null), System.currentTimeMillis())
+
+    fun addAppDial(number: String, atMs: Long) {
+        val list = (recentAppDials + (number to atMs)).takeLast(MAX_DIALS)
+        prefs.edit().putString(KEY_DIALS, DialLogic.encodeDials(list)).commit()
+    }
+
     private companion object {
+        const val KEY_DIALS = "app_dials"
+        const val MAX_DIALS = 50
         const val KEY_NUMBER = "number"
         const val KEY_AT = "dialed_at"
         const val KEY_ID = "client_id"
@@ -44,7 +56,9 @@ object Dialer {
         val n = DialLogic.cleanNumber(number)
         if (n.isEmpty()) return
         val prefs = DialPrefs(context)
-        prefs.pending = PendingDial(n, System.currentTimeMillis(), UUID.randomUUID().toString())
+        val now = System.currentTimeMillis()
+        prefs.pending = PendingDial(n, now, UUID.randomUUID().toString())
+        prefs.addAppDial(n, now)
         val direct = context.checkSelfPermission(android.Manifest.permission.CALL_PHONE) ==
             android.content.pm.PackageManager.PERMISSION_GRANTED
         try {

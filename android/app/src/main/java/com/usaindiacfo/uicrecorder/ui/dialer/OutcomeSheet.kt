@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -41,6 +42,7 @@ import com.usaindiacfo.uicrecorder.dialer.DialLogic
 import com.usaindiacfo.uicrecorder.dialer.DialPrefs
 import com.usaindiacfo.uicrecorder.dialer.Dialer
 import com.usaindiacfo.uicrecorder.dialer.PendingDial
+import com.usaindiacfo.uicrecorder.ui.theme.UicColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -130,7 +132,10 @@ private fun OutcomeSheet(a: OutcomeAsk, onDone: () -> Unit) {
             Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("How did the call go?", style = MaterialTheme.typography.titleMedium)
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Avatar(a.contact?.name)
+                Text("How did the call go?", style = MaterialTheme.typography.titleMedium, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
+            }
             Text(
                 buildString {
                     append(a.contact?.title ?: a.dial.number)
@@ -145,7 +150,10 @@ private fun OutcomeSheet(a: OutcomeAsk, onDone: () -> Unit) {
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 CallOutcome.entries.forEach { o ->
-                    FilterChip(selected = outcome == o, onClick = { outcome = o; error = null }, label = { Text(o.label) })
+                    FilterChip(
+                        selected = outcome == o, onClick = { outcome = o; error = null }, label = { Text(o.label) },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    )
                 }
             }
             if (outcome == CallOutcome.CALL_BACK) {
@@ -161,8 +169,11 @@ private fun OutcomeSheet(a: OutcomeAsk, onDone: () -> Unit) {
             if (askCompany) OutlinedTextField(company, { company = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("Company (optional)") }, singleLine = true)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, androidx.compose.ui.Alignment.End)) {
-                TextButton(onClick = ::skip) { Text("Skip") }
-                Button(onClick = {
+                TextButton(onClick = ::skip, modifier = Modifier.heightIn(min = 48.dp)) { Text("Skip") }
+                Button(
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = UicColors.callGreen, contentColor = androidx.compose.ui.graphics.Color.White),
+                    onClick = {
                     error = DialLogic.validateOutcome(outcome, followUpAt, System.currentTimeMillis())
                     if (error != null) return@Button
                     scope.launch {

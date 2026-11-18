@@ -1,4 +1,4 @@
-import type { CallOutcome, CallStatus, ContactStatus, Direction } from "./api";
+import type { CallOutcome, CallStatus, ContactStatus, DialVia, Direction } from "./api";
 
 // Times show in the viewer's own time zone (IST for the India team), like the Android app.
 const whenFmt = new Intl.DateTimeFormat(undefined, {
@@ -144,4 +144,19 @@ export function fromLocalInput(v: string) {
   if (!v) return null;
   const d = new Date(v);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+export const VIA_LABEL: Record<DialVia, string> = { LAPTOP: "via laptop", APP: "via app", PHONE_DIALER: "via phone dialer" };
+
+/** wa.me link for a number; mirrors the Android DialLogic.whatsAppUrl (10-digit and 0-prefixed numbers are Indian). */
+export function whatsAppUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  let digits = trimmed.replace(/\D/g, "");
+  if (!digits) return null;
+  if (!trimmed.startsWith("+")) {
+    if (digits.startsWith("00")) digits = digits.slice(2);
+    else if (digits.length === 10) digits = `91${digits}`;
+    else if (digits.length === 11 && digits.startsWith("0")) digits = `91${digits.slice(1)}`;
+  }
+  return digits.length >= 8 && digits.length <= 15 ? `https://wa.me/${digits}` : null;
 }

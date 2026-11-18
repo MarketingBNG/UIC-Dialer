@@ -9,6 +9,7 @@ import androidx.room.Query
 import com.usaindiacfo.uicrecorder.data.api.ActivityType
 import com.usaindiacfo.uicrecorder.data.api.CallOutcome
 import com.usaindiacfo.uicrecorder.data.api.CreateActivityRequest
+import com.usaindiacfo.uicrecorder.data.api.DialVia
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -38,6 +39,8 @@ data class PendingActivityEntity(
 fun PendingActivityEntity.toRequest() = CreateActivityRequest(
     clientId = clientId, phone = phone, type = type, outcome = outcome, note = note,
     followUpAt = followUpAt, durationS = durationS, occurredAt = occurredAt, name = name, company = company,
+    // Only the outcome sheet logs CALL activities, and it only asks about calls started from the app.
+    via = if (type == ActivityType.CALL) DialVia.APP else null,
 )
 
 @Dao

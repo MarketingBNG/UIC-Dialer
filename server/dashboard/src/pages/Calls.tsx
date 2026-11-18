@@ -4,7 +4,7 @@ import { Link, useSearchParams } from "react-router";
 import { api, isManager, qs, type CallPage, type CallStatus, type Direction, type User } from "../api";
 import { useMe } from "../App";
 import { DIRECTION_LABEL, STATUS_LABEL, formatDuration, formatShortWhen, personName } from "../format";
-import { DirectionTag, Empty, ErrorBox, PageHeader, Spinner, StatusBadge } from "../ui";
+import { DirectionTag, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, ViaTag } from "../ui";
 
 const FILTER_KEYS = ["q", "phone", "userId", "direction", "status", "from", "to"] as const;
 
@@ -194,6 +194,7 @@ export function CallsPage() {
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-600 dark:text-slate-400">
                     <DirectionTag direction={c.direction} />
+                    <ViaTag via={c.via} />
                     <span>{formatShortWhen(c.startedAt)}</span>
                     <span>{formatDuration(c.durationS)}</span>
                     {manager && <span className="truncate">{personName(c.user)}</span>}
@@ -240,7 +241,10 @@ export function CallsPage() {
                       {c.contactName && <div className="text-xs text-slate-500">{c.phoneE164 || c.phoneRaw}</div>}
                     </td>
                     <td className="px-4 py-3">
-                      <DirectionTag direction={c.direction} />
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <DirectionTag direction={c.direction} />
+                        <ViaTag via={c.via} />
+                      </div>
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">{formatShortWhen(c.startedAt)}</td>
                     <td className="px-4 py-3 text-right tabular-nums">{formatDuration(c.durationS)}</td>

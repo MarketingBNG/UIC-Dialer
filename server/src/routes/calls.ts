@@ -6,7 +6,8 @@ import { HttpError, currentDevice, currentUser, type Deps } from "../context.js"
 import { WindowLimiter } from "../privacy/uploadLimit.js";
 import { ALLOWED_AUDIO_MIME } from "../storage/local.js";
 
-const CreateCall = CallMeta.extend({ source: z.enum(["LIVE", "BACKLOG"]).default("LIVE") });
+// via "APP": the phone's own app-dial log matched this call-log entry.
+const CreateCall = CallMeta.extend({ source: z.enum(["LIVE", "BACKLOG"]).default("LIVE"), via: z.enum(["APP"]).optional() });
 
 /** Phone uploads: register metadata, then stream the audio. */
 export async function callRoutes(app: FastifyInstance, deps: Deps) {
@@ -21,8 +22,8 @@ export async function callRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   app.post("/v1/calls", auth, async (req, reply) => {
-    const { source, ...meta } = CreateCall.parse(req.body);
-    const r = await registerCall(deps, currentUser(req).id, currentDevice(req).id, source, meta);
+    const { source, via, ...meta } = CreateCall.parse(req.body);
+    const r = await registerCall(deps, currentUser(req).id, currentDevice(req).id, source, meta, via);
     if (r.alreadyUploaded) return reply.code(200).send(r);
     return reply.code(201).send({ ...r, uploadPath: `/v1/calls/${r.callId}/audio` });
   });

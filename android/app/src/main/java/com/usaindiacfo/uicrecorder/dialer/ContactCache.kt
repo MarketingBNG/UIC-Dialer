@@ -21,6 +21,15 @@ class ContactCache(context: Context) {
         get() = read(KEY_FOLLOW_UPS)
         set(v) = write(KEY_FOLLOW_UPS, v)
 
+    /** Last GET /v1/followups/today (Today offline, caller card, morning summary fallback). */
+    var today: com.usaindiacfo.uicrecorder.data.api.FollowUpsToday?
+        get() = prefs.getString(KEY_TODAY, null)?.let {
+            runCatching { json.decodeFromString(com.usaindiacfo.uicrecorder.data.api.FollowUpsToday.serializer(), it) }.getOrNull()
+        }
+        set(v) = prefs.edit().apply {
+            if (v == null) remove(KEY_TODAY) else putString(KEY_TODAY, json.encodeToString(com.usaindiacfo.uicrecorder.data.api.FollowUpsToday.serializer(), v))
+        }.apply()
+
     fun clear() = prefs.edit().clear().apply()
 
     private fun read(key: String): List<ContactDto> =
@@ -32,5 +41,6 @@ class ContactCache(context: Context) {
     private companion object {
         const val KEY_RECENT = "recent"
         const val KEY_FOLLOW_UPS = "follow_ups"
+        const val KEY_TODAY = "today"
     }
 }

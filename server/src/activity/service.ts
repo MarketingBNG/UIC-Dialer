@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { HttpError, type Deps } from "../context.js";
-import { Prisma, type ActivityType, type CallOutcome, type User } from "../generated/prisma/client.js";
+import { Prisma, type ActivityType, type CallOutcome, type DialVia, type User } from "../generated/prisma/client.js";
+import { VIA_VALUES } from "./via.js";
 
 /** A CALL activity and a recorded Call belong together when same rep, same number, start within this window. */
 export const LINK_WINDOW_MS = 10 * 60 * 1000;
@@ -28,6 +29,8 @@ export const ActivityBody = z.object({
   occurredAt: z.iso.datetime({ offset: true }),
   name: z.string().trim().max(200).optional(),
   company: z.string().trim().max(200).optional(),
+  // How the call was dialled; only kept for CALL activities.
+  via: z.enum(VIA_VALUES).optional(),
 });
 export type ActivityBody = z.infer<typeof ActivityBody>;
 
@@ -60,6 +63,7 @@ export function activityDto(a: ActivityRow) {
     durationS: a.durationS,
     occurredAt: a.occurredAt,
     callId: a.callId,
+    via: a.via,
   };
 }
 
@@ -84,9 +88,9 @@ async function findCallFor(db: Deps["db"], userId: string, phoneE164: string, at
       startedAt: { gte: new Date(at.getTime() - LINK_WINDOW_MS), lte: new Date(at.getTime() + LINK_WINDOW_MS) },
       activities: { none: {} },
     },
-    select: { id: true, startedAt: true },
+    select: { id: true, startedAt: true, via: true },
   });
-  return closest(calls, (c) => c.startedAt, at)?.id ?? null;
+  return closest(calls, (c) => c.startedAt, at) ?? null;
 }
 
 function closest<T>(rows: T[], time: (r: T) => Date, at: Date): T | undefined {
@@ -94,7 +98,10 @@ function closest<T>(rows: T[], time: (r: T) => Date, at: Date): T | undefined {
 }
 
 /** After a Call is registered: link it to the closest unlinked CALL activity by the same rep on the same number. */
-export async function linkCallToActivity(deps: Deps, call: { id: string; userId: string; phoneE164: string | null; startedAt: Date }) {
+export async function linkCallToActivity(
+  deps: Deps,
+  call: { id: string; userId: string; phoneE164: string | null; startedAt: Date; via?: DialVia | null },
+) {
   if (!call.phoneE164) return;
   if ((await deps.db.activity.count({ where: { callId: call.id } })) > 0) return;
   const at = call.startedAt;
@@ -109,7 +116,10 @@ export async function linkCallToActivity(deps: Deps, call: { id: string; userId:
     select: { id: true, occurredAt: true },
   });
   const best = closest(candidates, (a) => a.occurredAt, at);
-  if (best) await deps.db.activity.updateMany({ where: { id: best.id, callId: null }, data: { callId: call.id } });
+  if (!best) return;
+  const { count } = await deps.db.activity.updateMany({ where: { id: best.id, callId: null }, data: { callId: call.id } });
+  // The call knows how it was dialled; an activity without its own via takes it (never the other way).
+  if (count === 1 && call.via) await deps.db.activity.updateMany({ where: { id: best.id, via: null }, data: { via: call.via } });
 }
 
 export interface NewActivity {
@@ -120,6 +130,7 @@ export interface NewActivity {
   followUpAt?: Date | undefined;
   durationS?: number | undefined;
   occurredAt: Date;
+  via?: DialVia | undefined;
 }
 
 /** Contact changes implied by a new activity (see docs/dialer-plan.md). */
@@ -161,7 +172,7 @@ export async function addActivity(deps: Deps, userId: string, contactId: string,
       // Row lock serialises activities on one contact: no lost contact update, no Call claimed twice.
       await tx.$executeRaw`SELECT 1 FROM contacts WHERE id = ${contactId}::uuid FOR UPDATE`;
       const contact = await tx.contact.findUniqueOrThrow({ where: { id: contactId } });
-      const callId = a.type === "CALL" ? await findCallFor(tx as Deps["db"], userId, contact.phoneE164, a.occurredAt) : null;
+      const call = a.type === "CALL" ? await findCallFor(tx as Deps["db"], userId, contact.phoneE164, a.occurredAt) : null;
       const activity = await tx.activity.create({
         data: {
           clientId,
@@ -173,10 +184,12 @@ export async function addActivity(deps: Deps, userId: string, contactId: string,
           followUpAt: a.followUpAt ?? null,
           durationS: a.durationS ?? null,
           occurredAt: a.occurredAt,
-          callId,
+          callId: call?.id ?? null,
+          via: a.type === "CALL" ? (a.via ?? call?.via ?? null) : null,
         },
       });
       await tx.contact.update({ where: { id: contactId }, data: contactUpdate(contact, a) });
+      if (a.type === "CALL" || a.type === "WHATSAPP") await closeMissedTasks(tx as Deps["db"], userId, contact.phoneE164, a.occurredAt);
       return activity;
     });
   } catch (e) {
@@ -186,6 +199,14 @@ export async function addActivity(deps: Deps, userId: string, contactId: string,
     }
     throw e;
   }
+}
+
+/** A later call or WhatsApp to the number is the follow-up: close this rep's open missed-call tasks before `at`. */
+export async function closeMissedTasks(db: Deps["db"], userId: string, phoneE164: string, at: Date) {
+  await db.followUpTask.updateMany({
+    where: { userId, phoneE164, state: "OPEN", occurredAt: { lt: at } },
+    data: { state: "DONE", doneAt: new Date() },
+  });
 }
 
 function sameOwner(a: ActivityRow, userId: string) {

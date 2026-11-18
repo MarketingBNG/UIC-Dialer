@@ -5,7 +5,13 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -36,6 +42,16 @@ internal fun Throwable.userMessage(): String = when {
     this is ApiException && isForbidden -> "You don't have permission for this. Ask an admin."
     this is ApiException -> message?.takeIf { it.isNotBlank() } ?: "Server error ($code)"
     else -> "Can't reach the server. Check your connection."
+}
+
+/** Top bar for the admin screens; back returns to Settings. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AdminBackBar(onBack: () -> Unit) {
+    TopAppBar(
+        title = { Text("Admin") },
+        navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+    )
 }
 
 @Composable

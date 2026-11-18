@@ -73,7 +73,10 @@ export function DialerProvider({ children }: { children: ReactNode }) {
   const call = useCallback((raw: string, label?: string) => {
     const phone = cleanNumber(raw);
     if (!phone) return;
-    update({ phone, label: label || phone, at: Date.now(), clientId: crypto.randomUUID() });
+    const clientId = crypto.randomUUID();
+    update({ phone, label: label || phone, at: Date.now(), clientId });
+    // Lets the server label the recorded call "via laptop"; best effort, never blocks dialling.
+    api("/api/dial-intents", { method: "POST", body: { clientId, phone } }).catch(() => {});
     left.current = false;
     setAsking(false);
     // The desktop shell hands window.open'd tel: links to Windows (Phone Link); a browser follows the link itself.
@@ -157,6 +160,7 @@ function OutcomeDialog({ open, call, onClose, onDone }: { open: boolean; call: P
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["contacts"] });
       void qc.invalidateQueries({ queryKey: ["contact"] });
+      void qc.invalidateQueries({ queryKey: ["followups-today"] });
       onDone();
     },
   });

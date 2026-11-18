@@ -4,7 +4,6 @@ import android.provider.CallLog
 import com.usaindiacfo.uicrecorder.data.api.CallOutcome
 import com.usaindiacfo.uicrecorder.detect.CallLogEntry
 import java.time.Instant
-import java.time.LocalDate
 import java.time.ZoneId
 
 /** Pure dialer rules (no Android APIs beyond constants), unit-tested in DialLogicTest. */
@@ -34,6 +33,20 @@ object DialLogic {
             .filter { it.dateMs >= dialedAtMs - DIAL_SLACK_MS }
             .filter { sameNumber(it.number, number) }
             .minByOrNull { it.dateMs }
+
+    /** How long after tapping Call the call log entry may start and still count as dialled from the app. */
+    const val APP_DIAL_WINDOW_MS = 10 * 60_000L
+
+    /**
+     * True when the rep tapped Call in the app for [number] shortly before [callStartMs]
+     * ([dials] = number to tap time). Same rule as [matchDial], bounded to [APP_DIAL_WINDOW_MS].
+     */
+    fun isAppDial(dials: List<Pair<String, Long>>, number: String?, callStartMs: Long): Boolean {
+        val n = last10(number) ?: return false
+        return dials.any { (d, at) ->
+            last10(d) == n && callStartMs >= at - DIAL_SLACK_MS && callStartMs <= at + APP_DIAL_WINDOW_MS
+        }
+    }
 
     /**
      * wa.me wants the full international number as digits only. A bare 10-digit number (or 0 + 10 digits)
@@ -76,8 +89,19 @@ object DialLogic {
     /** Follow-up due before today (IST). */
     fun isOverdue(followUpIso: String?, now: Instant = Instant.now()): Boolean {
         val at = parseInstant(followUpIso) ?: return false
-        return at.isBefore(LocalDate.ofInstant(now, IST).atStartOfDay(IST).toInstant())
+        return at.isBefore(now.atZone(IST).toLocalDate().atStartOfDay(IST).toInstant())
     }
 
     fun parseInstant(iso: String?): Instant? = iso?.let { runCatching { Instant.parse(it) }.getOrNull() }
+
+    /** App-dial log storage: one "number|ms" per line; entries older than 24 h are dropped. */
+    fun encodeDials(dials: List<Pair<String, Long>>): String = dials.joinToString("\n") { "${it.first}|${it.second}" }
+
+    fun decodeDials(raw: String?, nowMs: Long): List<Pair<String, Long>> =
+        raw.orEmpty().lineSequence().mapNotNull { line ->
+            val i = line.lastIndexOf('|')
+            if (i <= 0) return@mapNotNull null
+            val at = line.substring(i + 1).toLongOrNull() ?: return@mapNotNull null
+            (line.substring(0, i) to at).takeIf { nowMs - at < 24 * 3600_000L }
+        }.toList()
 }

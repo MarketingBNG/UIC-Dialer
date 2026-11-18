@@ -10,6 +10,10 @@ import com.usaindiacfo.uicrecorder.data.api.AudioMime
 import com.usaindiacfo.uicrecorder.data.api.CallSource
 import com.usaindiacfo.uicrecorder.data.api.CreateCallRequest
 import com.usaindiacfo.uicrecorder.data.api.DeviceConfig
+import com.usaindiacfo.uicrecorder.data.api.DialVia
+import com.usaindiacfo.uicrecorder.data.api.Direction
+import com.usaindiacfo.uicrecorder.dialer.DialLogic
+import com.usaindiacfo.uicrecorder.dialer.DialPrefs
 import com.usaindiacfo.uicrecorder.data.db.RecordingEntity
 import com.usaindiacfo.uicrecorder.data.db.RecordingSource
 import com.usaindiacfo.uicrecorder.data.db.RecordingStatus
@@ -38,6 +42,8 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
     private val dao get() = c.db.recordings()
     private val api: ApiClient get() = c.apiClient
     private val prefs = SyncPrefs(context)
+    /** Calls the rep started from the app (last 24 h): those recordings are reported as via=APP. */
+    private val appDials by lazy { DialPrefs(context).recentAppDials }
     private val contacts: ContactCheck by lazy { AndroidContactCheck(context, c.db.clientHashes()) }
 
     /** Set by a phone-wide stop (server 429, missing Contacts permission): end this run, WorkManager retries later. */
@@ -159,6 +165,7 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
                     durationS = r.durationS?.coerceIn(0, 24 * 3600),
                     originalName = r.displayName.take(255),
                     source = if (r.source == RecordingSource.LIVE) CallSource.LIVE else CallSource.BACKLOG,
+                    via = if (r.direction == Direction.OUTGOING && DialLogic.isAppDial(appDials, r.phone, r.startedAt ?: r.dateModified)) DialVia.APP else null,
                 ),
             )
             if (!created.alreadyUploaded) {

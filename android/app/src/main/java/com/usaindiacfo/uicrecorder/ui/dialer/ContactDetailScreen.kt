@@ -9,6 +9,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import com.usaindiacfo.uicrecorder.ui.theme.UicColors
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
@@ -95,6 +109,8 @@ class ContactDetailViewModel(private val c: AppContainer, val phone: String) : V
     fun logWhatsApp() = viewModelScope.launch { c.activityRepository.log(phone, ActivityType.WHATSAPP) }
 }
 
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
     val container = appContainer()
@@ -112,89 +128,125 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
     }
     var note by remember { mutableStateOf("") }
     var noteFollowUp by remember { mutableStateOf<Long?>(null) }
+    val contact = state.contact
+    val number = contact?.phoneE164 ?: phone
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        TextButton(onClick = onBack) { Text("Back") }
-        val contact = state.contact
-        Text(contact?.title ?: phone, style = MaterialTheme.typography.headlineSmall)
-        if (contact != null) {
-            val due = formatWhen(context, contact.nextFollowUpAt)
-            Text(
-                buildList {
-                    if (!contact.name.isNullOrBlank()) add(contact.phoneE164)
-                    add(contact.status.label)
-                    due?.let { add(if (DialLogic.isOverdue(contact.nextFollowUpAt)) "Overdue: $it" else "Follow up: $it") }
-                    contact.owner?.let { add("Owner: ${it.name ?: it.email}") }
-                }.joinToString(" · "),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
-        state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-        state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
-
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { call(contact?.phoneE164 ?: phone) }, modifier = Modifier.weight(1f)) { Text("Call") }
-            OutlinedButton(
-                onClick = { if (Dialer.whatsApp(context, contact?.phoneE164 ?: phone)) vm.logWhatsApp() },
-                modifier = Modifier.weight(1f),
-            ) { Text("WhatsApp") }
-        }
-
-        Card {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Details", style = MaterialTheme.typography.titleSmall)
-                if (contact == null) {
-                    Text("Name and company can be added after the first call or note.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
-                    OutlinedTextField(name, { name = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("Name") }, singleLine = true)
-                    OutlinedTextField(company, { company = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("Company") }, singleLine = true)
-                    Button(onClick = { vm.save(name, company) }, enabled = !state.saving) { Text("Save details") }
-                }
-            }
-        }
-
-        Card {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Add note", style = MaterialTheme.typography.titleSmall)
-                OutlinedTextField(note, { note = it.take(2000) }, Modifier.fillMaxWidth(), label = { Text("Note") }, minLines = 2)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { pickFollowUp(context, noteFollowUp) { noteFollowUp = it } }) {
-                        Text(noteFollowUp?.let { "Follow up: ${formatWhen(context, it)}" } ?: "Follow-up (optional)")
+    Column(Modifier.fillMaxSize()) {
+        TopAppBar(
+            title = { Text("Contact") },
+            navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+        )
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // Header: avatar, name, number, status, follow-up, actions
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Avatar(contact?.name, size = 56.dp)
+                        Column(Modifier.weight(1f)) {
+                            Text(contact?.title ?: phone, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                            val sub = listOfNotNull(
+                                number.takeIf { !contact?.name.isNullOrBlank() },
+                                contact?.company?.takeIf { it.isNotBlank() },
+                            ).joinToString(" · ")
+                            if (sub.isNotEmpty()) Text(sub, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
+                        }
                     }
-                    if (noteFollowUp != null) TextButton(onClick = { noteFollowUp = null }) { Text("Clear") }
+                    if (contact != null) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            StatusChip(contact.status)
+                            formatWhen(context, contact.nextFollowUpAt)?.let { due ->
+                                val overdue = DialLogic.isOverdue(contact.nextFollowUpAt)
+                                Text(
+                                    if (overdue) "Overdue: $due" else "Follow up: $due",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (overdue) UicColors.overdue else MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                    contact?.owner?.let {
+                        Text("Owner: ${it.name ?: it.email}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { call(number) },
+                            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = UicColors.callGreen, contentColor = Color.White),
+                        ) { Text("Call") }
+                        OutlinedButton(
+                            onClick = { if (Dialer.whatsApp(context, number)) vm.logWhatsApp() },
+                            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                        ) { Text("WhatsApp") }
+                    }
                 }
-                Button(
-                    onClick = {
-                        vm.addNote(note, noteFollowUp)
-                        note = ""
-                        noteFollowUp = null
-                    },
-                    enabled = note.isNotBlank(),
-                ) { Text("Save note") }
             }
-        }
+            if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+            state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
 
-        Text("Recent activity", style = MaterialTheme.typography.titleSmall)
-        if (state.activities.isEmpty() && !state.loading) Text("Nothing yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        state.activities.forEach { a ->
-            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                Text(
-                    buildList {
-                        add(a.type.label)
-                        a.outcome?.let { add(it.label) }
-                        formatDuration(a.durationS)?.takeIf { a.type == ActivityType.CALL }?.let(::add)
-                    }.joinToString(" · "),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-                Text(formatWhen(context, a.occurredAt).orEmpty(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                a.followUpAt?.let { Text("Follow up: ${formatWhen(context, it)}", style = MaterialTheme.typography.labelSmall) }
-                a.note?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Add note", style = MaterialTheme.typography.titleSmall)
+                    OutlinedTextField(note, { note = it.take(2000) }, Modifier.fillMaxWidth(), label = { Text("Note") }, minLines = 2)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { pickFollowUp(context, noteFollowUp) { noteFollowUp = it } }) {
+                            Text(noteFollowUp?.let { "Follow up: ${formatWhen(context, it)}" } ?: "Follow-up (optional)")
+                        }
+                        if (noteFollowUp != null) TextButton(onClick = { noteFollowUp = null }) { Text("Clear") }
+                    }
+                    Button(
+                        onClick = {
+                            vm.addNote(note, noteFollowUp)
+                            note = ""
+                            noteFollowUp = null
+                        },
+                        enabled = note.isNotBlank(),
+                    ) { Text("Save note") }
+                }
             }
-            HorizontalDivider()
+
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Activity", style = MaterialTheme.typography.titleSmall)
+                    if (state.activities.isEmpty() && !state.loading) Text("Nothing yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    state.activities.forEachIndexed { i, a ->
+                        if (i > 0) HorizontalDivider()
+                        Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    buildList {
+                                        add(a.type.label)
+                                        a.outcome?.let { add(it.label) }
+                                        formatDuration(a.durationS)?.takeIf { a.type == ActivityType.CALL }?.let(::add)
+                                    }.joinToString(" · "),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                                if (a.type == ActivityType.CALL) ViaChip(a.viaName)
+                            }
+                            Text(formatWhen(context, a.occurredAt).orEmpty(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            a.followUpAt?.let { Text("Follow up: ${formatWhen(context, it)}", style = MaterialTheme.typography.labelSmall) }
+                            a.note?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                        }
+                    }
+                }
+            }
+
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Details", style = MaterialTheme.typography.titleSmall)
+                    if (contact == null) {
+                        Text("Name and company can be added after the first call or note.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        OutlinedTextField(name, { name = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("Name") }, singleLine = true)
+                        OutlinedTextField(company, { company = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("Company") }, singleLine = true)
+                        Button(onClick = { vm.save(name, company) }, enabled = !state.saving) { Text("Save details") }
+                    }
+                }
+            }
         }
     }
 }

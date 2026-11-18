@@ -20,6 +20,7 @@ import kotlinx.coroutines.launch
 
 /** Manual DI: app-wide lazy singletons. Get it via `context.container` or `appContainer()` in Compose. */
 class AppContainer(private val context: Context) {
+    val appContext: Context get() = context
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val tokenStore by lazy {
         TokenStore(context).apply {
@@ -35,6 +36,21 @@ class AppContainer(private val context: Context) {
     val deviceConfigRepository by lazy { DeviceConfigRepository(context, apiClient, db.clientHashes()) }
     val contactCache by lazy { com.usaindiacfo.uicrecorder.dialer.ContactCache(context) }
     val activityRepository by lazy { ActivityRepository(context, db.pendingActivities()) { tokenStore.user.value?.id } }
+
+    /**
+     * Starts reminders while signed in and clears them (alarms, queued missed calls) once signed out, whether
+     * by Sign out or by the server ending the session. Runs off the main thread.
+     */
+    fun watchSession() = appScope.launch {
+        var signedIn: Boolean? = null
+        tokenStore.user.collect { u ->
+            val now = u != null
+            if (now == signedIn) return@collect
+            signedIn = now
+            if (now) com.usaindiacfo.uicrecorder.reminders.Reminders.init(context)
+            else com.usaindiacfo.uicrecorder.reminders.Reminders.clearSession(context)
+        }
+    }
 
     /** Low-RAM phones (or < 3 GB): hash/compress/upload one file at a time. */
     val isLowRamDevice: Boolean by lazy {

@@ -44,6 +44,8 @@ data class CreateCallRequest(
     val durationS: Int? = null,
     val originalName: String? = null,
     val source: CallSource = CallSource.LIVE,
+    /** Only APP is sent: the rep dialled this call from the app. */
+    val via: DialVia? = null,
 )
 
 /** 201 → uploadPath set, alreadyUploaded=false; 200 → alreadyUploaded=true (skip the PUT). */
@@ -123,6 +125,7 @@ data class CallListItem(
     val status: CallStatus,
     val user: UserRef,
     val transcript: TranscriptLang? = null,
+    val via: DialVia? = null,
 )
 
 @Serializable data class CallPage(val items: List<CallListItem>, val nextCursor: String? = null)
@@ -190,6 +193,7 @@ data class CallDetail(
     val audioDeletedAt: String? = null,
     /** Zoho CRM sync state; absent on older servers. */
     val crm: CallCrm? = null,
+    val via: DialVia? = null,
 )
 
 @Serializable
@@ -470,6 +474,7 @@ data class ActivityDto(
     val durationS: Int? = null,
     val occurredAt: String,
     val callId: String? = null,
+    val via: DialVia? = null,
 )
 
 /** POST /v1/activities. Idempotent by [clientId] (a UUID made on the phone). Null fields are not sent. */
@@ -494,9 +499,71 @@ data class CreateActivityRequest(
     val occurredAt: String,
     val name: String? = null,
     val company: String? = null,
+    val via: DialVia? = null,
 )
 
 @Serializable data class CreateActivityResponse(val activity: ActivityDto, val contact: ContactDto)
 @Serializable data class ContactPage(val items: List<ContactDto> = emptyList(), val nextCursor: String? = null)
 @Serializable data class ContactList(val items: List<ContactDto> = emptyList())
-@Serializable data class ContactByPhone(val contact: ContactDto? = null, val activities: List<ActivityDto> = emptyList())
+@Serializable data class ContactByPhone(
+    val contact: ContactDto? = null,
+    val activities: List<ActivityDto> = emptyList(),
+    /** AI summary of the newest transcribed call on this number (caller card). */
+    val lastSummary: String? = null,
+)
+
+// ---- Stage 1: via labels and follow-ups (/v1/followups) ---------------------
+
+/** How an outgoing call was started. Null on old rows and on incoming/missed calls. */
+@Serializable enum class DialVia { LAPTOP, APP, PHONE_DIALER }
+
+fun DialVia?.label(): String? = when (this) {
+    DialVia.LAPTOP -> "via laptop"
+    DialVia.APP -> "via app"
+    DialVia.PHONE_DIALER -> "via phone dialer"
+    null -> null
+}
+
+@Serializable enum class FollowUpKind { FOLLOW_UP, MISSED_CALL }
+
+@Serializable
+data class FollowUpItem(
+    val key: String,
+    val kind: FollowUpKind,
+    val contactId: String? = null,
+    val taskId: String? = null,
+    val phoneE164: String,
+    val name: String? = null,
+    val company: String? = null,
+    val status: ContactStatus? = null,
+    val dueAt: String,
+    val overdue: Boolean = false,
+    val lastNote: String? = null,
+)
+
+@Serializable data class FollowUpCounts(val overdue: Int = 0, val today: Int = 0)
+
+@Serializable
+data class FollowUpsToday(
+    val items: List<FollowUpItem> = emptyList(),
+    val upcoming: List<FollowUpItem> = emptyList(),
+    val counts: FollowUpCounts = FollowUpCounts(),
+)
+
+@Serializable data class MissedCallItem(val clientId: String, val phone: String, val occurredAt: String, val callerName: String? = null)
+@Serializable data class MissedCallBatch(val items: List<MissedCallItem>)
+
+@Serializable
+data class MissedCallResult(
+    val clientId: String? = null,
+    val ok: Boolean,
+    val id: String? = null,
+    val state: String? = null,
+    val status: Int? = null,
+    val error: String? = null,
+)
+
+@Serializable data class MissedCallResponse(val results: List<MissedCallResult> = emptyList())
+
+/** action: "done" | "dismiss" | "snooze" (snooze needs [until]). */
+@Serializable data class FollowUpPatch(val action: String, val until: String? = null)

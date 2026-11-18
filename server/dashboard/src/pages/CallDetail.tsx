@@ -5,7 +5,7 @@ import { api, ApiError, isManager, type CallCrm, type CallDetail, type SpeakerRo
 import { useMe } from "../App";
 import { formatBytes, formatDuration, formatWhen, parseSegments, personName } from "../format";
 import { CallButton } from "../dialer";
-import { ConfirmDialog, DirectionTag, ErrorBox, Spinner, StatusBadge } from "../ui";
+import { ConfirmDialog, DirectionTag, ErrorBox, Spinner, StatusBadge, ViaTag } from "../ui";
 
 const SPEEDS = [1, 1.25, 1.5, 2];
 
@@ -118,8 +118,9 @@ export function CallDetailPage() {
         <section aria-label="Call details" className="card p-4 lg:order-2">
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
             <dt className="text-slate-500">Direction</dt>
-            <dd>
+            <dd className="flex flex-wrap items-center gap-2">
               <DirectionTag direction={c.direction} />
+              <ViaTag via={c.via} />
             </dd>
             <dt className="text-slate-500">When</dt>
             <dd>{formatWhen(c.startedAt)}</dd>

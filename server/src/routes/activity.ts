@@ -90,7 +90,7 @@ export async function activityRoutes(app: FastifyInstance, deps: Deps) {
   // ---- Phone app ----
 
   /** Stores one activity from the phone (idempotent by clientId). Throws HttpError for a bad item. */
-  const saveFromPhone = async (userId: string, body: z.infer<typeof ActivityBody>) => {
+  const saveFromPhone = async (userId: string, body: z.infer<typeof ActivityBody>, via = body.via) => {
     const phoneE164 = toE164(body.phone, region);
     if (!phoneE164) throw new HttpError(400, "Invalid phone number");
     const followUpAt = body.followUpAt ? new Date(body.followUpAt) : undefined;
@@ -107,6 +107,7 @@ export async function activityRoutes(app: FastifyInstance, deps: Deps) {
         followUpAt,
         durationS: body.durationS,
         occurredAt: new Date(body.occurredAt),
+        via: body.type === "CALL" ? via : undefined,
       }))
     );
   };
@@ -149,7 +150,11 @@ export async function activityRoutes(app: FastifyInstance, deps: Deps) {
 
   /** Call outcome logged from the desktop dialer (same rules and idempotency as the phone's). */
   app.post("/api/activities", anyone, async (req) => {
-    const activity = await saveFromPhone(currentUser(req).id, ActivityBody.parse(req.body));
+    const userId = currentUser(req).id;
+    const body = ActivityBody.parse(req.body);
+    // The dashboard registered this click-to-call as a dial intent: it was dialled from the laptop.
+    const intent = await deps.db.dialIntent.findFirst({ where: { clientId: body.clientId, userId }, select: { id: true } });
+    const activity = await saveFromPhone(userId, body, intent ? "LAPTOP" : body.via);
     const fresh = await deps.db.contact.findUniqueOrThrow({ where: { id: activity.contactId }, include: contactInclude });
     const { callId: _callId, ...dto } = activityDto(activity);
     return { activity: dto, contact: contactDto(fresh) };
@@ -188,13 +193,19 @@ export async function activityRoutes(app: FastifyInstance, deps: Deps) {
       where: { AND: [{ phoneE164 }, repContactScope(currentUser(req).id)] },
       include: contactInclude,
     });
-    if (!contact) return { contact: null, activities: [] };
+    if (!contact) return { contact: null, activities: [], lastSummary: null };
     const activities = await deps.db.activity.findMany({
       where: { contactId: contact.id },
       orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
       take: 20,
     });
-    return { contact: contactDto(contact), activities: activities.map(activityDto) };
+    // For the caller card: what was said last time on this number (calls this rep may see).
+    const last = await deps.db.call.findFirst({
+      where: { AND: [callScope(currentUser(req)), { phoneE164, transcript: { summary: { not: null } } }] },
+      orderBy: { startedAt: "desc" },
+      select: { transcript: { select: { summary: true } } },
+    });
+    return { contact: contactDto(contact), activities: activities.map(activityDto), lastSummary: last?.transcript?.summary ?? null };
   });
 
   app.patch("/v1/contacts/:id", device, async (req) => {
@@ -257,6 +268,7 @@ export async function activityRoutes(app: FastifyInstance, deps: Deps) {
         status: true,
         filePath: true,
         audioDeletedAt: true,
+        via: true,
         user: { select: { id: true, name: true, email: true } },
         transcript: { select: { summary: true } },
       },
@@ -278,7 +290,7 @@ export async function activityRoutes(app: FastifyInstance, deps: Deps) {
         .filter((c) => !linked.has(c.id))
         .map((c) => {
           const { id, status, summary, hasAudio } = callFields(c);
-          return { kind: "call" as const, id, direction: c.direction, startedAt: c.startedAt, durationS: c.durationS, status, user: c.user, hasAudio, summary, at: c.startedAt };
+          return { kind: "call" as const, id, direction: c.direction, via: c.via, startedAt: c.startedAt, durationS: c.durationS, status, user: c.user, hasAudio, summary, at: c.startedAt };
         }),
     ];
     items.sort((a, b) => b.at.getTime() - a.at.getTime());

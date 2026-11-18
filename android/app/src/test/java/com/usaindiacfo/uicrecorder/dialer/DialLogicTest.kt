@@ -86,4 +86,24 @@ class DialLogicTest {
         assertFalse(DialLogic.isOverdue(null, now))
         assertFalse(DialLogic.isOverdue("not a date", now))
     }
+
+    @Test fun isAppDialMatchesSameNumberWithinWindow() {
+        val dials = listOf("09876543210" to dialAt)
+        assertTrue(DialLogic.isAppDial(dials, "+91 98765 43210", dialAt + 3_000))
+        assertTrue(DialLogic.isAppDial(dials, "9876543210", dialAt - DialLogic.DIAL_SLACK_MS)) // log stamped slightly early
+        assertFalse(DialLogic.isAppDial(dials, "9876543210", dialAt - DialLogic.DIAL_SLACK_MS - 1))
+        assertTrue(DialLogic.isAppDial(dials, "9876543210", dialAt + DialLogic.APP_DIAL_WINDOW_MS))
+        assertFalse(DialLogic.isAppDial(dials, "9876543210", dialAt + DialLogic.APP_DIAL_WINDOW_MS + 1))
+        assertFalse(DialLogic.isAppDial(dials, "9876543211", dialAt + 3_000))
+        assertFalse(DialLogic.isAppDial(dials, null, dialAt + 3_000))
+        assertFalse(DialLogic.isAppDial(emptyList(), "9876543210", dialAt))
+    }
+
+    @Test fun appDialLogRoundTripsAndDropsOldEntries() {
+        val now = dialAt
+        val dials = listOf("+919876543210" to now - 25 * 3600_000L, "9876543211" to now - 60_000)
+        assertEquals(listOf("9876543211" to now - 60_000), DialLogic.decodeDials(DialLogic.encodeDials(dials), now))
+        assertEquals(emptyList<Pair<String, Long>>(), DialLogic.decodeDials(null, now))
+        assertEquals(emptyList<Pair<String, Long>>(), DialLogic.decodeDials("garbage\n|5\nx|y", now))
+    }
 }

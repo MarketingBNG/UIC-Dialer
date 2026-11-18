@@ -7,12 +7,13 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [RecordingEntity::class, CachedCallEntity::class, ClientHashEntity::class, PendingActivityEntity::class], version = 3, exportSchema = true)
+@Database(entities = [RecordingEntity::class, CachedCallEntity::class, ClientHashEntity::class, PendingActivityEntity::class, PendingMissedEntity::class], version = 4, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun recordings(): RecordingDao
     abstract fun cachedCalls(): CachedCallDao
     abstract fun clientHashes(): ClientHashDao
     abstract fun pendingActivities(): PendingActivityDao
+    abstract fun pendingMissed(): PendingMissedDao
 
     /**
      * Session ended by the server (revoked device, expired refresh): drop cached and sync state but keep queued
@@ -21,7 +22,7 @@ abstract class AppDatabase : RoomDatabase() {
      */
     fun clearExceptQueuedActivities() = runInTransaction {
         val db = openHelper.writableDatabase
-        listOf("recordings", "cached_calls", "client_hashes").forEach { db.execSQL("DELETE FROM `$it`") }
+        listOf("recordings", "cached_calls", "client_hashes", "pending_missed").forEach { db.execSQL("DELETE FROM `$it`") }
     }
 
     companion object {
@@ -44,9 +45,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v4 (stage 1): missed calls waiting for POST /v1/followups/missed. */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `pending_missed` (`clientId` TEXT NOT NULL, `phone` TEXT NOT NULL, " +
+                        "`occurredAtMs` INTEGER NOT NULL, `callerName` TEXT, PRIMARY KEY(`clientId`))",
+                )
+            }
+        }
+
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "uic.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
     }

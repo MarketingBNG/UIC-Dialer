@@ -131,6 +131,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
         startedAt: true,
         durationS: true,
         status: true,
+        via: true,
         user: { select: { id: true, name: true, email: true } },
         transcript: { select: { language: true } },
       },

@@ -1,8 +1,9 @@
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
 import { HttpError, type Deps } from "../context.js";
-import type { CallSource } from "../generated/prisma/client.js";
-import { linkCallToActivity } from "../activity/service.js";
+import type { CallSource, DialVia } from "../generated/prisma/client.js";
+import { LINK_WINDOW_MS, closeMissedTasks, linkCallToActivity } from "../activity/service.js";
+import { decideCallVia } from "../activity/via.js";
 import { toE164 } from "../phone.js";
 import { UploadTooLargeError, mimeFromContentType } from "../storage/local.js";
 
@@ -40,6 +41,7 @@ export async function registerCall(
   deviceId: string | null,
   source: CallSource,
   body: CallMeta,
+  bodyVia?: DialVia,
 ): Promise<{ callId: string; alreadyUploaded: boolean }> {
   const data = {
     deviceId,
@@ -56,12 +58,60 @@ export async function registerCall(
     where: { userId_originalSha256: { userId, originalSha256: body.originalSha256 } },
   });
   if (existing && existing.status !== "PENDING_UPLOAD") return { callId: existing.id, alreadyUploaded: true };
-  const call = existing
+  let call = existing
     ? await deps.db.call.update({ where: { id: existing.id }, data })
     : await deps.db.call.create({ data: { ...data, userId, originalSha256: body.originalSha256 } });
+  // Imported files carry no dialling history.
+  if (!call.via && source !== "IMPORT") call = await setCallVia(deps, call, bodyVia);
+  if (call.phoneE164 && (call.direction === "OUTGOING" || (call.direction === "INCOMING" && (call.durationS ?? 0) > 0))) {
+    await closeMissedTasks(deps.db, userId, call.phoneE164, call.startedAt);
+  }
   // The rep may have logged the call's outcome in the dialer before the recording was found.
   await linkCallToActivity(deps, call);
   return { callId: call.id, alreadyUploaded: false };
+}
+
+type CallRow = Awaited<ReturnType<Deps["db"]["call"]["create"]>>;
+
+class IntentTaken extends Error {}
+
+/** Decides an outgoing call's via; a desktop dial intent near the start time is claimed at most once. */
+async function setCallVia(deps: Deps, call: CallRow, bodyVia: DialVia | undefined): Promise<CallRow> {
+  if (call.direction !== "OUTGOING") return call;
+
+  if (bodyVia !== "APP" && call.phoneE164) {
+    const at = call.startedAt.getTime();
+    const intents = await deps.db.dialIntent.findMany({
+      where: {
+        userId: call.userId,
+        phoneE164: call.phoneE164,
+        callId: null,
+        createdAt: { gte: new Date(at - LINK_WINDOW_MS), lte: new Date(at + LINK_WINDOW_MS) },
+      },
+      select: { id: true, createdAt: true },
+    });
+    intents.sort((a, b) => Math.abs(a.createdAt.getTime() - at) - Math.abs(b.createdAt.getTime() - at));
+    const laptopVia = decideCallVia(call.direction, bodyVia, true);
+    for (const intent of intents) {
+      // Claim the intent and set via together: a concurrent run that already set via gets no claim.
+      const r = await deps.db.$transaction(async (tx) => {
+        const set = await tx.call.updateMany({ where: { id: call.id, via: null }, data: { via: laptopVia } });
+        if (set.count === 0) return "via-set" as const;
+        const { count } = await tx.dialIntent.updateMany({ where: { id: intent.id, callId: null }, data: { callId: call.id } });
+        if (count === 0) throw new IntentTaken();
+        return "claimed" as const;
+      }).catch((e) => {
+        if (e instanceof IntentTaken) return "taken" as const;
+        throw e;
+      });
+      if (r === "claimed") return { ...call, via: laptopVia };
+      if (r === "via-set") return { ...call, via: (await deps.db.call.findUniqueOrThrow({ where: { id: call.id }, select: { via: true } })).via };
+    }
+  }
+  const via = decideCallVia(call.direction, bodyVia, false);
+  if (!via) return call;
+  await deps.db.call.updateMany({ where: { id: call.id, via: null }, data: { via } });
+  return { ...call, via };
 }
 
 /** Marks the call UPLOADED and queues transcription; only one concurrent upload wins the transition. */

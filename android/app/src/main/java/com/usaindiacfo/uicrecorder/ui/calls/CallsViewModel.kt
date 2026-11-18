@@ -49,6 +49,8 @@ data class CallRow(
     val durationS: Int?,
     val status: CallStatus,
     val person: String,
+    /** DialVia name ("LAPTOP" / "APP" / "PHONE_DIALER"); null for old rows and the offline cache. */
+    val via: String? = null,
 )
 
 private fun CachedCallEntity.toRow() = CallRow(
@@ -57,7 +59,9 @@ private fun CachedCallEntity.toRow() = CallRow(
     direction, startedAt, durationS, status, userName ?: userEmail,
 )
 
-private fun CallListItem.toRow() = toCached().toRow()
+private fun CallListItem.toRow() = toCached().toRow().copy(via = viaName)
+
+internal val CallListItem.viaName: String? get() = via?.name
 
 enum class DatePreset(val label: String) { ALL("Any time"), TODAY("Today"), WEEK("7 days"), MONTH("30 days") }
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
-import type { CallStatus, ContactStatus, Direction } from "./api";
-import { CONTACT_STATUS_LABEL, DIRECTION_LABEL, STATUS_LABEL } from "./format";
+import type { CallStatus, ContactStatus, DialVia, Direction } from "./api";
+import { CONTACT_STATUS_LABEL, DIRECTION_LABEL, STATUS_LABEL, VIA_LABEL } from "./format";
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
@@ -72,6 +72,12 @@ export function DirectionTag({ direction }: { direction: Direction }) {
       {DIRECTION_LABEL[direction]}
     </span>
   );
+}
+
+/** "via laptop" / "via app" / "via phone dialer"; nothing when unknown. */
+export function ViaTag({ via }: { via: DialVia | null | undefined }) {
+  if (!via) return null;
+  return <Badge tone={via === "LAPTOP" ? "blue" : via === "APP" ? "green" : "gray"}>{VIA_LABEL[via]}</Badge>;
 }
 
 /** Modal built on <dialog>: focus trap, Esc to close and backdrop come from the browser. */

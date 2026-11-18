@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useState } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router";
-import { ApiError, api, isManager, type Me } from "./api";
+import { ApiError, api, isManager, type Me, type PhoneStatus } from "./api";
 import { FirefliesBanner } from "./components/Fireflies";
 import { CallDetailPage } from "./pages/CallDetail";
 import { DialerProvider } from "./dialer";
@@ -14,6 +14,7 @@ import { HealthPage } from "./pages/Health";
 import { RepsPage } from "./pages/Reps";
 import { SettingsPage } from "./pages/Settings";
 import { SignInPage } from "./pages/SignIn";
+import { TodayPage } from "./pages/Today";
 import { UsersPage } from "./pages/Users";
 import { ErrorBox, Spinner } from "./ui";
 
@@ -58,13 +59,50 @@ export function App() {
 
 function navItems(me: Me) {
   const items = [
+    { to: "/today", label: "Today" },
     { to: "/dialer", label: "Dialer" },
-    { to: "/calls", label: "Calls" },
-    { to: "/activity", label: "Activity Tracker" },
+    { to: "/activity", label: "Contacts", end: true },
+    { to: "/calls", label: "Calls & recordings" },
   ];
-  if (isManager(me.role)) items.push({ to: "/health", label: "Sync health" }, { to: "/users", label: "Users" });
+  if (isManager(me.role)) {
+    items.push(
+      { to: "/activity/reps", label: "Reps & stats" },
+      { to: "/health", label: "Sync health" },
+      { to: "/users", label: "Users" },
+    );
+  }
   if (me.role === "ADMIN") items.push({ to: "/settings", label: "Settings" }, { to: "/audit", label: "Audit log" });
   return items;
+}
+
+/** "2m ago" style, for the phone pill. */
+function shortAgo(iso: string, now = Date.now()) {
+  const m = Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60_000));
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  if (m < 24 * 60) return `${Math.floor(m / 60)}h ago`;
+  return new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(new Date(iso));
+}
+
+/** The rep's Android phone heartbeat (the app reports in at least hourly). Says nothing about Phone Link. */
+function PhoneStatusPill() {
+  const q = useQuery({ queryKey: ["me-phone"], queryFn: () => api<PhoneStatus>("/api/me/phone"), refetchInterval: 60_000 });
+  if (!q.data) return null;
+  const p = q.data;
+  const text = !p.lastSeenAt
+    ? "No phone signed in"
+    : p.online
+      ? `Phone online · seen ${shortAgo(p.lastSeenAt)}`
+      : `Phone offline since ${shortAgo(p.lastSeenAt)}`;
+  return (
+    <div role="status" className="rounded-xl bg-white/10 px-3 py-2 text-xs text-white/90" title={p.model ? `${p.model}${p.appVersion ? ` · app ${p.appVersion}` : ""}` : undefined}>
+      <span className="flex items-center gap-2 font-medium">
+        <span aria-hidden className={`size-2 shrink-0 rounded-full ${p.online ? "bg-green-400" : "bg-slate-400"}`} />
+        {text}
+      </span>
+      {p.model && <span className="mt-0.5 block truncate text-white/60">{p.model} · calls use its SIM</span>}
+    </div>
+  );
 }
 
 function Shell({ me }: { me: Me }) {
@@ -81,77 +119,93 @@ function Shell({ me }: { me: Me }) {
   });
   const items = navItems(me);
   const linkCls = ({ isActive }: { isActive: boolean }) =>
-    `rounded-lg px-3 py-2 text-sm font-medium ${
-      isActive
-        ? "bg-brand-50 text-brand-700 dark:bg-slate-800 dark:text-white"
-        : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+    `flex min-h-10 items-center rounded-xl px-3 text-sm font-medium ${
+      isActive ? "bg-white/15 text-white" : "text-white/75 hover:bg-white/10 hover:text-white"
     }`;
+  const role = me.role.charAt(0) + me.role.slice(1).toLowerCase();
+  const nav = (onPick?: () => void) =>
+    items.map((i) => (
+      <NavLink key={i.to} to={i.to} end={i.end} className={linkCls} onClick={onPick}>
+        {i.label}
+      </NavLink>
+    ));
+  const logo = (
+    <span className="flex items-center gap-2 font-semibold text-white">
+      <span aria-hidden className="grid size-8 place-items-center rounded-xl bg-brand-600 text-xs">
+        UIC
+      </span>
+      UIC Dialer
+    </span>
+  );
 
   return (
-    <div className="min-h-dvh">
+    <div className="min-h-dvh md:pl-60">
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-white focus:p-2">
         Skip to content
       </a>
-      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur pt-[env(safe-area-inset-top)] dark:border-slate-800 dark:bg-slate-900/90">
-        <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4">
-          <span className="flex items-center gap-2 font-semibold">
-            <span aria-hidden className="grid size-7 place-items-center rounded-lg bg-brand-600 text-xs text-white">
-              UIC
-            </span>
-            <span className="hidden sm:inline">Call Recorder</span>
-          </span>
-          <nav aria-label="Main" className="ml-4 hidden gap-1 md:flex">
-            {items.map((i) => (
-              <NavLink key={i.to} to={i.to} className={linkCls}>
-                {i.label}
-              </NavLink>
-            ))}
-          </nav>
-          <div className="ml-auto flex items-center gap-2">
-            <div className="hidden text-right text-xs leading-tight sm:block">
-              <div className="font-medium">{me.name || me.email}</div>
-              <div className="text-slate-500">
-                {me.role.charAt(0) + me.role.slice(1).toLowerCase()}
-                {me.team ? ` · ${me.team}` : ""}
-              </div>
-            </div>
-            <button type="button" className="btn-ghost hidden md:inline-flex" disabled={logout.isPending} onClick={() => logout.mutate()}>
-              Sign out
-            </button>
-            <button
-              type="button"
-              className="btn-ghost px-3 md:hidden"
-              aria-expanded={menuOpen}
-              aria-controls="mobile-nav"
-              aria-label="Menu"
-              onClick={() => setMenuOpen((o) => !o)}
-            >
-              <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-                <path d={menuOpen ? "M6 6l12 12M18 6L6 18" : "M4 7h16M4 12h16M4 17h16"} />
-              </svg>
-            </button>
+      {/* Desktop: navy sidebar. */}
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col gap-4 bg-navy p-4 md:flex">
+        {logo}
+        <PhoneStatusPill />
+        <nav aria-label="Main" className="flex flex-1 flex-col gap-1 overflow-y-auto">
+          {nav()}
+        </nav>
+        <div className="border-t border-white/15 pt-3 text-xs text-white/80">
+          <div className="truncate font-medium text-white">{me.name || me.email}</div>
+          <div>
+            {role}
+            {me.team ? ` · ${me.team}` : ""}
           </div>
+          <button
+            type="button"
+            className="mt-2 min-h-10 w-full rounded-xl px-3 text-left text-sm font-medium text-white/80 hover:bg-white/10 hover:text-white"
+            disabled={logout.isPending}
+            onClick={() => logout.mutate()}
+          >
+            Sign out
+          </button>
+        </div>
+      </aside>
+      {/* Small screens: top bar with a menu. */}
+      <header className="sticky top-0 z-30 bg-navy pt-[env(safe-area-inset-top)] md:hidden">
+        <div className="flex h-14 items-center gap-3 px-4">
+          {logo}
+          <button
+            type="button"
+            className="ml-auto grid size-11 place-items-center rounded-xl text-white hover:bg-white/10"
+            aria-expanded={menuOpen}
+            aria-controls="mobile-nav"
+            aria-label="Menu"
+            onClick={() => setMenuOpen((o) => !o)}
+          >
+            <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d={menuOpen ? "M6 6l12 12M18 6L6 18" : "M4 7h16M4 12h16M4 17h16"} />
+            </svg>
+          </button>
         </div>
         {menuOpen && (
-          <nav id="mobile-nav" aria-label="Main" className="flex flex-col gap-1 border-t border-slate-200 px-4 py-3 md:hidden dark:border-slate-800">
-            <div className="px-3 pb-2 text-xs text-slate-500">
+          <nav id="mobile-nav" aria-label="Main" className="flex flex-col gap-1 border-t border-white/15 px-4 py-3">
+            <div className="px-3 pb-2 text-xs text-white/70">
               {me.name || me.email} · {me.role.toLowerCase()}
             </div>
-            {items.map((i) => (
-              <NavLink key={i.to} to={i.to} className={linkCls} onClick={() => setMenuOpen(false)}>
-                {i.label}
-              </NavLink>
-            ))}
-            <button type="button" className="btn-outline mt-2" disabled={logout.isPending} onClick={() => logout.mutate()}>
+            <PhoneStatusPill />
+            {nav(() => setMenuOpen(false))}
+            <button
+              type="button"
+              className="mt-2 min-h-10 rounded-xl border border-white/30 px-3 text-sm font-medium text-white hover:bg-white/10"
+              disabled={logout.isPending}
+              onClick={() => logout.mutate()}
+            >
               Sign out
             </button>
           </nav>
         )}
       </header>
-      <main id="main" className="mx-auto max-w-6xl px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+      <main id="main" className="mx-auto max-w-6xl px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:px-8">
         {isManager(me.role) && <FirefliesBanner />}
         <Routes>
-          <Route path="/" element={<Navigate to="/calls" replace />} />
+          <Route path="/" element={<Navigate to="/today" replace />} />
+          <Route path="/today" element={<TodayPage />} />
           <Route path="/dialer" element={<DialerPage />} />
           <Route path="/calls" element={<CallsPage />} />
           <Route path="/calls/:id" element={<CallDetailPage />} />
@@ -162,7 +216,7 @@ function Shell({ me }: { me: Me }) {
           {isManager(me.role) && <Route path="/users" element={<UsersPage />} />}
           {me.role === "ADMIN" && <Route path="/settings" element={<SettingsPage />} />}
           {me.role === "ADMIN" && <Route path="/audit" element={<AuditPage />} />}
-          <Route path="*" element={<Navigate to="/calls" replace />} />
+          <Route path="*" element={<Navigate to="/today" replace />} />
         </Routes>
       </main>
     </div>

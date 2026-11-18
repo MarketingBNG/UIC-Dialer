@@ -116,7 +116,11 @@ class ActivityWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
         var batched = true // false once the server says it has no batch endpoint (older deploy)
         while (!isStopped) {
             val batch = dao.nextBatch()
-            if (batch.isEmpty()) return Result.success()
+            if (batch.isEmpty()) {
+                // Outcomes changed follow-ups (and may close missed-call tasks): refresh reminders.
+                com.usaindiacfo.uicrecorder.reminders.Reminders.enqueueSync(ctx, ExistingWorkPolicy.KEEP)
+                return Result.success()
+            }
             try {
                 if (batched) {
                     // Up to 50 in one request: after an outage a phone may hold many, and one round trip each is slow.
@@ -178,6 +182,10 @@ class ResumeWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         if (c.db.pendingActivities().pendingCount() > 0) {
             SyncScheduler.restartIfWaiting(ctx, SyncScheduler.ACTIVITIES) { SyncScheduler.enqueueActivities(ctx, it) }
         }
+        // Hourly heartbeat keeps the dashboard's "Phone online" (75 min) accurate.
+        HeartbeatReporter.report(ctx, force = true)
+        // Missed calls and follow-up alarms, even when the rep hasn't opened the app.
+        com.usaindiacfo.uicrecorder.reminders.Reminders.enqueueSync(ctx, ExistingWorkPolicy.KEEP)
         return Result.success()
     }
 }

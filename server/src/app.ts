@@ -14,6 +14,7 @@ import { callRoutes } from "./routes/calls.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
 import { deviceRoutes } from "./routes/device.js";
 import { firefliesRoutes } from "./routes/fireflies.js";
+import { followupRoutes } from "./routes/followups.js";
 import { importRoutes } from "./routes/import.js";
 import { publishRoutes } from "./routes/publish.js";
 import { internalRoutes } from "./routes/internal.js";
@@ -67,6 +68,7 @@ export async function buildApp(deps: Deps, opts: FastifyServerOptions = {}) {
   await app.register(async (s) => dashboardRoutes(s, deps));
   await app.register(async (s) => firefliesRoutes(s, deps));
   await app.register(async (s) => activityRoutes(s, deps));
+  await app.register(async (s) => followupRoutes(s, deps));
 
   // Built dashboard (React SPA), served from the same origin.
   // Built: dist/src/app.js -> dist/public. Dev (tsx src/app.ts): falls back to dist/public too.

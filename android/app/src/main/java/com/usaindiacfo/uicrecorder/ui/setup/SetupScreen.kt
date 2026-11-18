@@ -61,9 +61,10 @@ fun SetupScreen(onDone: () -> Unit) {
 
     val requiredOk = remember(tick) { SetupChecks.requiredGranted(context) }
     val contactsOk = remember(tick) { SetupChecks.granted(context, android.Manifest.permission.READ_CONTACTS) }
-    val notifOk = remember(tick) {
-        SetupChecks.optionalPermissions.filter { it != android.Manifest.permission.READ_CONTACTS }.all { SetupChecks.granted(context, it) }
-    }
+    val notifOk = remember(tick) { SetupChecks.notificationsGranted(context) }
+    val phoneStateOk = remember(tick) { SetupChecks.phoneStateGranted(context) }
+    val overlayOk = remember(tick) { SetupChecks.canDrawOverlays(context) }
+    val exactOk = remember(tick) { SetupChecks.canExactAlarms(context) }
     val batteryOk = remember(tick) { SetupChecks.ignoringBatteryOptimizations(context) }
     val restricted = remember(tick) { SetupChecks.backgroundRestricted(context) }
     val needsRestrictedSettings = remember(tick) { SetupChecks.needsRestrictedSettings(context) }
@@ -130,10 +131,35 @@ fun SetupScreen(onDone: () -> Unit) {
             body = if (config.businessOnly && !contactsOk) {
                 "Your admin turned on business calls only. Allow Contacts so calls with your saved personal contacts are skipped; until then most calls wait to upload."
             } else {
-                "Contacts show names instead of numbers. Notifications report upload problems."
+                "Contacts show names instead of numbers. Notifications remind you of follow-ups and missed calls."
             },
         ) {
-            OutlinedButton(onClick = { permLauncher.launch(SetupChecks.optionalPermissions.toTypedArray()) }) { Text("Allow") }
+            OutlinedButton(onClick = { permLauncher.launch(SetupChecks.contactsAndNotifications.toTypedArray()) }) { Text("Allow") }
+        }
+
+        Step(
+            done = phoneStateOk && overlayOk,
+            optional = true,
+            title = "Show caller card over calls (optional)",
+            body = when {
+                !phoneStateOk -> "When a client calls, see their name, company and last note while the phone rings. Allow phone status so the app knows when a call comes in."
+                !overlayOk -> "Allow \"Display over other apps\" to show the card on the ringing screen. Without it the card comes as a notification."
+                else -> "The caller card shows on the ringing screen."
+            },
+        ) {
+            if (!phoneStateOk) OutlinedButton(onClick = { permLauncher.launch(arrayOf(android.Manifest.permission.READ_PHONE_STATE)) }) { Text("Allow") }
+            else if (!overlayOk) OutlinedButton(onClick = { SetupChecks.openOverlaySettings(context) }) { Text("Open settings") }
+        }
+
+        if (SetupChecks.exactAlarmApplies) {
+            Step(
+                done = exactOk,
+                optional = true,
+                title = "Exact reminder times (optional)",
+                body = if (exactOk) "Follow-up reminders arrive on time." else "Lets follow-up reminders arrive exactly on time. Without it they may come up to 10 minutes late.",
+            ) {
+                OutlinedButton(onClick = { SetupChecks.openExactAlarmSettings(context) }) { Text("Allow") }
+            }
         }
 
         Step(

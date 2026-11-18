@@ -37,8 +37,23 @@ import com.usaindiacfo.uicrecorder.data.db.RecordingStatus
 import com.usaindiacfo.uicrecorder.ui.setup.SetupChecks
 import com.usaindiacfo.uicrecorder.update.UpdateBanner
 
+/** Old Home tab; its content now lives in Settings as the Sync section. */
 @Composable
 fun HomeScreen(onOpenSetup: () -> Unit) {
+    var resumeTick by remember { mutableIntStateOf(0) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { resumeTick++ }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        UpdateBanner(checkKey = resumeTick / 10) // re-check occasionally, not on every resume
+        SyncStatus(onOpenSetup)
+    }
+}
+
+/** Synced / pending / failed counts, backlog progress, Sync now, and a "Finish setup" banner. */
+@Composable
+fun SyncStatus(onOpenSetup: () -> Unit) {
     val context = LocalContext.current
     val dao = appContainer().db.recordings()
     val counts by remember { dao.observeCounts() }.collectAsState(initial = emptyList())
@@ -59,12 +74,7 @@ fun HomeScreen(onOpenSetup: () -> Unit) {
     val failed = byStatus[RecordingStatus.FAILED] ?: 0
     val total = counts.sumOf { it.count }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        UpdateBanner(checkKey = resumeTick / 10) // re-check occasionally, not on every resume
-
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         if (!permsOk) {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
                 Column(Modifier.padding(16.dp)) {

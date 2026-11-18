@@ -1,6 +1,8 @@
 export type Role = "ADMIN" | "MANAGER" | "AGENT";
 export type Direction = "INCOMING" | "OUTGOING" | "MISSED" | "UNKNOWN";
 export type CallStatus = "PENDING_UPLOAD" | "UPLOADED" | "TRANSCRIBING" | "TRANSCRIBED" | "FAILED";
+/** How an outgoing call was dialled; null for incoming calls and older rows. */
+export type DialVia = "LAPTOP" | "APP" | "PHONE_DIALER";
 
 export interface Me {
   id: string;
@@ -24,6 +26,7 @@ export interface CallItem {
   startedAt: string;
   durationS: number | null;
   status: CallStatus;
+  via?: DialVia | null;
   user: UserRef;
   transcript: { language: string | null } | null;
 }
@@ -356,6 +359,7 @@ export interface Activity {
   durationS: number | null;
   occurredAt: string;
   callId: string | null;
+  via?: DialVia | null;
 }
 export type TimelineItem =
   | (Activity & {
@@ -370,6 +374,7 @@ export type TimelineItem =
       startedAt: string;
       durationS: number | null;
       status: CallStatus;
+      via?: DialVia | null;
       user: UserRef;
       hasAudio: boolean;
       summary: string | null;
@@ -393,4 +398,30 @@ export interface RepStats {
   whatsapp: number;
   followUpsDueToday: number;
   overdue: number;
+}
+
+// Stage 1: today's follow-ups (contact follow-ups + missed-call tasks) and the rep's phone heartbeat.
+export interface FollowUpItem {
+  key: string;
+  kind: "FOLLOW_UP" | "MISSED_CALL";
+  contactId: string | null;
+  taskId: string | null;
+  phoneE164: string;
+  name: string | null;
+  company: string | null;
+  status: ContactStatus | null;
+  dueAt: string;
+  overdue: boolean;
+  lastNote: string | null;
+}
+export interface FollowUpsToday {
+  items: FollowUpItem[];
+  upcoming: FollowUpItem[];
+  counts: { overdue: number; today: number };
+}
+export interface PhoneStatus {
+  lastSeenAt: string | null;
+  online: boolean;
+  model: string | null;
+  appVersion: string | null;
 }
