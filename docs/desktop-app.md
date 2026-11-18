@@ -39,5 +39,8 @@ If it's missing, that phone can still dial from the desktop, but the rep must ta
 
 - UIC Dialer shows the live dashboard, so dashboard updates arrive without reinstalling. Reinstall only for a new desktop version.
 - Closing the window keeps it running in the tray (so the outcome prompt isn't lost). Quit it from the tray icon.
+- Tray menu: **Start with Windows** (starts in the tray at login), **Sign in using your browser…**, **Reload**, **Open logs folder**, and the version.
+- If the server is restarting or the internet drops, the app retries on its own (after 5s, then up to every minute). Ctrl+R or F5 reloads; Ctrl +/−/0 zooms.
+- Sign-in problems: the tray's **Open logs folder** has `shell.log`, one line per sign-in step (no codes or tokens).
 - The dashboard's Dialer page also works in a normal browser on Windows if Phone Link handles `tel:` links, but sign-in and Call clicks are smoother in the app.
 - Code-signing the installer (to remove the SmartScreen warning) needs a paid code-signing certificate.

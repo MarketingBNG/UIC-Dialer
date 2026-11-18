@@ -1,14 +1,15 @@
 {
   "name": "uic-dialer-desktop",
   "productName": "UIC Dialer",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "description": "UIC Dialer for Windows: the dashboard plus click-to-call through Phone Link.",
   "author": "USA India CFO",
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "check": "node --check src/main.js",
+    "check": "node --check src/main.js && node --check src/rules.js",
+    "test": "node --test test/rules.test.js",
     "dist": "electron-builder --win nsis --publish never"
   },
   "devDependencies": {
@@ -19,15 +20,42 @@
     "appId": "com.usaindiacfo.uicdialer",
     "productName": "UIC Dialer",
     "artifactName": "UIC-Dialer-Setup-${version}.${ext}",
-    "files": ["src/**/*", "package.json"],
-    "directories": { "output": "dist" },
-    "protocols": [{ "name": "UIC Dialer sign-in", "schemes": ["uicdialer"] }],
-    "win": { "target": ["nsis"] },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "protocols": [
+      {
+        "name": "UIC Dialer sign-in",
+        "schemes": [
+          "uicdialer"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
     "nsis": {
       "oneClick": true,
       "perMachine": false,
       "createDesktopShortcut": true,
-      "shortcutName": "UIC Dialer"
-    }
+      "shortcutName": "UIC Dialer",
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US"
+    ]
   }
 }

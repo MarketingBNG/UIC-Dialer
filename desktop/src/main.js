@@ -1,85 +1,145 @@
 // UIC Dialer for Windows. A thin, locked-down window around the hosted dashboard (so dashboard updates need no
-// reinstall) that adds two things a browser can't do cleanly:
+// reinstall) that adds what a browser can't do cleanly:
 //  1. tel: links go to Windows, where Phone Link dials on the rep's paired Android phone and carries the audio
 //     over Bluetooth. The phone's own dialer places the call, so its recorder and our upload keep working.
 //  2. Google sign-in runs in the system browser (Google blocks sign-in inside embedded windows). The server sends
 //     a one-time code back through the uicdialer:// link, which only this app can redeem (S256 verifier).
+//  3. It stays up: reloads by itself when the server restarts or the network drops, and lives in the tray.
+// The link and sign-in rules are in rules.js, tested by test/rules.test.js.
 "use strict";
 
-const { app, BrowserWindow, Menu, Tray, nativeImage, session, shell } = require("electron");
-const crypto = require("node:crypto");
+const { app, BrowserWindow, Menu, Tray, dialog, nativeImage, screen, session, shell } = require("electron");
+const fs = require("node:fs");
+const path = require("node:path");
+const rules = require("./rules.js");
 
-const APP_URL = new URL(process.env.UIC_URL || "https://calls.usaindiacfo.us");
-const SCHEME = "uicdialer";
+const APP_URL = rules.resolveAppUrl(process.env.UIC_URL);
+const SCHEME = rules.SCHEME;
+const APP_ID = "com.usaindiacfo.uicdialer";
+/** Started by "Start with Windows": come up in the tray without a window. */
+const startHidden = process.argv.includes("--hidden");
 
 let win = null;
 let tray = null;
 let quitting = false;
-/** Verifier for the sign-in currently open in the browser (one at a time). */
-let signInVerifier = null;
+/** Browser sign-ins started from this app and not yet finished (see rules.addFlow). */
+let flows = [];
+/** Failed page loads in a row; sets the retry wait, reset by a good load. */
+let failures = 0;
+let retryTimer = null;
 
-const sameOrigin = (url) => {
+// ---- small helpers ------------------------------------------------------
+
+/** One line per event in %APPDATA%/UIC Dialer/logs/shell.log. Never codes or tokens. */
+function log(what) {
   try {
-    return new URL(url).origin === APP_URL.origin;
+    const dir = app.getPath("logs");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, "shell.log"), `${new Date().toISOString()} v${app.getVersion()} ${what}\n`);
   } catch {
-    return false;
+    /* a log that can't be written never stops the app */
   }
-};
-
-/** Phone numbers only: digits and one leading +. Anything else is dropped. */
-function openTel(url) {
-  const number = decodeURIComponent(url.slice(4)).replace(/[^\d+]/g, "").replace(/(?!^)\+/g, "");
-  if (/^\+?\d{3,20}$/.test(number)) void shell.openExternal(`tel:${number}`);
 }
 
+const windowStateFile = () => path.join(app.getPath("userData"), "window.json");
+
+function loadWindowState() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(windowStateFile(), "utf8"));
+    return rules.validWindowState(saved, screen.getAllDisplays().map((d) => d.workArea));
+  } catch {
+    return null;
+  }
+}
+
+function saveWindowState() {
+  if (!win || win.isDestroyed()) return;
+  try {
+    const maximised = win.isMaximized();
+    const b = maximised ? win.getNormalBounds() : win.getBounds();
+    fs.mkdirSync(path.dirname(windowStateFile()), { recursive: true });
+    fs.writeFileSync(windowStateFile(), JSON.stringify({ ...b, maximised }));
+  } catch {
+    /* next time it opens at the default size */
+  }
+}
+
+// ---- links and sign-in --------------------------------------------------
+
 function startSignIn() {
-  signInVerifier = crypto.randomBytes(32).toString("base64url");
-  const challenge = crypto.createHash("sha256").update(signInVerifier).digest("base64url");
+  const flow = rules.newFlow();
+  flows = rules.addFlow(flows, flow);
   const url = new URL("/auth/google", APP_URL);
-  url.searchParams.set("desktop", challenge);
+  url.searchParams.set("desktop", flow.challenge);
+  log("sign-in started");
   void shell.openExternal(url.href);
 }
 
 function finishSignIn(link) {
-  let url;
-  try {
-    url = new URL(link);
-  } catch {
+  const match = rules.matchCallback(link, flows);
+  if (match.ignored) {
+    log(`sign-in callback ignored: ${match.ignored}`);
     return;
   }
-  const code = url.searchParams.get("code");
-  if (url.protocol !== `${SCHEME}:` || url.hostname !== "auth" || !code || !signInVerifier) return;
+  // The server's code is single-use: forget the flow before redeeming it.
+  flows = flows.filter((f) => f !== match.flow);
   const exchange = new URL("/auth/desktop/exchange", APP_URL);
-  exchange.searchParams.set("code", code);
-  exchange.searchParams.set("verifier", signInVerifier);
-  signInVerifier = null;
+  exchange.searchParams.set("code", match.code);
+  exchange.searchParams.set("verifier", match.flow.verifier);
+  log("sign-in callback received");
   showWindow();
+  // Loaded in the window so the session cookie lands in the window's own cookie jar. The server redirects to
+  // "/" on success or "/?error=…", which the sign-in page explains.
   void win.loadURL(exchange.href);
 }
 
-/** Decides where a link from the page goes. Returns true when the window may follow it itself. */
+/** Acts on a link from the page. Returns true when the window may follow it itself. */
 function route(url) {
-  if (url.startsWith("tel:")) {
-    openTel(url);
-    return false;
-  }
-  if (sameOrigin(url)) {
-    if (new URL(url).pathname === "/auth/google") {
+  switch (rules.routeFor(url, APP_URL)) {
+    case "window":
+      return true;
+    case "tel":
+      void shell.openExternal(`tel:${rules.telNumber(url)}`);
+      return false;
+    case "signin":
       startSignIn();
       return false;
-    }
-    return true;
+    case "external":
+      void shell.openExternal(url);
+      return false;
+    default:
+      return false;
   }
-  if (/^(https|mailto):/i.test(url)) void shell.openExternal(url);
-  return false;
 }
 
+// ---- staying up ---------------------------------------------------------
+
+/** Tries the page again after a growing wait (the server may be restarting during a deploy). */
+function scheduleRetry(reason, url) {
+  if (!win || quitting || retryTimer) return;
+  const wait = rules.retryDelayMs(failures);
+  failures += 1;
+  log(`load problem: ${reason}; retrying in ${wait / 1000}s`);
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    if (!win || win.isDestroyed()) return;
+    // Back to the page that failed when it's ours, so the rep lands where they were.
+    void win.loadURL(rules.sameOrigin(url, APP_URL) && !url.includes("/auth/") ? url : APP_URL.href);
+  }, wait);
+}
+
+// ---- window -------------------------------------------------------------
+
 function createWindow() {
+  const state = loadWindowState();
   win = new BrowserWindow({
-    width: 1200,
-    height: 820,
+    width: state?.width ?? 1200,
+    height: state?.height ?? 820,
+    x: state?.x,
+    y: state?.y,
     minWidth: 380,
     minHeight: 520,
+    show: false,
     title: "UIC Dialer",
     autoHideMenuBar: true,
     backgroundColor: "#ffffff",
@@ -91,27 +151,91 @@ function createWindow() {
       spellcheck: true,
     },
   });
-  // Lets the dashboard know it runs inside the desktop app.
-  win.webContents.setUserAgent(`${win.webContents.getUserAgent()} UICDialer/${app.getVersion()}`);
-  win.webContents.setWindowOpenHandler(({ url }) => {
+  if (state?.maximised) win.maximize();
+  const wc = win.webContents;
+
+  // Drop the Electron token (no need to advertise it) but keep ours: the dashboard looks for "UICDialer/"
+  // to open calls through this app.
+  wc.setUserAgent(`${wc.getUserAgent().replace(` Electron/${process.versions.electron}`, "").replace(` ${app.getName()}/${app.getVersion()}`, "")} UICDialer/${app.getVersion()}`);
+
+  // Show once painted, so there's no white flash; "Start with Windows" keeps it in the tray.
+  win.once("ready-to-show", () => {
+    if (!startHidden) win?.show();
+  });
+
+  // Ctrl + / Ctrl - / Ctrl 0 zoom, including the "=" key and the numpad (the default binding needs Shift).
+  wc.on("before-input-event", (event, input) => {
+    if (input.type !== "keyDown" || !(input.control || input.meta) || input.alt) return;
+    const step = input.code === "Equal" || input.code === "NumpadAdd" ? 0.5 : input.code === "Minus" || input.code === "NumpadSubtract" ? -0.5 : null;
+    if (step !== null) wc.setZoomLevel(wc.getZoomLevel() + step);
+    else if (input.code === "Digit0" || input.code === "Numpad0") wc.setZoomLevel(0);
+    else if (input.key === "F5" || (input.code === "KeyR" && !input.shift)) wc.reload();
+    else return;
+    event.preventDefault();
+  });
+
+  wc.setWindowOpenHandler(({ url }) => {
     if (route(url)) void win.loadURL(url);
     return { action: "deny" };
   });
-  win.webContents.on("will-navigate", (e, url) => {
+  wc.on("will-navigate", (e, url) => {
     if (!route(url)) e.preventDefault();
   });
-  win.webContents.on("will-redirect", (e, url) => {
-    if (sameOrigin(url)) return;
+  // A server redirect elsewhere fires will-redirect, not will-navigate.
+  wc.on("will-redirect", (e, url) => {
+    if (rules.sameOrigin(url, APP_URL)) return;
     e.preventDefault();
     if (/^https:/i.test(url)) void shell.openExternal(url);
   });
+
+  // Network down, server restarting (a 502 from the proxy loads "successfully"), or the page crashed.
+  wc.on("did-fail-load", (_e, code, description, url, isMainFrame) => {
+    if (!isMainFrame || code === -3 /* aborted, e.g. by a redirect */) return;
+    scheduleRetry(`${description} (${code})`, url);
+  });
+  wc.on("did-navigate", (_e, url, status) => {
+    if (!rules.sameOrigin(url, APP_URL)) return;
+    if (status >= 500) scheduleRetry(`server answered ${status}`, url);
+    else if (status > 0 && status < 400) failures = 0;
+    if (url.includes("/?error=")) log(`sign-in failed: ${new URL(url).searchParams.get("error")}`);
+  });
+  wc.on("render-process-gone", (_e, details) => {
+    if (quitting || details.reason === "clean-exit") return;
+    scheduleRetry(`page stopped (${details.reason})`, APP_URL.href);
+  });
+  win.on("unresponsive", () => {
+    void dialog
+      .showMessageBox(win, {
+        type: "warning",
+        title: "UIC Dialer is not responding",
+        message: "The page has stopped responding.",
+        detail: "Reload it, or wait for it to recover. Calls and outcomes already saved are safe.",
+        buttons: ["Reload", "Wait"],
+        defaultId: 0,
+      })
+      .then(({ response }) => {
+        if (response === 0) wc.forcefullyCrashRenderer();
+      });
+  });
+
   win.on("close", (e) => {
+    saveWindowState();
     // Closing keeps the app in the tray so a call outcome prompt isn't lost; Quit is in the tray menu.
     if (!quitting) {
       e.preventDefault();
       win.hide();
     }
   });
+  // Windows shutdown or sign-out skips before-quit.
+  win.on("session-end", () => {
+    quitting = true;
+  });
+  win.on("closed", () => {
+    win = null;
+  });
+
+  // DNS and TLS done while the window is still being set up.
+  wc.session.preconnect({ url: APP_URL.href, numSockets: 2 });
   void win.loadURL(APP_URL.href);
 }
 
@@ -122,15 +246,39 @@ function showWindow() {
   win.focus();
 }
 
+// ---- tray ---------------------------------------------------------------
+
 async function createTray() {
   // The installed exe's icon (Electron's default until a branded build/icon.ico is added).
   const icon = await app.getFileIcon(process.execPath, { size: "small" }).catch(() => nativeImage.createEmpty());
   tray = new Tray(icon);
   tray.setToolTip("UIC Dialer");
+  tray.on("click", showWindow);
+  refreshTray();
+}
+
+function refreshTray() {
+  if (!tray) return;
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: "Open UIC Dialer", click: showWindow },
+      { label: `Version ${app.getVersion()}`, enabled: false },
+      { type: "separator" },
       { label: "Reload", click: () => win?.webContents.reload() },
+      // Reachable even when the window shows an error, which is when it's needed.
+      { label: "Sign in using your browser…", click: startSignIn },
+      { label: "Open logs folder", click: () => void shell.openPath(app.getPath("logs")) },
+      { type: "separator" },
+      {
+        label: "Start with Windows",
+        type: "checkbox",
+        checked: app.getLoginItemSettings().openAtLogin,
+        // --hidden: starts in the tray, so it's ready for calls without a window popping up at login.
+        click: (item) => {
+          app.setLoginItemSettings({ openAtLogin: item.checked, args: ["--hidden"] });
+          refreshTray();
+        },
+      },
       { type: "separator" },
       {
         label: "Quit",
@@ -141,13 +289,25 @@ async function createTray() {
       },
     ]),
   );
-  tray.on("click", showWindow);
 }
 
+// ---- startup ------------------------------------------------------------
 
-if (!app.requestSingleInstanceLock()) {
-  app.quit();
-} else {
+/**
+ * One copy only: a second launch (a desktop shortcut, or Windows delivering a uicdialer:// link) hands its
+ * arguments to this one. After an update the new copy may start while the old one still holds the lock, so
+ * --updated retries briefly.
+ */
+async function singleInstance() {
+  const updated = process.argv.includes("--updated");
+  for (let i = 0; ; i++) {
+    if (app.requestSingleInstanceLock()) return true;
+    if (!updated || i >= 20) return false;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+
+function main() {
   app.on("second-instance", (_e, argv) => {
     const link = argv.find((a) => a.startsWith(`${SCHEME}://`));
     if (link) finishSignIn(link);
@@ -155,20 +315,28 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   // In development (electron .) Windows needs the script path to relaunch us for uicdialer:// links.
-  if (process.defaultApp) app.setAsDefaultProtocolClient(SCHEME, process.execPath, [require("node:path").resolve(process.argv[1])]);
+  if (process.defaultApp && process.argv.length >= 2) app.setAsDefaultProtocolClient(SCHEME, process.execPath, [path.resolve(process.argv[1])]);
   else app.setAsDefaultProtocolClient(SCHEME);
 
   app.whenReady().then(() => {
-    // The dashboard needs no camera, mic, location or notifications from Electron.
+    // Taskbar grouping and notifications under "UIC Dialer", not "electron.app.Electron".
+    app.setAppUserModelId(APP_ID);
+    // The dashboard needs no camera, mic, location or notifications. Both handlers: most web APIs check
+    // first and only ask if the check says no.
     session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
+    session.defaultSession.setPermissionCheckHandler(() => false);
     Menu.setApplicationMenu(null);
     createWindow();
     void createTray();
+    log(`started${startHidden ? " (hidden)" : ""} → ${APP_URL.origin}`);
   });
   app.on("before-quit", () => {
     quitting = true;
+    saveWindowState();
   });
   app.on("window-all-closed", () => {
     /* stay in the tray */
   });
 }
+
+void singleInstance().then((ok) => (ok ? main() : app.quit()));

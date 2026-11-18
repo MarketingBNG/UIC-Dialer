@@ -124,7 +124,7 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
       if (typeof checks["desktop"] === "string") {
         // Signed in from the desktop app's browser tab: hand a one-time code back to the app instead of a cookie.
         const code = await deps.tokens.seal({ uid: user.id, ch: checks["desktop"], jti: randomUUID() }, DESKTOP_CODE_TTL_S);
-        const target = escapeHtml(`${DESKTOP_SCHEME}://auth?code=${encodeURIComponent(code)}`);
+        const target = escapeHtml(`${DESKTOP_SCHEME}://auth?code=${encodeURIComponent(code)}&state=${encodeURIComponent(checks["desktop"])}`);
         return reply
           .type("text/html; charset=utf-8")
           .header("cache-control", "no-store")
