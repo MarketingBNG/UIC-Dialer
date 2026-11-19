@@ -65,6 +65,14 @@ enum AuditAction {
   EXPORT
   // Zoho CRM: admin resync / backfill.
   CRM_SYNC
+  // Stage 3 (migration 20261118101000). /api/audit hides these from old apps unless ?v=2.
+  CALL_LIST_CHANGE
+  CONTACT_IMPORT
+  DNC_CHANGE
+  LEAD_SOURCE_CHANGE
+  OUTCOME_CHANGE
+  TEMPLATE_CHANGE
+  TARGET_CHANGE
 }
 
 model User {
@@ -78,6 +86,9 @@ model User {
   active          Boolean   @default(true)
   excludedNumbers String[]  @default([]) @map("excluded_numbers")
   lastLoginAt     DateTime? @map("last_login_at")
+  // Daily targets (stage 3); null = no target.
+  targetCallsPerDay   Int?  @map("target_calls_per_day")
+  targetTalkMinPerDay Int?  @map("target_talk_min_per_day")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
@@ -89,6 +100,13 @@ model User {
   activities    Activity[]
   followUpTasks FollowUpTask[]
   dialIntents   DialIntent[]
+
+  callListsCreated CallList[]         @relation("CallListCreator")
+  callListAssigned CallListAssignee[]
+  listItemsClaimed CallListItem[]     @relation("ListItemClaimedBy")
+  listItemsDone    CallListItem[]     @relation("ListItemDoneBy")
+  dncCreated       DncNumber[]
+  leadsAssigned    LeadEvent[]
 
   @@map("users")
 }
@@ -189,6 +207,7 @@ model Call {
 
   firefliesReservations FirefliesReservation[]
   activities            Activity[]
+  score                 CallScore?
 
   @@unique([userId, originalSha256])
   @@index([userId, startedAt(sort: Desc)])
@@ -387,14 +406,20 @@ model Contact {
   status         ContactStatus @default(NEW)
   nextFollowUpAt DateTime?     @map("next_follow_up_at")
   lastActivityAt DateTime?     @map("last_activity_at")
+  city           String?
+  // Lead source name, "csv" or "manual" (stage 2/3).
+  source         String?
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 
   owner      User?      @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: SetNull)
   activities Activity[]
   followUpTasks FollowUpTask[]
+  listItems  CallListItem[]
+  leadEvents LeadEvent[]
 
   @@index([ownerId])
+  @@index([status])
   @@index([nextFollowUpAt])
   @@index([lastActivityAt(sort: Desc)])
   @@map("contacts")
@@ -415,15 +440,25 @@ model Activity {
   // The rep's recorded Call with the same number within 10 minutes, linked from either side.
   callId     String?      @map("call_id") @db.Uuid
   via        DialVia?     @map("via")
+  // Stage 2: custom outcome (outcome keeps its base enum), call list item, WhatsApp/SMS channel, template.
+  outcomeId      String?  @map("outcome_id") @db.Uuid
+  callListItemId String?  @map("call_list_item_id") @db.Uuid
+  channel        String?
+  templateId     String?  @map("template_id") @db.Uuid
   createdAt  DateTime     @default(now()) @map("created_at")
 
-  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  call    Call?   @relation(fields: [callId], references: [id], onDelete: SetNull)
+  contact      Contact          @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  call         Call?            @relation(fields: [callId], references: [id], onDelete: SetNull)
+  outcomeDef   OutcomeDef?      @relation(fields: [outcomeId], references: [id], onDelete: SetNull)
+  callListItem CallListItem?    @relation(fields: [callListItemId], references: [id], onDelete: SetNull)
+  template     MessageTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
 
   @@index([contactId, occurredAt(sort: Desc)])
   @@index([userId, occurredAt(sort: Desc)])
   @@index([callId])
+  @@index([outcomeId])
+  @@index([callListItemId])
   @@map("activities")
 }
 
@@ -436,6 +471,7 @@ enum DialVia {
 
 enum FollowUpKind {
   MISSED_CALL
+  NEW_LEAD
 }
 
 enum FollowUpState {
@@ -471,12 +507,234 @@ model FollowUpTask {
   occurredAt DateTime      @map("occurred_at") // missed call time
   dueAt      DateTime      @map("due_at") // = occurredAt; snooze moves it
   doneAt     DateTime?     @map("done_at")
+  leadEventId String?      @unique @map("lead_event_id") @db.Uuid
   createdAt  DateTime      @default(now()) @map("created_at")
   updatedAt  DateTime      @updatedAt @map("updated_at")
   user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   contact    Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  leadEvent  LeadEvent?    @relation(fields: [leadEventId], references: [id], onDelete: SetNull)
 
   @@index([userId, state, dueAt])
   @@index([phoneE164])
   @@map("follow_up_tasks")
+}
+
+// ---- Stage 2: custom outcomes, scripts, templates, call lists ------------------------------------------
+
+enum OutcomeRule {
+  NONE
+  ASK_FOLLOW_UP
+  ASK_MEETING
+  ASK_CALLBACK
+  CLOSE_LEAD
+  RETRY
+  REMOVE_FROM_LISTS
+}
+
+enum CallListState {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum CallListItemState {
+  PENDING
+  IN_PROGRESS
+  DONE
+  SKIPPED
+  REMOVED
+}
+
+// Admin-defined call outcomes. Activity.outcome keeps the base enum so reports and Zoho keep working.
+model OutcomeDef {
+  id          String      @id @default(uuid(7)) @db.Uuid
+  key         String?     @unique
+  label       String
+  color       String
+  sortOrder   Int         @default(0) @map("sort_order")
+  active      Boolean     @default(true)
+  baseOutcome CallOutcome @map("base_outcome")
+  rule        OutcomeRule @default(NONE)
+  retryHours  Int?        @map("retry_hours")
+  addToDnc    Boolean     @default(false) @map("add_to_dnc")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  activities Activity[]
+  listItems  CallListItem[]
+
+  @@map("outcome_defs")
+}
+
+model CallScript {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  name      String
+  sections  Json // [{ heading, text }]
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  lists CallList[]
+
+  @@map("call_scripts")
+}
+
+model MessageTemplate {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  name      String
+  body      String
+  whatsapp  Boolean  @default(true)
+  sms       Boolean  @default(true)
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  activities Activity[]
+
+  @@map("message_templates")
+}
+
+model CallList {
+  id          String        @id @default(uuid(7)) @db.Uuid
+  name        String
+  scriptId    String?       @map("script_id") @db.Uuid
+  state       CallListState @default(ACTIVE)
+  createdById String?       @map("created_by_id") @db.Uuid
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  script    CallScript?        @relation(fields: [scriptId], references: [id], onDelete: SetNull)
+  createdBy User?              @relation("CallListCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  assignees CallListAssignee[]
+  items     CallListItem[]
+
+  @@index([state])
+  @@map("call_lists")
+}
+
+model CallListAssignee {
+  listId String @map("list_id") @db.Uuid
+  userId String @map("user_id") @db.Uuid
+
+  list CallList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  user User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([listId, userId])
+  @@index([userId])
+  @@map("call_list_assignees")
+}
+
+model CallListItem {
+  id             String            @id @default(uuid(7)) @db.Uuid
+  listId         String            @map("list_id") @db.Uuid
+  contactId      String            @map("contact_id") @db.Uuid
+  position       Int
+  state          CallListItemState @default(PENDING)
+  claimedById    String?           @map("claimed_by_id") @db.Uuid
+  leaseUntil     DateTime?         @map("lease_until")
+  retryAt        DateTime?         @map("retry_at")
+  attempts       Int               @default(0)
+  lastOutcomeId  String?           @map("last_outcome_id") @db.Uuid
+  lastOutcome    CallOutcome?      @map("last_outcome")
+  lastActivityAt DateTime?         @map("last_activity_at")
+  doneById       String?           @map("done_by_id") @db.Uuid
+  doneAt         DateTime?         @map("done_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  list           CallList    @relation(fields: [listId], references: [id], onDelete: Cascade)
+  contact        Contact     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  claimedBy      User?       @relation("ListItemClaimedBy", fields: [claimedById], references: [id], onDelete: SetNull)
+  doneBy         User?       @relation("ListItemDoneBy", fields: [doneById], references: [id], onDelete: SetNull)
+  lastOutcomeDef OutcomeDef? @relation(fields: [lastOutcomeId], references: [id], onDelete: SetNull)
+  activities     Activity[]
+
+  @@unique([listId, contactId])
+  @@index([listId, state, position])
+  @@index([contactId, state])
+  @@map("call_list_items")
+}
+
+// ---- Stage 3: do-not-call, lead sources, AI call scores ----------------------------------------------
+
+enum DncSource {
+  MANUAL
+  OUTCOME
+  IMPORT
+}
+
+// key = numberKey() (last 10 digits), the same rule as client_numbers and the app's PrivacyFilter.key().
+model DncNumber {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  key         String    @unique
+  phoneE164   String?   @map("phone_e164")
+  raw         String
+  reason      String?
+  source      DncSource @default(MANUAL)
+  createdById String?   @map("created_by_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@map("dnc_numbers")
+}
+
+model LeadSource {
+  id        String   @id @default(uuid(7)) @db.Uuid
+  name      String   @unique
+  tokenHash String   @unique @map("token_hash")
+  tokenHint String   @map("token_hint")
+  active    Boolean  @default(true)
+  repPool   String[] @default([]) @map("rep_pool")
+  fieldMap  Json?    @map("field_map")
+  rrCursor  String?  @map("rr_cursor") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  events LeadEvent[]
+
+  @@map("lead_sources")
+}
+
+model LeadEvent {
+  id           String   @id @default(uuid(7)) @db.Uuid
+  sourceId     String?  @map("source_id") @db.Uuid
+  externalId   String?  @map("external_id")
+  contactId    String?  @map("contact_id") @db.Uuid
+  assignedToId String?  @map("assigned_to_id") @db.Uuid
+  status       String // ASSIGNED | EXISTING_OWNER | DNC | NO_REP | INVALID
+  payload      Json
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  source     LeadSource?   @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  contact    Contact?      @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  assignedTo User?         @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+  task       FollowUpTask?
+
+  @@unique([sourceId, externalId])
+  @@index([createdAt(sort: Desc)])
+  @@map("lead_events")
+}
+
+model CallScore {
+  callId          String   @id @map("call_id") @db.Uuid
+  overall         Int
+  scriptAdherence Int?     @map("script_adherence")
+  sentiment       String
+  objections      Json
+  nextStep        String?  @map("next_step")
+  strengths       Json
+  improvements    Json
+  scriptId        String?  @map("script_id") @db.Uuid
+  model           String
+  inputTokens     Int?     @map("input_tokens")
+  outputTokens    Int?     @map("output_tokens")
+  costUsd         Float?   @map("cost_usd")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  call Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+
+  @@map("call_scores")
 }

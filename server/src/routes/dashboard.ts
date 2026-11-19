@@ -14,9 +14,13 @@ import { CostSettings, getCostSettings, saveCostSettings, translationUsage } fro
 import { MAX_CLIENT_NUMBERS, MIN_KEY_DIGITS, importClientNumbers, numberKey, parseClientCsv } from "../privacy/clientNumbers.js";
 import { crmRecordUrl, crmStats } from "../crm/sync.js";
 import { PrivacySettings, getPrivacySettings, savePrivacySettings } from "../privacy/settings.js";
+import { V2_AUDIT_ACTIONS } from "../audit.js";
+import { TargetFields } from "./team.js";
 
-const AUDIT_ACTIONS = ["PLAY", "DOWNLOAD", "SEARCH", "DELETE", "USER_CHANGE", "DEVICE_REVOKE", "SETTINGS_CHANGE", "CLIENT_LIST_CHANGE", "RETENTION_DELETE", "EXPORT", "CRM_SYNC"] as const;
+const AUDIT_ACTIONS = ["PLAY", "DOWNLOAD", "SEARCH", "DELETE", "USER_CHANGE", "DEVICE_REVOKE", "SETTINGS_CHANGE", "CLIENT_LIST_CHANGE", "RETENTION_DELETE", "EXPORT", "CRM_SYNC", ...V2_AUDIT_ACTIONS] as const;
 const AuditQuery = z.object({
+  // v=2: include the stage 2/3 actions (old apps' Kotlin enum can't decode them).
+  v: z.string().max(5).optional(),
   action: z.enum(AUDIT_ACTIONS).optional(),
   userId: z.uuid().optional(),
   cursor: z.uuid().optional(),
@@ -48,6 +52,7 @@ const UserPatch = z.object({
   team: z.string().max(100).nullable().optional(),
   active: z.boolean().optional(),
   excludedNumbers: z.array(z.string().max(40)).max(500).optional(),
+  ...TargetFields,
 });
 
 const idParam = (req: FastifyRequest) => z.uuid().parse((req.params as { id: string }).id);
@@ -134,10 +139,11 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
         via: true,
         user: { select: { id: true, name: true, email: true } },
         transcript: { select: { language: true } },
+        score: { select: { overall: true } },
       },
     });
     const more = rows.length > q.limit;
-    const items = more ? rows.slice(0, q.limit) : rows;
+    const items = (more ? rows.slice(0, q.limit) : rows).map(({ score, ...c }) => ({ ...c, score: score?.overall ?? null }));
     return { items, nextCursor: more ? items.at(-1)?.id : null };
   });
 
@@ -216,13 +222,14 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
             summaryModel: true,
           },
         },
+        score: true,
       },
     });
     if (!call) throw new HttpError(404, "Not found");
     const open = call.transcript
       ? await deps.db.job.groupBy({
           by: ["kind"],
-          where: { callId: call.id, kind: { in: ["translate", "summarize"] }, status: { in: ["QUEUED", "RUNNING"] } },
+          where: { callId: call.id, kind: { in: ["translate", "summarize", "score"] }, status: { in: ["QUEUED", "RUNNING", "WAITING_BUDGET"] } },
           _count: true,
         })
       : [];
@@ -240,8 +247,21 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
       error: call.crmSyncError,
       attempts: call.crmAttempts,
     };
-    const { crmStatus: _a, crmCallId: _b, crmNoteId: _c, crmRecordModule: _d, crmRecordId: _e, crmSyncedAt: _f, crmSyncError: _g, crmAttempts: _h, crmQueuedAt: _i, crmNextAttemptAt: _j, crmLockedUntil: _k, ...rest } = call;
-    return { ...rest, transcript, crm, fileSize: call.fileSize?.toString() ?? null };
+    const { crmStatus: _a, crmCallId: _b, crmNoteId: _c, crmRecordModule: _d, crmRecordId: _e, crmSyncedAt: _f, crmSyncError: _g, crmAttempts: _h, crmQueuedAt: _i, crmNextAttemptAt: _j, crmLockedUntil: _k, score: s, ...rest } = call;
+    const score = s
+      ? {
+          overall: s.overall,
+          scriptAdherence: s.scriptAdherence,
+          sentiment: s.sentiment,
+          objections: s.objections,
+          nextStep: s.nextStep,
+          strengths: s.strengths,
+          improvements: s.improvements,
+          model: s.model,
+          createdAt: s.createdAt,
+        }
+      : null;
+    return { ...rest, transcript, crm, fileSize: call.fileSize?.toString() ?? null, score, scorePending: pending("score") };
   });
 
   /** Audio playback with HTTP Range support (seeking in the browser player). `?download=1` saves the file (audited). */
@@ -321,7 +341,11 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
       const devices = await deps.db.device.findMany({ where: { userId: id, revokedAt: null } });
       for (const d of devices) await deps.tokens.revokeDevice(d.id);
     }
-    await audit(req, "USER_CHANGE", undefined, { userId: id, ...body });
+    const { targetCallsPerDay, targetTalkMinPerDay, ...rest } = body;
+    if (targetCallsPerDay !== undefined || targetTalkMinPerDay !== undefined) {
+      await audit(req, "TARGET_CHANGE", undefined, { userId: id, targetCallsPerDay, targetTalkMinPerDay });
+    }
+    if (Object.keys(rest).length > 0) await audit(req, "USER_CHANGE", undefined, { userId: id, ...rest });
     return user;
   });
 
@@ -432,6 +456,8 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     const patch = PrivacySettings.partial().parse(req.body);
     const current = await getPrivacySettings(deps.db);
     const next = { ...current, ...patch };
+    // Days is the one source of truth once written (the dashboard edits days only; months stays for old apps).
+    if (patch.retentionDays != null) next.retentionMonths = null;
     await savePrivacySettings(deps.db, next);
     await audit(req, "SETTINGS_CHANGE", undefined, { privacy: patch });
     return next;
@@ -483,8 +509,9 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
   /** Newest first, keyset-paged. Admin only. */
   app.get("/api/audit", admins, async (req) => {
     const q = AuditQuery.parse(req.query);
+    const v2 = Number(q.v ?? "1") >= 2;
     const rows = await deps.db.auditLog.findMany({
-      where: { action: q.action, userId: q.userId },
+      where: { action: q.action ?? (v2 ? undefined : { notIn: [...V2_AUDIT_ACTIONS] }), userId: q.userId },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       take: q.limit + 1,
       ...(q.cursor ? { cursor: { id: q.cursor }, skip: 1 } : {}),

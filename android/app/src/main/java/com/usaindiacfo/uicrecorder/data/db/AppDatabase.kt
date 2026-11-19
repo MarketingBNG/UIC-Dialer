@@ -7,13 +7,14 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [RecordingEntity::class, CachedCallEntity::class, ClientHashEntity::class, PendingActivityEntity::class, PendingMissedEntity::class], version = 4, exportSchema = true)
+@Database(entities = [RecordingEntity::class, CachedCallEntity::class, ClientHashEntity::class, PendingActivityEntity::class, PendingMissedEntity::class, DncHashEntity::class], version = 5, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun recordings(): RecordingDao
     abstract fun cachedCalls(): CachedCallDao
     abstract fun clientHashes(): ClientHashDao
     abstract fun pendingActivities(): PendingActivityDao
     abstract fun pendingMissed(): PendingMissedDao
+    abstract fun dncHashes(): DncHashDao
 
     /**
      * Session ended by the server (revoked device, expired refresh): drop cached and sync state but keep queued
@@ -22,7 +23,7 @@ abstract class AppDatabase : RoomDatabase() {
      */
     fun clearExceptQueuedActivities() = runInTransaction {
         val db = openHelper.writableDatabase
-        listOf("recordings", "cached_calls", "client_hashes", "pending_missed").forEach { db.execSQL("DELETE FROM `$it`") }
+        listOf("recordings", "cached_calls", "client_hashes", "pending_missed", "dnc_hashes").forEach { db.execSQL("DELETE FROM `$it`") }
     }
 
     companion object {
@@ -55,9 +56,19 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v5 (stage 2/3): outcome/list/message fields on queued activities, and the hashed do-not-call list. */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                listOf("outcomeId", "callListItemId", "channel", "templateId").forEach {
+                    db.execSQL("ALTER TABLE `pending_activities` ADD COLUMN `$it` TEXT")
+                }
+                db.execSQL("CREATE TABLE IF NOT EXISTS `dnc_hashes` (`hash` TEXT NOT NULL, PRIMARY KEY(`hash`))")
+            }
+        }
+
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "uic.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
     }

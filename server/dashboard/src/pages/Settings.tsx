@@ -1,14 +1,64 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { NavLink, Navigate, Route, Routes } from "react-router";
 import { api, type DeviceConfig, type Settings } from "../api";
-import { ClientListPanel, PrivacyPanel } from "../components/Privacy";
+import { ClientListPanel } from "../components/Privacy";
 import { ErrorBox, PageHeader, Spinner, Toggle } from "../ui";
+import { DncTab } from "./settings/Dnc";
+import { LeadSourcesTab } from "./settings/LeadSources";
+import { OutcomesTab } from "./settings/Outcomes";
+import { RetentionTab } from "./settings/Retention";
+import { ScriptsTab } from "./settings/Scripts";
+import { TargetsTab } from "./settings/Targets";
+import { TemplatesTab } from "./settings/Templates";
 
+const TABS = [
+  { to: "/settings", label: "General", end: true },
+  { to: "/settings/outcomes", label: "Outcomes" },
+  { to: "/settings/scripts", label: "Scripts" },
+  { to: "/settings/templates", label: "Templates" },
+  { to: "/settings/lead-sources", label: "Lead sources" },
+  { to: "/settings/dnc", label: "Do-not-call" },
+  { to: "/settings/retention", label: "Retention" },
+  { to: "/settings/targets", label: "Targets" },
+];
+
+/** Admin settings with sub-tabs (each tab is its own URL, so /settings/dnc deep-links). */
 export function SettingsPage() {
+  const cls = ({ isActive }: { isActive: boolean }) =>
+    `whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium ${
+      isActive ? "bg-brand-600 text-white" : "border border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+    }`;
+  return (
+    <>
+      <PageHeader title="Settings" />
+      <nav aria-label="Settings" className="mb-4 flex gap-2 overflow-x-auto pb-1">
+        {TABS.map((t) => (
+          <NavLink key={t.to} to={t.to} end={t.end} className={cls}>
+            {t.label}
+          </NavLink>
+        ))}
+      </nav>
+      <Routes>
+        <Route index element={<GeneralTab />} />
+        <Route path="outcomes" element={<OutcomesTab />} />
+        <Route path="scripts" element={<ScriptsTab />} />
+        <Route path="templates" element={<TemplatesTab />} />
+        <Route path="lead-sources" element={<LeadSourcesTab />} />
+        <Route path="dnc" element={<DncTab />} />
+        <Route path="retention" element={<RetentionTab />} />
+        <Route path="targets" element={<TargetsTab />} />
+        <Route path="*" element={<Navigate to="/settings" replace />} />
+      </Routes>
+    </>
+  );
+}
+
+function GeneralTab() {
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => api<Settings>("/api/settings") });
   return (
     <>
-      <PageHeader title="Server settings" subtitle="Applied to every phone. Excluded numbers are set per user on the Users page." />
+      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">Applied to every phone. Excluded numbers are set per user on the Users page.</p>
       {settings.isPending ? (
         <Spinner label="Loading settings" />
       ) : settings.isError ? (
@@ -17,7 +67,6 @@ export function SettingsPage() {
         <>
           <DeviceConfigForm initial={settings.data.deviceConfig} />
           <ClientListPanel />
-          <PrivacyPanel />
           <section className="card mt-4 p-4">
             <h2 className="font-semibold">Published app</h2>
             {settings.data.latestApp ? (

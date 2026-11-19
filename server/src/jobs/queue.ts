@@ -7,11 +7,11 @@ export const STALE_LOCK_MINUTES = 10;
 /** lastError of a translate job replaced by a newer transcript (not a real failure). */
 export const SUPERSEDED = "superseded by re-transcription";
 
-export const JOB_KINDS = ["transcribe", "translate", "compress", "summarize"] as const;
+export const JOB_KINDS = ["transcribe", "translate", "compress", "summarize", "score"] as const;
 /** Kinds that run on an already TRANSCRIBED call and never change its status. */
-export const SIDE_KINDS = ["translate", "compress", "summarize"] as const;
+export const SIDE_KINDS = ["translate", "compress", "summarize", "score"] as const;
 /** Kinds that call Claude: their cost counts toward the monthly cap (src/translation/cost.ts). */
-export const CLAUDE_KINDS = ["translate", "summarize"] as const;
+export const CLAUDE_KINDS = ["translate", "summarize", "score"] as const;
 /** Stored audio above this bitrate is worth re-encoding (phones upload ~24 kbps AAC). */
 export const COMPRESS_MIN_BPS = 40_000;
 /** Calls with no recorded duration are compressed when bigger than this (~28 min at the phones' 24 kbps). */
@@ -376,7 +376,7 @@ export interface SummaryResult {
  * Stores the summary for a summarize job this worker holds. Returns false if the lock was lost.
  * The Claude cost is recorded on the job either way (it counts toward the monthly cap).
  */
-export async function completeSummary(db: Db, jobId: string, workerId: string, result: SummaryResult) {
+export async function completeSummary(db: Db, jobId: string, workerId: string, result: SummaryResult, opts: { score?: boolean } = {}) {
   const cost = await recordTranslationCost(db, jobId, result.model, result.usage);
   return db.$transaction(async (tx) => {
     const job = await tx.job.findFirst({ where: { id: jobId, status: "RUNNING", lockedBy: workerId, kind: "summarize" } });
@@ -398,6 +398,15 @@ export async function completeSummary(db: Db, jobId: string, workerId: string, r
     });
     if (count !== 1) return false;
     await tx.job.update({ where: { id: job.id }, data: { status: "DONE", lockedAt: null, lastError: null, finishedAt: new Date() } });
+    // AI scoring (SCORE_ENABLED) reads the summarized call; queued with the summary's priority.
+    if (opts.score) {
+      // Any open score job (also one running or waiting for budget) covers it: never two paid score calls at once.
+      const open = await tx.job.findFirst({
+        where: { callId: job.callId, kind: "score", status: { in: ["QUEUED", "RUNNING", "WAITING_BUDGET"] } },
+        select: { id: true },
+      });
+      if (!open) await tx.job.create({ data: { callId: job.callId, kind: "score", priority: job.priority } });
+    }
     return true;
   });
 }
@@ -416,5 +425,63 @@ export async function queueSummaryBackfill(db: Db): Promise<number> {
         SELECT 1 FROM "jobs" j
         WHERE j."call_id" = t."call_id" AND j."status" IN ('QUEUED', 'RUNNING')
           AND (j."kind" = 'summarize' OR (j."kind" = 'translate' AND t."text_en" IS NULL))
+      )`;
+}
+
+// ---- AI call scoring (stage 3) ------------------------------------------------
+
+export interface ScoreResult {
+  model: string;
+  overall: number;
+  scriptAdherence: number | null;
+  sentiment: (typeof SENTIMENTS)[number];
+  objections: { objection: string; handled: boolean }[];
+  nextStep: string | null;
+  strengths: string[];
+  improvements: string[];
+  scriptId: string | null;
+  usage?: TranslationUsage | undefined;
+}
+
+/**
+ * Stores the score for a score job this worker holds (upsert: a re-score replaces it). Returns false if the lock was
+ * lost. The Claude cost is recorded on the job either way (it counts toward the monthly cap).
+ */
+export async function completeScore(db: Db, jobId: string, workerId: string, result: ScoreResult) {
+  const cost = await recordTranslationCost(db, jobId, result.model, result.usage);
+  return db.$transaction(async (tx) => {
+    const job = await tx.job.findFirst({ where: { id: jobId, status: "RUNNING", lockedBy: workerId, kind: "score" } });
+    if (!job) return false;
+    const data = {
+      overall: result.overall,
+      scriptAdherence: result.scriptAdherence,
+      sentiment: result.sentiment,
+      objections: result.objections,
+      nextStep: result.nextStep,
+      strengths: result.strengths,
+      improvements: result.improvements,
+      scriptId: result.scriptId,
+      model: result.model,
+      inputTokens: result.usage?.inputTokens ?? null,
+      outputTokens: result.usage?.outputTokens ?? null,
+      costUsd: cost,
+    };
+    await tx.callScore.upsert({ where: { callId: job.callId }, create: { callId: job.callId, ...data }, update: data });
+    await tx.job.update({ where: { id: job.id }, data: { status: "DONE", lockedAt: null, lastError: null, finishedAt: new Date() } });
+    return true;
+  });
+}
+
+/** Queues a score job (priority 0) for every summarized call without a score and without an open score job. */
+export async function queueScoreBackfill(db: Db): Promise<number> {
+  return db.$executeRaw`
+    INSERT INTO "jobs" ("id", "call_id", "kind", "priority", "status", "attempts", "run_after", "created_at", "updated_at")
+    SELECT gen_random_uuid(), t."call_id", 'score', 0, 'QUEUED', 0, now(), now(), now()
+    FROM "transcripts" t
+    WHERE t."summary" IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM "call_scores" s WHERE s."call_id" = t."call_id")
+      AND NOT EXISTS (
+        SELECT 1 FROM "jobs" j
+        WHERE j."call_id" = t."call_id" AND j."kind" = 'score' AND j."status" IN ('QUEUED', 'RUNNING', 'WAITING_BUDGET')
       )`;
 }

@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router";
-import { api, isManager, type Activity, type ContactDetail, type ContactPatch, type ContactStatus, type TimelineItem, type User } from "../api";
+import { api, isManager, type Activity, type Contact, type ContactDetail, type ContactPatch, type ContactStatus, type DncDto, type DncPage, type TimelineItem, type User } from "../api";
 import { useMe } from "../App";
 import { CONTACT_STATUS_LABEL, OUTCOME_LABEL, formatDuration, formatWhen, fromLocalInput, isOverdue, personName, toLocalInput } from "../format";
 import { CallButton } from "../dialer";
-import { Badge, ContactStatusBadge, DirectionTag, ErrorBox, PageHeader, Spinner, StatusBadge, ViaTag } from "../ui";
+import { MessageCard } from "../components/MessageCard";
+import { OutcomeChip } from "../components/Outcomes";
+import { Badge, ContactStatusBadge, DirectionTag, ErrorBox, Modal, PageHeader, Spinner, StatusBadge, ViaTag } from "../ui";
 
 export function ContactDetailPage() {
   const { id = "" } = useParams();
@@ -18,7 +20,7 @@ export function ContactDetailPage() {
   return (
     <>
       <Link to="/activity" className="mb-3 inline-block text-sm text-brand-700 hover:underline dark:text-brand-100">
-        ← Activity Tracker
+        ← Contacts
       </Link>
       <PageHeader
         title={contact.name || contact.phoneE164}
@@ -26,14 +28,28 @@ export function ContactDetailPage() {
           <span className="flex flex-wrap items-center gap-2">
             {contact.name && <span>{contact.phoneE164}</span>}
             {contact.company && <span>· {contact.company}</span>}
+            {contact.city && <span>· {contact.city}</span>}
             <ContactStatusBadge status={contact.status} />
+            {contact.dnc && <Badge tone="red">Do not call</Badge>}
+            {contact.source && <Badge>{contact.source === "csv" ? "CSV import" : contact.source === "manual" ? "Manual lead" : contact.source}</Badge>}
           </span>
         }
-        actions={<CallButton phone={contact.phoneE164} label={contact.name || contact.phoneE164} className="btn-primary" />}
+        actions={
+          <>
+            <CallButton phone={contact.phoneE164} label={contact.name || contact.phoneE164} className="btn-primary" dncReason={contact.dnc?.reason} dnc={!!contact.dnc} />
+            <DncAction contact={contact} />
+          </>
+        }
       />
+      {contact.dnc && (
+        <p role="alert" className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
+          <strong>Do not call.</strong> This number is on the do-not-call list{contact.dnc.reason ? `: ${contact.dnc.reason}` : ""} (since {formatWhen(contact.dnc.createdAt)}).
+        </p>
+      )}
       <div className="grid gap-4 lg:grid-cols-[22rem_1fr]">
         <div className="space-y-4">
           <EditCard key={JSON.stringify(contact)} detail={detail.data} />
+          <MessageCard contact={contact} />
           <NoteCard contactId={contact.id} />
         </div>
         <Timeline items={timeline} />
@@ -49,6 +65,7 @@ function EditCard({ detail }: { detail: ContactDetail }) {
   const c = detail.contact;
   const [name, setName] = useState(c.name ?? "");
   const [company, setCompany] = useState(c.company ?? "");
+  const [city, setCity] = useState(c.city ?? "");
   const [status, setStatus] = useState<ContactStatus>(c.status);
   const [followUp, setFollowUp] = useState(toLocalInput(c.nextFollowUpAt));
   const [ownerId, setOwnerId] = useState(c.owner?.id ?? "");
@@ -69,6 +86,7 @@ function EditCard({ detail }: { detail: ContactDetail }) {
     const body: ContactPatch = {};
     if (name.trim() !== (c.name ?? "")) body.name = name.trim() || null;
     if (company.trim() !== (c.company ?? "")) body.company = company.trim() || null;
+    if (city.trim() !== (c.city ?? "")) body.city = city.trim() || null;
     if (status !== c.status) body.status = status;
     const fu = fromLocalInput(followUp);
     if (followUp !== toLocalInput(c.nextFollowUpAt)) body.nextFollowUpAt = fu;
@@ -92,6 +110,12 @@ function EditCard({ detail }: { detail: ContactDetail }) {
           Company
         </label>
         <input id="ct-company" className="input" maxLength={200} value={company} onChange={(e) => setCompany(e.target.value)} />
+      </div>
+      <div>
+        <label className="label" htmlFor="ct-city">
+          City
+        </label>
+        <input id="ct-city" className="input" maxLength={200} value={city} onChange={(e) => setCity(e.target.value)} />
       </div>
       <div>
         <label className="label" htmlFor="ct-status">
@@ -204,6 +228,90 @@ function NoteCard({ contactId }: { contactId: string }) {
 
 const TYPE_LABEL = { CALL: "Call logged", WHATSAPP: "WhatsApp chat opened", NOTE: "Note" } as const;
 
+/** Activity title; WHATSAPP activities carry the channel (SMS is logged as WHATSAPP with channel "SMS"). */
+function typeLabel(item: Activity) {
+  if (item.type === "WHATSAPP") {
+    if (item.channel === "SMS") return item.templateId || item.note ? "SMS sent" : "SMS opened";
+    if (item.channel === "WHATSAPP" && item.templateId) return "WhatsApp message sent";
+  }
+  return TYPE_LABEL[item.type];
+}
+
+/** "Mark do-not-call" for anyone; "Remove from DNC" for managers (the delete is a managers' endpoint). */
+function DncAction({ contact }: { contact: Contact }) {
+  const me = useMe();
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ["contact", contact.id] });
+    void qc.invalidateQueries({ queryKey: ["contacts"] });
+    void qc.invalidateQueries({ queryKey: ["dnc"] });
+  };
+  const mark = useMutation({
+    mutationFn: () => api<DncDto>("/api/dnc", { method: "POST", body: { phone: contact.phoneE164, reason: reason.trim() || undefined } }),
+    onSuccess: () => {
+      setOpen(false);
+      setReason("");
+      refresh();
+    },
+  });
+  const unmark = useMutation({
+    mutationFn: async () => {
+      const digits = contact.phoneE164.replace(/\D/g, "").slice(-10);
+      const page = await api<DncPage>(`/api/dnc?q=${encodeURIComponent(digits)}&limit=50`);
+      const row = page.items.find((d) => (d.phoneE164 ?? d.raw).replace(/\D/g, "").endsWith(digits));
+      if (!row) throw new Error("Not found on the do-not-call list");
+      await api<void>(`/api/dnc/${row.id}`, { method: "DELETE" });
+    },
+    onSuccess: refresh,
+  });
+  if (contact.dnc) {
+    if (!isManager(me.role)) return null;
+    return (
+      <>
+        <button type="button" className="btn-outline" disabled={unmark.isPending} onClick={() => unmark.mutate()}>
+          {unmark.isPending ? "Removing…" : "Remove from DNC"}
+        </button>
+        {unmark.error && <span className="self-center text-sm text-red-600 dark:text-red-400">{unmark.error.message}</span>}
+      </>
+    );
+  }
+  return (
+    <>
+      <button type="button" className="btn-ghost" onClick={() => setOpen(true)}>
+        Mark do-not-call
+      </button>
+      <Modal
+        open={open}
+        title="Mark do-not-call?"
+        onClose={() => !mark.isPending && setOpen(false)}
+        footer={
+          <>
+            <button type="button" className="btn-ghost" disabled={mark.isPending} onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+            <button type="button" className="btn-danger" disabled={mark.isPending} onClick={() => mark.mutate()}>
+              {mark.isPending ? "Saving…" : "Mark do-not-call"}
+            </button>
+          </>
+        }
+      >
+        <p>{contact.phoneE164} is taken off call lists and gets a warning before anyone dials it.</p>
+        <label className="label mt-3" htmlFor="dnc-why">
+          Reason (optional)
+        </label>
+        <input id="dnc-why" className="input" maxLength={200} placeholder="Asked not to be called" value={reason} onChange={(e) => setReason(e.target.value)} />
+        {mark.error && (
+          <p role="alert" className="mt-2 text-red-600 dark:text-red-400">
+            {mark.error.message}
+          </p>
+        )}
+      </Modal>
+    </>
+  );
+}
+
 function Timeline({ items }: { items: TimelineItem[] }) {
   return (
     <section aria-labelledby="tl-h" className="card p-4">
@@ -260,8 +368,10 @@ function ActivityEntry({ item }: { item: Extract<TimelineItem, { kind: "activity
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="font-medium">{TYPE_LABEL[item.type]}</span>
-        {item.outcome && <Badge tone={item.outcome === "INTERESTED" ? "green" : item.outcome === "NOT_INTERESTED" ? "red" : item.outcome === "NO_ANSWER" ? "amber" : "blue"}>{OUTCOME_LABEL[item.outcome]}</Badge>}
+        <span className="font-medium">{typeLabel(item)}</span>
+        {item.type === "WHATSAPP" && item.channel && <Badge tone={item.channel === "SMS" ? "blue" : "green"}>{item.channel === "SMS" ? "SMS" : "WhatsApp"}</Badge>}
+        {item.outcome && item.outcomeLabel && <OutcomeChip label={item.outcomeLabel} color={item.outcomeColor} />}
+        {item.outcome && !item.outcomeLabel && <Badge tone={item.outcome === "INTERESTED" ? "green" : item.outcome === "NOT_INTERESTED" ? "red" : item.outcome === "NO_ANSWER" ? "amber" : "blue"}>{OUTCOME_LABEL[item.outcome]}</Badge>}
         {item.type === "CALL" && item.durationS != null && <span className="text-sm tabular-nums">{formatDuration(item.durationS)}</span>}
         {item.type === "CALL" && <ViaTag via={item.via} />}
         {item.call && (

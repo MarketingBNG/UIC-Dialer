@@ -11,8 +11,10 @@ import { CallsPage } from "./pages/Calls";
 import { ContactDetailPage } from "./pages/ContactDetail";
 import { ContactsPage } from "./pages/Contacts";
 import { HealthPage } from "./pages/Health";
-import { RepsPage } from "./pages/Reps";
+import { ListDetailPage, ListSessionPage, ListsPage } from "./pages/Lists";
 import { SettingsPage } from "./pages/Settings";
+import { DncTab } from "./pages/settings/Dnc";
+import { TeamPage } from "./pages/Team";
 import { SignInPage } from "./pages/SignIn";
 import { TodayPage } from "./pages/Today";
 import { UsersPage } from "./pages/Users";
@@ -62,15 +64,18 @@ function navItems(me: Me) {
     { to: "/today", label: "Today" },
     { to: "/dialer", label: "Dialer" },
     { to: "/activity", label: "Contacts", end: true },
+    { to: "/lists", label: "Call lists" },
     { to: "/calls", label: "Calls & recordings" },
   ];
   if (isManager(me.role)) {
     items.push(
-      { to: "/activity/reps", label: "Reps & stats" },
+      { to: "/team", label: "Team" },
       { to: "/health", label: "Sync health" },
       { to: "/users", label: "Users" },
     );
   }
+  // Managers reach the do-not-call list directly; admins find it under Settings.
+  if (me.role === "MANAGER") items.push({ to: "/settings/dnc", label: "Do-not-call" });
   if (me.role === "ADMIN") items.push({ to: "/settings", label: "Settings" }, { to: "/audit", label: "Audit log" });
   return items;
 }
@@ -211,10 +216,15 @@ function Shell({ me }: { me: Me }) {
           <Route path="/calls/:id" element={<CallDetailPage />} />
           <Route path="/activity" element={<ContactsPage />} />
           <Route path="/activity/contacts/:id" element={<ContactDetailPage />} />
-          {isManager(me.role) && <Route path="/activity/reps" element={<RepsPage />} />}
+          <Route path="/lists" element={<ListsPage />} />
+          <Route path="/lists/:id" element={<ListDetailPage />} />
+          <Route path="/lists/:id/work" element={<ListSessionPage />} />
+          {isManager(me.role) && <Route path="/team" element={<TeamPage />} />}
+          {isManager(me.role) && <Route path="/activity/reps" element={<Navigate to="/team" replace />} />}
           {isManager(me.role) && <Route path="/health" element={<HealthPage />} />}
           {isManager(me.role) && <Route path="/users" element={<UsersPage />} />}
-          {me.role === "ADMIN" && <Route path="/settings" element={<SettingsPage />} />}
+          {me.role === "ADMIN" && <Route path="/settings/*" element={<SettingsPage />} />}
+          {me.role === "MANAGER" && <Route path="/settings/dnc" element={<DncTab standalone />} />}
           {me.role === "ADMIN" && <Route path="/audit" element={<AuditPage />} />}
           <Route path="*" element={<Navigate to="/today" replace />} />
         </Routes>

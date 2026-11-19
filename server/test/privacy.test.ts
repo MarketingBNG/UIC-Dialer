@@ -99,9 +99,9 @@ describe("privacy settings", () => {
   it("default to keep forever and no masking, and changes are audited", async () => {
     await savePrivacySettings(t.db, DEFAULT_PRIVACY_SETTINGS);
     const h = await asAdmin();
-    expect((await t.app.inject({ method: "GET", url: "/api/settings/privacy", headers: h })).json()).toEqual({ retentionMonths: null, maskPii: false });
+    expect((await t.app.inject({ method: "GET", url: "/api/settings/privacy", headers: h })).json()).toEqual({ retentionMonths: null, maskPii: false, retentionDays: null, retentionDeleteTranscript: false });
     const put = await t.app.inject({ method: "PUT", url: "/api/settings/privacy", headers: h, payload: { maskPii: true } });
-    expect(put.json()).toEqual({ retentionMonths: null, maskPii: true });
+    expect(put.json()).toEqual({ retentionMonths: null, maskPii: true, retentionDays: null, retentionDeleteTranscript: false });
     const before = await t.db.auditLog.count({ where: { action: "SETTINGS_CHANGE" } });
     await t.app.inject({ method: "PUT", url: "/api/settings/costs", headers: h, payload: {} });
     expect(await t.db.auditLog.count({ where: { action: "SETTINGS_CHANGE" } })).toBe(before + 1);
@@ -115,7 +115,7 @@ describe("privacy settings", () => {
     await t.db.job.updateMany({ where: { status: { in: ["QUEUED", "RUNNING", "WAITING_BUDGET"] } }, data: { status: "DONE" } });
     const call = await t.db.call.create({ data: { userId, startedAt: new Date(), originalSha256: randomUUID(), status: "UPLOADED" } });
     await t.db.job.create({ data: { callId: call.id } });
-    await savePrivacySettings(t.db, { retentionMonths: null, maskPii: true });
+    await savePrivacySettings(t.db, { ...DEFAULT_PRIVACY_SETTINGS, maskPii: true });
     const res = await t.app.inject({ method: "POST", url: "/internal/jobs/claim", headers: t.workerHeaders, payload: { workerId: "pii" } });
     expect(res.json().jobs[0]).toMatchObject({ callId: call.id, maskPii: true });
     await savePrivacySettings(t.db, DEFAULT_PRIVACY_SETTINGS);
@@ -161,7 +161,7 @@ describe("retention", () => {
     const busy = await storedCall(new Date("2026-01-01T00:00:00Z"));
     const notDone = await storedCall(new Date("2026-01-01T00:00:00Z"), "UPLOADED");
     await t.db.job.create({ data: { callId: busy.call.id, kind: "compress", status: "RUNNING" } });
-    await savePrivacySettings(t.db, { retentionMonths: 6, maskPii: false });
+    await savePrivacySettings(t.db, { ...DEFAULT_PRIVACY_SETTINGS, retentionMonths: 6 });
 
     const r = await runRetention(t.db, t.storage, now);
     expect(r!.deleted).toBeGreaterThanOrEqual(1);

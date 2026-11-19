@@ -67,6 +67,13 @@ const schema = z.object({
     .default("false")
     .transform((v) => v === "true" || v === "1"),
 
+  // Queue an AI call score job (Claude: script adherence, objections, next step, coaching) after every summary.
+  // Off by default; counts toward the Claude cap. The worker also needs SCORE_ENABLED and ANTHROPIC_API_KEY.
+  SCORE_ENABLED: z
+    .enum(["true", "false", "1", "0", ""])
+    .default("false")
+    .transform((v) => v === "true" || v === "1"),
+
   // Queue a compress job after transcription when the stored audio is above 40 kbps (worker needs ffmpeg).
   // Off by default: try the admin "Compress old recordings" button on a few calls first.
   COMPRESS_AFTER_TRANSCRIBE: z

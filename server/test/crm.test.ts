@@ -2,6 +2,8 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { CRM_ALERT_KEY, CRM_MAX_ATTEMPTS, CrmGlobalError, CrmLoop, CrmSync, NOTE_MAX_CHARS, crmStats, noteContent, zohoDateTime, zohoDuration } from "../src/crm/sync.js";
 import { REFRESH_FAIL_CACHE_MS, ZohoClient } from "../src/crm/zoho.js";
+import { addActivity } from "../src/activity/service.js";
+import type { Deps } from "../src/context.js";
 import { setupTestApp, sha256, uniqueEmail } from "./helpers.js";
 
 /** Fake Zoho: routes by "METHOD path" (path without /crm/v8/ and query), records every request. */
@@ -199,6 +201,59 @@ describe("CrmSync", () => {
     const rec = f.writes("/Calls")[0]!.body.data[0];
     expect(rec).toMatchObject({ What_Id: { id: "lead9" }, $se_module: "Leads" });
     expect(rec.Owner).toBeUndefined();
+  });
+
+  it("puts the outcome label in Subject and Description; a late outcome re-queues a SYNCED call", async () => {
+    f.contacts = [{ id: "c-out" }];
+    const phone = `+9198${String(Date.now()).slice(-8)}`;
+    const call = await newCall({ phone, summary: "Asked for a demo" });
+    expect((await sync.syncCall(call.id)).status).toBe("SYNCED");
+    expect(f.writes("/Calls")[0]!.body.data[0].Subject).toBe("Outbound call by Rep One");
+    expect((await t.db.call.findUniqueOrThrow({ where: { id: call.id } })).crmQueuedAt).toBeNull();
+
+    // The rep saves a custom outcome after the call was already in Zoho.
+    const def = await t.db.outcomeDef.create({ data: { label: "Demo booked", color: "#123456", baseOutcome: "INTERESTED", rule: "NONE" } });
+    const contact = await t.db.contact.create({ data: { phoneE164: phone, ownerId: userId } });
+    const deps = { db: t.db, config: t.config } as unknown as Deps;
+    const a = await addActivity(deps, userId, contact.id, { type: "CALL", outcomeId: def.id, note: "Thursday 3 pm", occurredAt: call.startedAt });
+    expect(a.callId).toBe(call.id);
+    const queued = await t.db.call.findUniqueOrThrow({ where: { id: call.id } });
+    expect(queued.crmQueuedAt).not.toBeNull();
+    expect(queued.crmAttempts).toBe(0);
+
+    expect((await sync.syncCall(call.id)).status).toBe("SYNCED");
+    const put = f.calls.filter((c) => c.method === "PUT" && c.url.includes("/Calls/")).at(-1)!;
+    const rec = put.body.data[0];
+    expect(rec.Subject).toBe("Outbound call by Rep One – Demo booked");
+    expect(rec.Description.startsWith("Outcome: Demo booked\nNote: Thursday 3 pm\n\nAsked for a demo")).toBe(true);
+    expect(rec.Call_Result).toBeUndefined();
+  });
+
+  it("an outcome logged while the first sync is running re-queues the call", async () => {
+    f.contacts = [{ id: "c-race" }];
+    const phone = `+9197${String(Date.now()).slice(-8)}`;
+    const call = await newCall({ phone, summary: "Asked for pricing" });
+    const contact = await t.db.contact.create({ data: { phoneE164: phone, ownerId: userId } });
+    const deps = { db: t.db, config: t.config } as unknown as Deps;
+    // The rep saves the outcome while the sync is talking to Zoho (after it read the call's activities).
+    const inner = f.fetch;
+    let logged = false;
+    f.fetch = (async (input: string | URL, init?: RequestInit) => {
+      if (!logged && init?.method === "POST" && String(input).includes("/Calls")) {
+        logged = true;
+        await addActivity(deps, userId, contact.id, { type: "CALL", outcome: "INTERESTED", occurredAt: call.startedAt });
+      }
+      return inner(input, init);
+    }) as typeof fetch;
+    const racing = new CrmSync(t.db, client(f), { publicUrl: "https://rec.example.com", summarizeEnabled: false, createUnknownLeads: false });
+    expect((await racing.syncCall(call.id)).status).toBe("SYNCED");
+    expect(logged).toBe(true);
+    // Still queued, so the next sync sends the outcome.
+    expect((await t.db.call.findUniqueOrThrow({ where: { id: call.id } })).crmQueuedAt).not.toBeNull();
+    expect((await racing.syncCall(call.id)).status).toBe("SYNCED");
+    const put = f.calls.filter((c) => c.method === "PUT" && c.url.includes("/Calls/")).at(-1)!;
+    expect(put.body.data[0].Subject).toBe("Outbound call by Rep One – Interested");
+    expect((await t.db.call.findUniqueOrThrow({ where: { id: call.id } })).crmQueuedAt).toBeNull();
   });
 
   it("updates instead of duplicating on resync", async () => {

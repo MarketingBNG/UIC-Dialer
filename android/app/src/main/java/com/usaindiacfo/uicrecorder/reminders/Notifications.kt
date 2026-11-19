@@ -110,6 +110,22 @@ object Notifications {
         notify(context, id, n)
     }
 
+    /** A lead the server assigned to this rep (NEW_LEAD task); treated like a missed call. */
+    fun showNewLead(context: Context, item: com.usaindiacfo.uicrecorder.data.api.FollowUpItem) {
+        val id = item.key.hashCode()
+        val n = NotificationCompat.Builder(context, CH_MISSED)
+            .setSmallIcon(R.drawable.ic_stat_call)
+            .setContentTitle(ReminderPlan.newLeadTitle(item))
+            .apply { ReminderPlan.newLeadBody(item)?.let { setContentText(it) } ?: setContentText("Added to Today") }
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(true)
+            .setContentIntent(openApp(context, "today", null, item.key))
+            .addAction(0, "Call now", action(context, NotificationActionActivity.ACTION_CALL, item.phoneE164, id, item.key))
+            .addAction(0, "WhatsApp", action(context, NotificationActionActivity.ACTION_WHATSAPP, item.phoneE164, id, item.key))
+            .build()
+        notify(context, id, n)
+    }
+
     /** Many missed calls at once (e.g. phone was off): one notification instead of a flood. */
     fun showMissedSummary(context: Context, count: Int) {
         val n = NotificationCompat.Builder(context, CH_MISSED)

@@ -65,6 +65,22 @@ fun pickFollowUp(context: Context, initialMs: Long?, onPicked: (Long) -> Unit) {
     }.show()
 }
 
+/** Platform date picker only (follow-up date); the time is 11:00 that day in the phone's zone. */
+fun pickFollowUpDate(context: Context, initialMs: Long?, onPicked: (Long) -> Unit) {
+    val zone = ZoneId.systemDefault()
+    val start = initialMs?.let { ZonedDateTime.ofInstant(java.time.Instant.ofEpochMilli(it), zone) }
+        ?: LocalDate.now(zone).plusDays(1).atTime(11, 0).atZone(zone)
+    DatePickerDialog(context, { _, y, m, d ->
+        onPicked(LocalDate.of(y, m + 1, d).atTime(LocalTime.of(11, 0)).atZone(zone).toInstant().toEpochMilli())
+    }, start.year, start.monthValue - 1, start.dayOfMonth).apply {
+        datePicker.minDate = LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli()
+    }.show()
+}
+
+/** "8 Nov" in the phone's zone. */
+fun formatDate(context: Context, ms: Long): String =
+    DateUtils.formatDateTime(context, ms, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_ABBREV_MONTH)
+
 /**
  * What a rep sees when a list can't load. Network and server trouble get one plain sentence (not
  * "Failed to connect to …"); only a real error message from our server is shown as-is.

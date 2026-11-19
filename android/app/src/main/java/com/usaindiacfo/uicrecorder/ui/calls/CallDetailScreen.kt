@@ -145,6 +145,7 @@ fun CallDetailScreen(id: String, onBack: () -> Unit) {
                         )
                     }
                     call.transcript?.let { t -> item(key = "summary") { SummaryCard(t, t.summaryPending) } }
+                    if (call.score != null || call.scorePending) item(key = "score") { ScoreCard(call.score, call.scorePending) }
                     item(key = "th") {
                         Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("Transcript", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))

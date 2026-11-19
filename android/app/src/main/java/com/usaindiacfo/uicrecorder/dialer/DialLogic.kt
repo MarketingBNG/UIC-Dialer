@@ -52,7 +52,7 @@ object DialLogic {
      * wa.me wants the full international number as digits only. A bare 10-digit number (or 0 + 10 digits)
      * is Indian, so it gets 91; a "00" international prefix is dropped. Null if nothing usable.
      */
-    fun whatsAppUrl(raw: String): String? {
+    fun whatsAppUrl(raw: String, text: String? = null): String? {
         val trimmed = raw.trim()
         var digits = trimmed.filter { it.isDigit() }
         if (digits.isEmpty()) return null
@@ -65,7 +65,9 @@ object DialLogic {
             }
         }
         if (digits.length !in 8..15) return null
-        return "https://wa.me/$digits"
+        if (text.isNullOrEmpty()) return "https://wa.me/$digits"
+        // URLEncoder writes spaces as "+", which WhatsApp shows literally; wa.me wants %20.
+        return "https://wa.me/$digits?text=" + java.net.URLEncoder.encode(text, "UTF-8").replace("+", "%20")
     }
 
     /** What a typed or pasted number keeps: digits, plus a leading + if it had one. */

@@ -4,12 +4,12 @@ import { api, type ClientImportResult, type ClientNumber, type PrivacySettings }
 import { formatWhen } from "../format";
 import { ConfirmDialog, Empty, ErrorBox, Spinner, Toggle } from "../ui";
 
-/** Audio retention (off = keep forever) and PII masking (off). Admin only. */
+/** Recording retention (off = keep forever, by days) and PII masking. Admin only. */
 export function PrivacyPanel() {
   const settings = useQuery({ queryKey: ["privacy"], queryFn: () => api<PrivacySettings>("/api/settings/privacy") });
   return (
-    <section className="card mt-4 p-4 sm:p-6">
-      <h2 className="font-semibold">Privacy</h2>
+    <section className="card p-4 sm:p-6">
+      <h2 className="font-semibold">Recording retention and privacy</h2>
       {settings.isPending ? (
         <Spinner label="Loading privacy settings" />
       ) : settings.isError ? (
@@ -21,18 +21,37 @@ export function PrivacyPanel() {
   );
 }
 
+/**
+ * Days shown in the form: the days setting, else the legacy months setting converted with a ceiling (calendar months
+ * average 30.44 days), so switching to days never deletes audio the months setting would still have kept.
+ */
+const initialDays = (p: PrivacySettings) => p.retentionDays ?? (p.retentionMonths != null ? Math.ceil((p.retentionMonths * 365.25) / 12) : null);
+
 function PrivacyForm({ initial }: { initial: PrivacySettings }) {
   const qc = useQueryClient();
-  const [keepForever, setKeepForever] = useState(initial.retentionMonths === null);
-  const [months, setMonths] = useState(String(initial.retentionMonths ?? 24));
+  const startDays = initialDays(initial);
+  const [on, setOn] = useState(startDays !== null);
+  const [days, setDays] = useState(String(startDays ?? 365));
+  const [deleteTranscript, setDeleteTranscript] = useState(initial.retentionDeleteTranscript ?? false);
   const [maskPii, setMaskPii] = useState(initial.maskPii);
+  // Retention is only written when its controls were touched; a PII-only change sends just maskPii.
+  const [retentionTouched, setRetentionTouched] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [saved, setSaved] = useState(false);
-  const monthsOk = keepForever || (/^\d+$/.test(months) && Number(months) >= 1 && Number(months) <= 240);
-  const next: PrivacySettings = { retentionMonths: keepForever ? null : Number(months), maskPii };
-  const dirty = JSON.stringify(next) !== JSON.stringify(initial);
-  // Turning deletion on (or shortening it) deletes audio: ask first.
-  const deletesMore = next.retentionMonths !== null && (initial.retentionMonths === null || next.retentionMonths < initial.retentionMonths);
+  const daysOk = !on || (/^\d+$/.test(days) && Number(days) >= 1 && Number(days) <= 3650);
+  const nextDays = on ? Number(days) : null;
+  const nextDeleteTranscript = on && deleteTranscript;
+  const retentionChanged =
+    retentionTouched &&
+    (nextDays !== startDays || nextDeleteTranscript !== (initial.retentionDeleteTranscript ?? false) || (initial.retentionMonths != null && initial.retentionDays == null));
+  // The dashboard edits days only; writing days clears the legacy months value (one source of truth).
+  const next: Partial<PrivacySettings> = retentionChanged
+    ? { retentionDays: nextDays, retentionMonths: null, retentionDeleteTranscript: nextDeleteTranscript, maskPii }
+    : { maskPii };
+  const dirty = retentionChanged || maskPii !== initial.maskPii;
+  // Turning deletion on, shortening it, or adding transcript deletion deletes data: ask first.
+  const deletesMore =
+    retentionChanged && nextDays !== null && (startDays === null || nextDays < startDays || (nextDeleteTranscript && !initial.retentionDeleteTranscript));
 
   const save = useMutation({
     mutationFn: () => api<PrivacySettings>("/api/settings/privacy", { method: "PUT", body: next }),
@@ -42,35 +61,63 @@ function PrivacyForm({ initial }: { initial: PrivacySettings }) {
     },
   });
   const submit = () => (deletesMore ? setConfirm(true) : save.mutate());
+  const touch = () => setSaved(false);
+  const touchRetention = () => {
+    setSaved(false);
+    setRetentionTouched(true);
+  };
 
   return (
     <form
       className="mt-2 space-y-4"
       onSubmit={(e) => {
         e.preventDefault();
-        if (dirty && monthsOk) submit();
+        if (dirty && daysOk) submit();
       }}
     >
       <div className="divide-y divide-slate-100 dark:divide-slate-800">
         <Toggle
-          label="Keep recordings forever"
-          hint="Turn off to delete audio files of calls older than the months below, once a day. Transcripts are kept."
-          checked={keepForever}
+          label="Delete old recordings"
+          hint="Off by default: recordings are kept forever. When on, audio of calls older than the days below is deleted once a day."
+          checked={on}
           onChange={(v) => {
-            setSaved(false);
-            setKeepForever(v);
+            touchRetention();
+            setOn(v);
           }}
         />
-        {!keepForever && (
-          <div className="max-w-xs py-2">
-            <label className="label" htmlFor="p-months">
-              Delete audio older than (months)
+        {on && (
+          <div className="space-y-2 py-2">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <label htmlFor="p-days">Delete recordings after</label>
+              <input
+                id="p-days"
+                inputMode="numeric"
+                className="input w-24"
+                value={days}
+                aria-invalid={!daysOk}
+                onChange={(e) => {
+                  touchRetention();
+                  setDays(e.target.value);
+                }}
+              />
+              <span>days</span>
+            </div>
+            <p className={`hint ${daysOk ? "" : "text-red-600"}`}>1 to 3650. Deleted audio can't be recovered.</p>
+            {initial.retentionMonths != null && initial.retentionDays == null && (
+              <p className="hint">Currently set as {initial.retentionMonths} months by an older version; saving switches it to days.</p>
+            )}
+            <label className="flex cursor-pointer items-start gap-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5 size-4 accent-brand-600"
+                checked={deleteTranscript}
+                onChange={(e) => {
+                  touchRetention();
+                  setDeleteTranscript(e.target.checked);
+                }}
+              />
+              Also delete transcript text (summary and score are kept)
             </label>
-            <input id="p-months" inputMode="numeric" className="input" value={months} aria-invalid={!monthsOk} onChange={(e) => {
-              setSaved(false);
-              setMonths(e.target.value);
-            }} />
-            <p className={`hint ${monthsOk ? "" : "text-red-600"}`}>1 to 240. Deleted audio can't be recovered.</p>
           </div>
         )}
         <Toggle
@@ -78,13 +125,13 @@ function PrivacyForm({ initial }: { initial: PrivacySettings }) {
           hint="Replaces them with the last 4 digits before the transcript is stored. Existing transcripts are not changed. PAN and GST numbers are kept."
           checked={maskPii}
           onChange={(v) => {
-            setSaved(false);
+            touch();
             setMaskPii(v);
           }}
         />
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <button type="submit" className="btn-primary" disabled={!dirty || !monthsOk || save.isPending}>
+        <button type="submit" className="btn-primary" disabled={!dirty || !daysOk || save.isPending}>
           {save.isPending ? "Saving…" : "Save"}
         </button>
         <span aria-live="polite" className="text-sm">
@@ -95,7 +142,9 @@ function PrivacyForm({ initial }: { initial: PrivacySettings }) {
       <ConfirmDialog
         open={confirm}
         title="Delete old recordings?"
-        body={`Audio files of calls older than ${next.retentionMonths} months will be deleted permanently in the next daily run. Transcripts stay.`}
+        body={`Audio of calls older than ${nextDays} days will be deleted permanently in the next daily run.${
+          nextDeleteTranscript ? " Their transcript text is cleared too; summaries and scores stay." : " Transcripts stay."
+        }`}
         confirmLabel="Turn on deletion"
         busy={save.isPending}
         onClose={() => setConfirm(false)}

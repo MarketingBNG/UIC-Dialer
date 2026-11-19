@@ -92,6 +92,17 @@ export function noteContent(t: { summary: string | null; actionItems: unknown; t
 }
 
 
+const BASE_LABEL = { INTERESTED: "Interested", CALL_BACK: "Call back", NOT_INTERESTED: "Not interested", NO_ANSWER: "No answer" } as const;
+
+/** "Outcome: <label>" (+ "\nNote: <note>") for the Zoho Call; null when the call has no outcome. */
+export function outcomeText(
+  a: { outcome: keyof typeof BASE_LABEL | null; note: string | null; outcomeDef: { label: string } | null } | undefined,
+) {
+  if (!a?.outcome) return null;
+  const label = a.outcomeDef?.label ?? BASE_LABEL[a.outcome];
+  return { label, text: `Outcome: ${label}${a.note ? `\nNote: ${a.note}` : ""}` };
+}
+
 /** Thrown out of a tick when Zoho is unusable for every call (auth, scopes, outage). */
 export class CrmGlobalError extends Error {}
 
@@ -221,11 +232,25 @@ export class CrmSync {
   private async syncInner(callId: string): Promise<CrmStatus | "SKIPPED"> {
     const call = await this.db.call.findUnique({
       where: { id: callId },
-      include: { user: { select: { email: true, name: true } }, transcript: true },
+      include: {
+        user: { select: { email: true, name: true } },
+        transcript: true,
+        // The rep's outcome for this call (newest linked activity), sent as text: no Zoho picklist needed.
+        activities: {
+          orderBy: { occurredAt: "desc" },
+          take: 1,
+          select: { outcome: true, note: true, outcomeDef: { select: { label: true } } },
+        },
+      },
     });
     if (!call) return "SKIPPED";
     const now = this.now();
-    const done = { crmSyncError: null, crmAttempts: 0, crmQueuedAt: null, crmNextAttemptAt: null, crmSyncedAt: now };
+    // crm_queued_at is cleared only if nobody re-queued the call while this sync ran (an outcome logged meanwhile
+    // re-queues it, and this run read the activities before that outcome existed).
+    const queuedAt = call.crmQueuedAt;
+    const done = { crmSyncError: null, crmAttempts: 0, crmNextAttemptAt: null, crmSyncedAt: now };
+    const clearQueued = () =>
+      this.db.call.updateMany({ where: { id: call.id, crmQueuedAt: queuedAt }, data: { crmQueuedAt: null } });
 
     // Linked record: keep the one we already used, so re-syncs update the same Call / Note.
     let module = call.crmRecordModule as ZohoModule | null;
@@ -245,6 +270,7 @@ export class CrmSync {
         await this.db.call.update({ where: { id: call.id }, data: { crmRecordModule: module, crmRecordId: id } });
       } else {
         await this.db.call.update({ where: { id: call.id }, data: { ...done, crmStatus: "NO_MATCH" } });
+        await clearQueued();
         return "NO_MATCH";
       }
     }
@@ -255,13 +281,14 @@ export class CrmSync {
     const rep = call.user.name ?? call.user.email;
     const missed = call.direction === "MISSED";
     const t = call.transcript;
+    const outcome = outcomeText(call.activities[0]);
     const callRecord: Record<string, unknown> = {
-      Subject: `${CALL_TYPE[call.direction]} call by ${rep}`.slice(0, 255),
+      Subject: `${CALL_TYPE[call.direction]} call by ${rep}${outcome ? ` – ${outcome.label}` : ""}`.slice(0, 255),
       Call_Type: CALL_TYPE[call.direction],
       Call_Start_Time: zohoDateTime(call.startedAt),
       Call_Duration: zohoDuration(call.durationS, missed),
       // The UIC call link also identifies the Call by hand (see the crash-window note below).
-      Description: [t?.summary, `Recording and transcript: ${link}`].filter(Boolean).join("\n\n"),
+      Description: [outcome?.text, t?.summary, `Recording and transcript: ${link}`].filter(Boolean).join("\n\n"),
       ...(owner ? { Owner: { id: owner } } : {}),
       ...(module === "Contacts" ? { Who_Id: { id: record.id } } : { What_Id: { id: record.id }, $se_module: module }),
     };
@@ -281,6 +308,7 @@ export class CrmSync {
       crmNoteId = await this.upsert("Notes", crmNoteId, { ...note, Parent_Id: { module: { api_name: module }, id: record.id } });
     }
     await this.db.call.update({ where: { id: call.id }, data: { ...done, crmStatus: "SYNCED", crmNoteId } });
+    await clearQueued();
     return "SYNCED";
   }
 

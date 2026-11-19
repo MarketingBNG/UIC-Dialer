@@ -17,6 +17,13 @@ export const AUDIT_LABELS: Record<AuditAction, string> = {
   RETENTION_DELETE: "Retention deleted audio",
   EXPORT: "Exported calls (CSV)",
   CRM_SYNC: "Zoho CRM sync",
+  CALL_LIST_CHANGE: "Call list changed",
+  CONTACT_IMPORT: "Contacts imported",
+  DNC_CHANGE: "Do-not-call list changed",
+  LEAD_SOURCE_CHANGE: "Lead source changed",
+  OUTCOME_CHANGE: "Outcomes changed",
+  TEMPLATE_CHANGE: "Templates changed",
+  TARGET_CHANGE: "Targets changed",
 };
 
 /** One-line summary of the detail JSON (same wording as the Android Audit screen). */
@@ -27,8 +34,13 @@ export function auditSummary(e: Pick<AuditEntry, "action" | "detail">): string {
       return typeof d["q"] === "string" ? `"${d["q"]}"` : "";
     case "EXPORT":
       return `${d["rows"] ?? 0} calls`;
-    case "RETENTION_DELETE":
-      return `${d["deleted"] ?? 0} audio files older than ${d["retentionMonths"] ?? "?"} months`;
+    case "RETENTION_DELETE": {
+      const age = d["retentionDays"] != null ? `${String(d["retentionDays"])} days` : `${String(d["retentionMonths"] ?? "?")} months`;
+      const cleared = typeof d["transcriptsCleared"] === "number" && d["transcriptsCleared"] > 0 ? `, ${d["transcriptsCleared"]} transcripts cleared` : "";
+      return `${String(d["deleted"] ?? 0)} audio files older than ${age}${cleared}`;
+    }
+    case "CONTACT_IMPORT":
+      return `${String(d["created"] ?? 0)} created, ${String(d["updated"] ?? 0)} updated, ${String(d["skipped"] ?? 0)} skipped`;
     case "CLIENT_LIST_CHANGE":
       return Object.entries(d)
         .filter(([, v]) => typeof v === "number" && v > 0)
@@ -47,6 +59,8 @@ export function AuditPage() {
       const p = new URLSearchParams({ limit: "50" });
       if (action) p.set("action", action);
       if (pageParam) p.set("cursor", pageParam);
+      // v=2: include the stage 2/3 actions (old apps don't get them).
+      p.set("v", "2");
       return api<Page>(`/api/audit?${p}`);
     },
     initialPageParam: undefined as string | undefined,

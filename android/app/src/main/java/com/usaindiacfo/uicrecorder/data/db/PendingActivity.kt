@@ -34,6 +34,11 @@ data class PendingActivityEntity(
     /** Set when the server rejected the row for good (400/422); such rows are not sent again. */
     val lastError: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
+    /** Stage 2: custom outcome, call-list item, message channel (WHATSAPP/SMS) and template. */
+    val outcomeId: String? = null,
+    val callListItemId: String? = null,
+    val channel: String? = null,
+    val templateId: String? = null,
 )
 
 fun PendingActivityEntity.toRequest() = CreateActivityRequest(
@@ -41,6 +46,7 @@ fun PendingActivityEntity.toRequest() = CreateActivityRequest(
     followUpAt = followUpAt, durationS = durationS, occurredAt = occurredAt, name = name, company = company,
     // Only the outcome sheet logs CALL activities, and it only asks about calls started from the app.
     via = if (type == ActivityType.CALL) DialVia.APP else null,
+    outcomeId = outcomeId, callListItemId = callListItemId, channel = channel, templateId = templateId,
 )
 
 @Dao
@@ -65,6 +71,14 @@ interface PendingActivityDao {
 
     @Query("SELECT COUNT(*) FROM pending_activities WHERE lastError IS NULL")
     suspend fun pendingCount(): Int
+
+    /** True while [clientId] is still waiting to be sent (list sessions wait for it before asking for the next contact). */
+    @Query("SELECT EXISTS(SELECT 1 FROM pending_activities WHERE clientId = :clientId AND lastError IS NULL)")
+    fun observeQueued(clientId: String): Flow<Boolean>
+
+    /** True once the server rejected [clientId] for good; it will not be sent again. */
+    @Query("SELECT EXISTS(SELECT 1 FROM pending_activities WHERE clientId = :clientId AND lastError IS NOT NULL)")
+    suspend fun isFailed(clientId: String): Boolean
 
     @Query("DELETE FROM pending_activities")
     suspend fun deleteAll()

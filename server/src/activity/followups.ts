@@ -24,7 +24,7 @@ export const FollowUpPatch = z.object({
 
 export interface FollowUpItem {
   key: string;
-  kind: "FOLLOW_UP" | "MISSED_CALL";
+  kind: "FOLLOW_UP" | "MISSED_CALL" | "NEW_LEAD";
   contactId: string | null;
   taskId: string | null;
   phoneE164: string;
@@ -34,6 +34,8 @@ export interface FollowUpItem {
   dueAt: Date;
   overdue: boolean;
   lastNote: string | null;
+  /** The contact's source (lead source name, "csv", "manual"), for "New lead · Website". */
+  source: string | null;
 }
 
 /** Sort by due time, then key (stable across refreshes). */
@@ -47,7 +49,7 @@ export function countItems(items: FollowUpItem[]) {
   return { overdue, today: items.length - overdue };
 }
 
-const contactSelect = { id: true, phoneE164: true, name: true, company: true, status: true, nextFollowUpAt: true } as const;
+const contactSelect = { id: true, phoneE164: true, name: true, company: true, status: true, nextFollowUpAt: true, source: true } as const;
 type ContactLite = Prisma.ContactGetPayload<{ select: typeof contactSelect }>;
 const taskInclude = { contact: { select: contactSelect } } as const;
 type TaskRow = Prisma.FollowUpTaskGetPayload<{ include: typeof taskInclude }>;
@@ -77,13 +79,14 @@ function contactItem(c: ContactLite, start: Date, notes: Map<string, string>): F
     dueAt: c.nextFollowUpAt!,
     overdue: c.nextFollowUpAt! < start,
     lastNote: notes.get(c.id) ?? null,
+    source: c.source,
   };
 }
 
 function taskItem(t: TaskRow, notes: Map<string, string>): FollowUpItem {
   return {
     key: `task:${t.id}`,
-    kind: "MISSED_CALL",
+    kind: t.kind,
     contactId: t.contactId,
     taskId: t.id,
     phoneE164: t.phoneE164,
@@ -91,13 +94,17 @@ function taskItem(t: TaskRow, notes: Map<string, string>): FollowUpItem {
     company: t.contact?.company ?? null,
     status: t.contact?.status ?? null,
     dueAt: t.dueAt,
-    overdue: true, // a missed call is always waiting on the rep
+    overdue: true, // a missed call or a new lead is always waiting on the rep
     lastNote: (t.contactId && notes.get(t.contactId)) || null,
+    source: t.contact?.source ?? null,
   };
 }
 
-/** The rep's own follow-ups due by the end of today (IST), missed-call tasks, and the next 24 h of contact follow-ups. */
-export async function followUpsToday(deps: Deps, userId: string, now = new Date()) {
+/**
+ * The rep's own follow-ups due by the end of today (IST), missed-call / new-lead tasks, and the next 24 h of contact
+ * follow-ups. NEW_LEAD tasks only with `v2` (old apps' Kotlin enum would reject the unknown kind).
+ */
+export async function followUpsToday(deps: Deps, userId: string, now = new Date(), opts: { v2?: boolean } = {}) {
   const { start, end } = istDay(now);
   const horizon = new Date(Math.max(end.getTime(), now.getTime() + 24 * HOUR_MS));
   const [contacts, upcoming, tasks] = await Promise.all([
@@ -114,7 +121,7 @@ export async function followUpsToday(deps: Deps, userId: string, now = new Date(
       select: contactSelect,
     }),
     deps.db.followUpTask.findMany({
-      where: { userId, state: "OPEN", dueAt: { lt: end } },
+      where: { userId, state: "OPEN", dueAt: { lt: end }, ...(opts.v2 ? {} : { kind: "MISSED_CALL" as const }) },
       orderBy: [{ dueAt: "asc" }, { id: "asc" }],
       take: TODAY_MAX,
       include: taskInclude,

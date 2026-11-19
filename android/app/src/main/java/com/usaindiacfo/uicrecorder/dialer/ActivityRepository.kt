@@ -28,6 +28,10 @@ class ActivityRepository(
         durationS: Int? = null,
         name: String? = null,
         company: String? = null,
+        outcomeId: String? = null,
+        callListItemId: String? = null,
+        channel: String? = null,
+        templateId: String? = null,
     ) {
         dao.insert(
             PendingActivityEntity(
@@ -41,6 +45,10 @@ class ActivityRepository(
                 occurredAt = Instant.ofEpochMilli(occurredAtMs).toString(),
                 name = name?.trim()?.take(200)?.takeIf { it.isNotEmpty() },
                 company = company?.trim()?.take(200)?.takeIf { it.isNotEmpty() },
+                outcomeId = outcomeId,
+                callListItemId = callListItemId,
+                channel = channel,
+                templateId = templateId,
             ),
         )
         // Remember whose queue this is, so a different rep signing in later never sends it under their name.

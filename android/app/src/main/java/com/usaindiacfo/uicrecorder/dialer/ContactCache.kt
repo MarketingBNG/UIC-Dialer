@@ -11,6 +11,7 @@ import kotlinx.serialization.json.Json
  */
 class ContactCache(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("dialer_cache", Context.MODE_PRIVATE)
+    private val catalogPrefs = context.applicationContext.getSharedPreferences("dialer_catalog", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
 
     var recent: List<ContactDto>
@@ -30,7 +31,11 @@ class ContactCache(context: Context) {
             if (v == null) remove(KEY_TODAY) else putString(KEY_TODAY, json.encodeToString(com.usaindiacfo.uicrecorder.data.api.FollowUpsToday.serializer(), v))
         }.apply()
 
-    fun clear() = prefs.edit().clear().apply()
+    /** Also drops the cached outcomes and templates (OutcomeCatalog). */
+    fun clear() {
+        prefs.edit().clear().apply()
+        catalogPrefs.edit().clear().apply()
+    }
 
     private fun read(key: String): List<ContactDto> =
         prefs.getString(key, null)?.let { runCatching { json.decodeFromString<ContactList>(it).items }.getOrNull() } ?: emptyList()

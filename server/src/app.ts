@@ -18,6 +18,11 @@ import { followupRoutes } from "./routes/followups.js";
 import { importRoutes } from "./routes/import.js";
 import { publishRoutes } from "./routes/publish.js";
 import { internalRoutes } from "./routes/internal.js";
+import { dncRoutes } from "./routes/dnc.js";
+import { leadRoutes } from "./routes/leads.js";
+import { listRoutes } from "./routes/lists.js";
+import { outcomeRoutes } from "./routes/outcomes.js";
+import { teamRoutes } from "./routes/team.js";
 
 export async function buildApp(deps: Deps, opts: FastifyServerOptions = {}) {
   const app = Fastify({
@@ -44,7 +49,9 @@ export async function buildApp(deps: Deps, opts: FastifyServerOptions = {}) {
   await app.register(rateLimit, { max: 600, timeWindow: "1 minute" });
 
   app.setErrorHandler((err, req, reply) => {
-    if (err instanceof HttpError) return reply.code(err.statusCode).send({ error: err.message });
+    if (err instanceof HttpError) {
+      return reply.code(err.statusCode).send({ ...err.extra, error: err.message, ...(err.code ? { code: err.code } : {}) });
+    }
     if (err instanceof ZodError) {
       return reply.code(400).send({ error: "Invalid request", issues: err.issues.map((i) => ({ path: i.path, message: i.message })) });
     }
@@ -69,6 +76,11 @@ export async function buildApp(deps: Deps, opts: FastifyServerOptions = {}) {
   await app.register(async (s) => firefliesRoutes(s, deps));
   await app.register(async (s) => activityRoutes(s, deps));
   await app.register(async (s) => followupRoutes(s, deps));
+  await app.register(async (s) => outcomeRoutes(s, deps));
+  await app.register(async (s) => listRoutes(s, deps));
+  await app.register(async (s) => dncRoutes(s, deps));
+  await app.register(async (s) => leadRoutes(s, deps));
+  await app.register(async (s) => teamRoutes(s, deps));
 
   // Built dashboard (React SPA), served from the same origin.
   // Built: dist/src/app.js -> dist/public. Dev (tsx src/app.ts): falls back to dist/public too.

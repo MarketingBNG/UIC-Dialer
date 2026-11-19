@@ -194,6 +194,9 @@ data class CallDetail(
     /** Zoho CRM sync state; absent on older servers. */
     val crm: CallCrm? = null,
     val via: DialVia? = null,
+    /** AI call score (stage 3); null until scored or when scoring is off. */
+    val score: CallScore? = null,
+    val scorePending: Boolean = false,
 )
 
 @Serializable
@@ -410,7 +413,8 @@ data class FirefliesPatch(
     val clearBlock: Boolean? = null,
 )
 
-@Serializable data class ErrorBody(val error: String? = null)
+/** [code] (stage 2+): DNC, LIST_PAUSED, NOT_ASSIGNED, OUTCOME_NEEDS_DATE, EXISTS. */
+@Serializable data class ErrorBody(val error: String? = null, val code: String? = null)
 
 // ---- Privacy (M3): client list, retention / PII settings, audit log ---------
 
@@ -461,7 +465,14 @@ data class ContactDto(
     val nextFollowUpAt: String? = null,
     val lastActivityAt: String? = null,
     val owner: UserRef? = null,
+    val city: String? = null,
+    /** Lead source name, "csv" or "manual". */
+    val source: String? = null,
+    /** Set when the number is on the do-not-call list. */
+    val dnc: DncInfo? = null,
 )
+
+@Serializable data class DncInfo(val reason: String? = null, val createdAt: String = "")
 
 @Serializable
 data class ActivityDto(
@@ -475,6 +486,14 @@ data class ActivityDto(
     val occurredAt: String,
     val callId: String? = null,
     val via: DialVia? = null,
+    val outcomeId: String? = null,
+    val outcomeLabel: String? = null,
+    /** "#RRGGBB" */
+    val outcomeColor: String? = null,
+    val callListItemId: String? = null,
+    /** "WHATSAPP" | "SMS", only on WHATSAPP activities. */
+    val channel: String? = null,
+    val templateId: String? = null,
 )
 
 /** POST /v1/activities. Idempotent by [clientId] (a UUID made on the phone). Null fields are not sent. */
@@ -500,6 +519,10 @@ data class CreateActivityRequest(
     val name: String? = null,
     val company: String? = null,
     val via: DialVia? = null,
+    val outcomeId: String? = null,
+    val callListItemId: String? = null,
+    val channel: String? = null,
+    val templateId: String? = null,
 )
 
 @Serializable data class CreateActivityResponse(val activity: ActivityDto, val contact: ContactDto)
@@ -524,7 +547,8 @@ fun DialVia?.label(): String? = when (this) {
     null -> null
 }
 
-@Serializable enum class FollowUpKind { FOLLOW_UP, MISSED_CALL }
+/** NEW_LEAD only arrives with ?v=2 (older APKs would fail to decode it). */
+@Serializable enum class FollowUpKind { FOLLOW_UP, MISSED_CALL, NEW_LEAD }
 
 @Serializable
 data class FollowUpItem(
@@ -539,6 +563,8 @@ data class FollowUpItem(
     val dueAt: String,
     val overdue: Boolean = false,
     val lastNote: String? = null,
+    /** Contact source, e.g. "Website" for "New lead · Website". */
+    val source: String? = null,
 )
 
 @Serializable data class FollowUpCounts(val overdue: Int = 0, val today: Int = 0)
@@ -567,3 +593,120 @@ data class MissedCallResult(
 
 /** action: "done" | "dismiss" | "snooze" (snooze needs [until]). */
 @Serializable data class FollowUpPatch(val action: String, val until: String? = null)
+
+// ---- Stage 2/3: outcomes, scripts, templates, call lists, DNC, targets, scoring ----
+
+enum class OutcomeRule { NONE, ASK_FOLLOW_UP, ASK_MEETING, ASK_CALLBACK, CLOSE_LEAD, RETRY, REMOVE_FROM_LISTS }
+
+/** Unknown or missing rules (a newer server) behave like NONE. */
+fun String?.toOutcomeRule(): OutcomeRule = OutcomeRule.entries.firstOrNull { it.name == this } ?: OutcomeRule.NONE
+
+@Serializable
+data class OutcomeDto(
+    val id: String,
+    val key: String? = null,
+    val label: String = "",
+    val color: String = "#64748B",
+    val sortOrder: Int = 0,
+    val active: Boolean = true,
+    val baseOutcome: CallOutcome = CallOutcome.NO_ANSWER,
+    val rule: String = "NONE",
+    val retryHours: Int? = null,
+    val addToDnc: Boolean = false,
+) {
+    val ruleEnum: OutcomeRule get() = rule.toOutcomeRule()
+}
+
+@Serializable data class OutcomeList(val items: List<OutcomeDto> = emptyList())
+
+@Serializable data class ScriptSection(val heading: String = "", val text: String = "")
+
+@Serializable
+data class ScriptDto(val id: String, val name: String = "", val sections: List<ScriptSection> = emptyList(), val active: Boolean = true, val updatedAt: String? = null)
+
+@Serializable
+data class TemplateDto(
+    val id: String,
+    val name: String = "",
+    val body: String = "",
+    val whatsapp: Boolean = true,
+    val sms: Boolean = true,
+    val active: Boolean = true,
+    val sortOrder: Int = 0,
+)
+
+@Serializable data class TemplateList(val items: List<TemplateDto> = emptyList())
+
+@Serializable
+data class ListProgress(val total: Int = 0, val done: Int = 0, val pending: Int = 0, val inProgress: Int = 0, val skipped: Int = 0, val removed: Int = 0)
+
+@Serializable data class ListResult(val outcomeId: String? = null, val label: String = "", val color: String = "#64748B", val count: Int = 0)
+
+@Serializable data class OutcomeRef(val id: String, val label: String = "", val color: String = "#64748B")
+
+@Serializable
+data class ListItemDto(
+    val id: String,
+    val position: Int = 0,
+    val state: String = "PENDING",
+    val attempts: Int = 0,
+    val retryAt: String? = null,
+    val lastOutcome: OutcomeRef? = null,
+    val lastActivityAt: String? = null,
+    val contact: ContactDto,
+)
+
+@Serializable
+data class MyCallList(
+    val id: String,
+    val name: String = "",
+    /** ACTIVE | PAUSED | ARCHIVED */
+    val state: String = "ACTIVE",
+    val script: ScriptDto? = null,
+    val createdAt: String? = null,
+    val progress: ListProgress = ListProgress(),
+    val results: List<ListResult> = emptyList(),
+    /** Who made the list ("assigned by …"). */
+    val createdBy: UserRef? = null,
+)
+
+@Serializable data class MyCallLists(val items: List<MyCallList> = emptyList())
+
+/** POST /v1/call-lists/:id/next. [item] is null with code LIST_EMPTY when nothing is left. */
+@Serializable
+data class NextResponse(val item: ListItemDto? = null, val progress: ListProgress = ListProgress(), val results: List<ListResult> = emptyList(), val code: String? = null)
+
+@Serializable data class Target(val callsPerDay: Int? = null, val talkMinPerDay: Int? = null)
+@Serializable data class TargetProgress(val callsPct: Int? = null, val talkPct: Int? = null)
+
+@Serializable
+data class MeToday(
+    val calls: Int = 0,
+    val connected: Int = 0,
+    val talkTimeS: Int = 0,
+    val messages: Int = 0,
+    val target: Target = Target(),
+    val progress: TargetProgress = TargetProgress(),
+)
+
+@Serializable data class Objection(val objection: String = "", val handled: Boolean = false)
+
+@Serializable
+data class CallScore(
+    val overall: Int = 0,
+    val scriptAdherence: Int? = null,
+    val sentiment: String = "neutral",
+    val objections: List<Objection> = emptyList(),
+    val nextStep: String? = null,
+    val strengths: List<String> = emptyList(),
+    val improvements: List<String> = emptyList(),
+    val model: String = "",
+    val createdAt: String? = null,
+)
+
+@Serializable data class Features(val scoring: Boolean = false, val summaries: Boolean = false)
+
+@Serializable data class DncRequest(val phone: String, val reason: String? = null)
+
+@Serializable
+data class DncDto(val id: String, val phoneE164: String? = null, val raw: String = "", val reason: String? = null, val source: String = "MANUAL", val createdAt: String? = null)

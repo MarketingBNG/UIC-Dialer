@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { api, ApiError, isManager, type CallCrm, type CallDetail, type SpeakerRole } from "../api";
+import { api, ApiError, isManager, type CallCrm, type CallDetail, type Features, type ScoreDto, type SpeakerRole } from "../api";
 import { useMe } from "../App";
 import { formatBytes, formatDuration, formatWhen, parseSegments, personName } from "../format";
 import { CallButton } from "../dialer";
@@ -203,6 +203,7 @@ export function CallDetailPage() {
           </section>
 
           {c.transcript && <SummaryCard t={c.transcript} />}
+          <ScoreCard score={c.score ?? null} pending={!!c.scorePending} />
 
           <section aria-labelledby="transcript-h" className="card p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
@@ -318,6 +319,109 @@ const SENTIMENT_TONE: Record<string, string> = {
 };
 
 /** AI summary, action items, sentiment and tags (same layout as the Android call screen). */
+const SCORE_SENTIMENT: Record<string, string> = {
+  positive: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+  neutral: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+  negative: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
+  mixed: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+};
+
+/** AI score of the call: overall /100, script adherence, sentiment, objections, next step, strengths, improvements. */
+function ScoreCard({ score, pending }: { score: ScoreDto | null; pending: boolean }) {
+  const features = useQuery({ queryKey: ["features"], queryFn: () => api<Features>("/api/features"), staleTime: 5 * 60_000 });
+  if (!score) {
+    if (pending)
+      return (
+        <section className="card p-4 text-sm text-slate-500" aria-label="AI score">
+          <span className="font-semibold text-slate-900 dark:text-slate-100">AI score</span> · Scoring…
+        </section>
+      );
+    // Nothing when scoring is off (or unknown); a short note when it's on but this call has no score yet.
+    return features.data?.scoring ? (
+      <p className="card p-4 text-sm text-slate-500">
+        <span className="font-semibold text-slate-900 dark:text-slate-100">AI score</span> · Not scored yet. Calls are scored after their summary is made.
+      </p>
+    ) : null;
+  }
+  const tone = score.overall >= 75 ? "text-call" : score.overall >= 50 ? "text-amber-ui" : "text-overdue";
+  return (
+    <section aria-labelledby="score-h" className="card p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h2 id="score-h" className="font-semibold">
+          AI score
+        </h2>
+        <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${SCORE_SENTIMENT[score.sentiment] ?? SCORE_SENTIMENT["neutral"]}`}>Customer: {score.sentiment}</span>
+      </div>
+      <div className="mt-2 flex flex-wrap items-end gap-6">
+        <div>
+          <span className={`text-4xl font-semibold tabular-nums ${tone}`}>{score.overall}</span>
+          <span className="text-sm text-slate-500"> /100</span>
+        </div>
+        {score.scriptAdherence != null && (
+          <div className="min-w-48 flex-1">
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-600 dark:text-slate-400">Script adherence</span>
+              <span className="tabular-nums">{score.scriptAdherence}%</span>
+            </div>
+            <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" role="progressbar" aria-label="Script adherence" aria-valuenow={score.scriptAdherence} aria-valuemin={0} aria-valuemax={100}>
+              <div className="h-full rounded-full bg-brand-600" style={{ width: `${Math.min(100, score.scriptAdherence)}%` }} />
+            </div>
+          </div>
+        )}
+      </div>
+      {score.objections.length > 0 && (
+        <div className="mt-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Objections</h3>
+          <ul className="mt-1 space-y-1 text-sm">
+            {score.objections.map((o, i) => (
+              <li key={i} className="flex gap-2">
+                <span aria-hidden className={o.handled ? "text-call" : "text-overdue"}>
+                  {o.handled ? "✓" : "✗"}
+                </span>
+                <span>
+                  {o.objection}
+                  <span className="sr-only">{o.handled ? " (handled)" : " (not handled)"}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {score.nextStep && (
+        <div className="mt-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Next step</h3>
+          <p className="mt-1 text-sm">{score.nextStep}</p>
+        </div>
+      )}
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        {score.strengths.length > 0 && (
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Strengths</h3>
+            <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
+              {score.strengths.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {score.improvements.length > 0 && (
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">To improve</h3>
+            <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">
+              {score.improvements.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+      <p className="hint mt-3">
+        {score.model} · {formatWhen(score.createdAt)}
+      </p>
+    </section>
+  );
+}
+
 function SummaryCard({ t }: { t: NonNullable<CallDetail["transcript"]> }) {
   if (!t.summary) {
     return t.summaryPending ? (

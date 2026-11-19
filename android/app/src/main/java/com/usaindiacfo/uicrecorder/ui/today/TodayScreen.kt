@@ -54,7 +54,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 @Composable
-fun TodayScreen(onOpenContact: (phone: String) -> Unit, onOpenSetup: () -> Unit) {
+fun TodayScreen(onOpenContact: (phone: String) -> Unit, onOpenSetup: () -> Unit, onOpenLists: () -> Unit = {}) {
     val container = appContainer()
     val vm: TodayViewModel = viewModel(factory = viewModelFactory { initializer { TodayViewModel(container) } })
     val state by vm.state.collectAsStateWithLifecycle()
@@ -108,6 +108,22 @@ fun TodayScreen(onOpenContact: (phone: String) -> Unit, onOpenSetup: () -> Unit)
                 CountCard(state.today.size, "Due today", MaterialTheme.colorScheme.primary, Modifier.weight(1f))
             }
         }
+        state.me?.let { me -> item(key = "targets") { TargetsCard(me) } }
+        if (state.lists.isNotEmpty()) item(key = "lists") {
+            Card(
+                Modifier.fillMaxWidth().clickable(onClick = onOpenLists),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            ) {
+                Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("My call lists (${state.lists.size})", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        val left = state.lists.sumOf { it.progress.pending + it.progress.inProgress }
+                        Text("$left numbers to call", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    TextButton(onClick = onOpenLists) { Text("Open") }
+                }
+            }
+        }
         if (state.loading) item(key = "loading") { LinearProgressIndicator(Modifier.fillMaxWidth()) }
         state.error?.let { item(key = "error") { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) } }
         if (state.overdue.isEmpty() && state.today.isEmpty() && !state.loading) item(key = "empty") {
@@ -149,6 +165,7 @@ private fun TodayRowCard(row: TodayRow, vm: TodayViewModel, onOpenContact: (Stri
     val context = LocalContext.current
     val call = rememberCaller()
     val missed = row.kind == TodayKind.MISSED_CALL
+    val lead = row.kind == TodayKind.NEW_LEAD
     val due = DateUtils.formatDateTime(context, row.dueAtMs, DateUtils.FORMAT_SHOW_TIME or DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_ABBREV_MONTH)
     Card(
         Modifier.fillMaxWidth().clickable { onOpenContact(row.phoneE164) },
@@ -169,22 +186,60 @@ private fun TodayRowCard(row: TodayRow, vm: TodayViewModel, onOpenContact: (Stri
                         color = if (row.overdue) UicColors.overdue else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (!missed) GreenCallButton(onClick = { call(row.phoneE164) })
+                if (!missed && !lead) GreenCallButton(onClick = { call(row.phoneE164) })
             }
-            if (missed || row.status != null) {
+            if (missed || lead || row.status != null) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (missed) Chip("Missed call", MaterialTheme.colorScheme.errorContainer, UicColors.overdue)
+                    if (lead) Chip("New lead" + (row.source?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: ""), Color(0xFFDDF3E4), Color(0xFF166534))
                     row.status?.let { StatusChip(it) }
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (missed) OutlinedButton(onClick = { call(row.phoneE164) }, Modifier.heightIn(min = 48.dp)) { Text("Call back") }
+                if (lead) OutlinedButton(onClick = { call(row.phoneE164) }, Modifier.heightIn(min = 48.dp)) { Text("Call now") }
                 OutlinedButton(
                     onClick = { if (Dialer.whatsApp(context, row.phoneE164)) vm.logWhatsApp(row.phoneE164) },
                     modifier = Modifier.heightIn(min = 48.dp),
                 ) { Text("WhatsApp") }
-                if (missed) TextButton(onClick = { vm.markDone(row) }, Modifier.heightIn(min = 48.dp)) { Text("Done") }
+                if (missed || lead) TextButton(onClick = { vm.markDone(row) }, Modifier.heightIn(min = 48.dp)) { Text("Done") }
             }
         }
+    }
+}
+
+/**
+ * "Today: 14 / 40 calls · 40 / 60 talk min" with a bar per target; without targets only the counts show.
+ */
+@Composable
+private fun TargetsCard(me: com.usaindiacfo.uicrecorder.data.api.MeToday) {
+    val talkMin = me.talkTimeS / 60
+    val callsTarget = me.target.callsPerDay
+    val talkTarget = me.target.talkMinPerDay
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                "Today: " + (if (callsTarget != null) "${me.calls} / $callsTarget calls" else "${me.calls} calls") +
+                    " · " + (if (talkTarget != null) "$talkMin / $talkTarget talk min" else "$talkMin talk min"),
+                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+            )
+            if (callsTarget != null) TargetBar("Calls", me.progress.callsPct)
+            if (talkTarget != null) TargetBar("Talk time", me.progress.talkPct)
+            if (callsTarget == null && talkTarget == null) {
+                Text("${me.connected} connected · ${me.messages} messages", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TargetBar(label: String, pct: Int?) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text("$label ${pct ?: 0}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        LinearProgressIndicator(
+            progress = { ((pct ?: 0) / 100f).coerceIn(0f, 1f) },
+            modifier = Modifier.fillMaxWidth(),
+            color = if ((pct ?: 0) >= 100) UicColors.callGreen else MaterialTheme.colorScheme.primary,
+        )
     }
 }

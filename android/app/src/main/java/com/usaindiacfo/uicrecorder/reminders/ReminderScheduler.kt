@@ -50,9 +50,14 @@ class ReminderStore(context: Context) {
         get() = prefs.getLong(KEY_MISSED_CURSOR, 0)
         set(v) = prefs.edit().putLong(KEY_MISSED_CURSOR, v).apply()
 
+    /** NEW_LEAD keys already notified (each lead notifies once). */
+    var notifiedLeads: Set<String>
+        get() = prefs.getStringSet(KEY_LEADS, null)?.toSet() ?: emptySet()
+        set(v) = prefs.edit().putStringSet(KEY_LEADS, v).apply()
+
     /** Sign-out: forget everything tied to the rep, keep the morning-summary setting. */
     fun clearSession() =
-        prefs.edit().remove(KEY_SCHEDULED).remove(KEY_SNOOZES).remove(KEY_FIRED).remove(KEY_LAST_SUMMARY).remove(KEY_MISSED_CURSOR).apply()
+        prefs.edit().remove(KEY_SCHEDULED).remove(KEY_SNOOZES).remove(KEY_FIRED).remove(KEY_LAST_SUMMARY).remove(KEY_MISSED_CURSOR).remove(KEY_LEADS).apply()
 
     private companion object {
         const val KEY_SCHEDULED = "scheduled"
@@ -61,6 +66,7 @@ class ReminderStore(context: Context) {
         const val KEY_ENABLED = "enabled"
         const val KEY_HOUR = "hour"
         const val KEY_LAST_SUMMARY = "lastSummaryDate"
+        const val KEY_LEADS = "notified_leads"
         const val KEY_MISSED_CURSOR = "lastMissedScanMs"
     }
 }

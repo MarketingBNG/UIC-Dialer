@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
-import { api, type FollowUpItem, type FollowUpsToday } from "../api";
+import { api, type FollowUpItem, type FollowUpsToday, type MeToday, type MyList } from "../api";
 import { useMe } from "../App";
 import { CallButton } from "../dialer";
-import { formatShortWhen, whatsAppUrl } from "../format";
+import { formatDuration, formatShortWhen, whatsAppUrl } from "../format";
 import { Badge, ContactStatusBadge, ErrorBox, PageHeader, Spinner } from "../ui";
 
 const timeFmt = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
@@ -30,7 +30,8 @@ export function TodayPage() {
   const me = useMe();
   const q = useQuery({
     queryKey: ["followups-today"],
-    queryFn: () => api<FollowUpsToday>("/api/followups/today"),
+    // v=2: also new-lead items (old phone apps don't get them).
+    queryFn: () => api<FollowUpsToday>("/api/followups/today?v=2"),
     refetchInterval: 60_000,
   });
 
@@ -40,6 +41,10 @@ export function TodayPage() {
   return (
     <>
       <PageHeader title={greeting(me.name)} subtitle={`Today · ${dateFmt.format(new Date())}`} />
+      <div className="mb-5 grid gap-3 lg:grid-cols-2">
+        <TargetsCard />
+        <MyListsCard />
+      </div>
       {q.isPending ? (
         <Spinner />
       ) : q.isError ? (
@@ -72,6 +77,79 @@ export function TodayPage() {
   );
 }
 
+function TargetBar({ label, value, target, pct }: { label: string; value: string; target: number | null; pct: number | null }) {
+  return (
+    <div>
+      <div className="flex items-baseline justify-between text-sm">
+        <span className="text-slate-600 dark:text-slate-400">{label}</span>
+        <span className="font-semibold tabular-nums">
+          {value}
+          {target != null && <span className="font-normal text-slate-500"> / {target}</span>}
+        </span>
+      </div>
+      {pct != null && (
+        <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" role="progressbar" aria-label={label} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+          <div className={`h-full rounded-full ${pct >= 100 ? "bg-call" : "bg-brand-600"}`} style={{ width: `${Math.min(100, pct)}%` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** My numbers today against my daily targets (bars only when a target is set). */
+function TargetsCard() {
+  const q = useQuery({ queryKey: ["me-today"], queryFn: () => api<MeToday>("/api/me/today"), refetchInterval: 60_000 });
+  if (!q.data) return null;
+  const d = q.data;
+  return (
+    <section aria-labelledby="targets-h" className="card space-y-3 p-4">
+      <h2 id="targets-h" className="font-semibold">
+        My targets
+      </h2>
+      <TargetBar label="Calls" value={String(d.calls)} target={d.target.callsPerDay} pct={d.progress.callsPct} />
+      <TargetBar label="Talk time (min)" value={String(Math.floor(d.talkTimeS / 60))} target={d.target.talkMinPerDay} pct={d.progress.talkPct} />
+      <p className="text-xs text-slate-500">
+        {d.connected} connected · {formatDuration(d.talkTimeS)} talk · {d.messages} messages
+      </p>
+    </section>
+  );
+}
+
+function MyListsCard() {
+  const q = useQuery({ queryKey: ["my-lists"], queryFn: () => api<{ items: MyList[] }>("/api/my/call-lists") });
+  const items = q.data?.items ?? [];
+  if (items.length === 0) return null;
+  return (
+    <section aria-labelledby="mylists-h" className="card p-4">
+      <h2 id="mylists-h" className="mb-2 font-semibold">
+        My call lists ({items.length})
+      </h2>
+      <ul className="space-y-2">
+        {items.slice(0, 4).map((l) => (
+          <li key={l.id} className="flex items-center gap-2 text-sm">
+            <span className="min-w-0 flex-1 truncate font-medium">{l.name}</span>
+            <span className="tabular-nums text-slate-500">
+              {l.progress.done} of {l.progress.total}
+            </span>
+            {l.state === "ACTIVE" ? (
+              <Link to={`/lists/${l.id}/work`} className="btn-call min-h-9 px-3">
+                {l.progress.inProgress ? "Continue" : "Start"}
+              </Link>
+            ) : (
+              <Badge tone="amber">Paused</Badge>
+            )}
+          </li>
+        ))}
+      </ul>
+      {items.length > 4 && (
+        <Link to="/lists" className="mt-2 inline-block text-sm text-brand-700 hover:underline dark:text-brand-100">
+          All lists
+        </Link>
+      )}
+    </section>
+  );
+}
+
 function Section({ title, items }: { title: string; items: FollowUpItem[] }) {
   if (items.length === 0) return null;
   const id = `today-${title.toLowerCase()}`;
@@ -92,13 +170,14 @@ function Section({ title, items }: { title: string; items: FollowUpItem[] }) {
 function Row({ item }: { item: FollowUpItem }) {
   const qc = useQueryClient();
   const missed = item.kind === "MISSED_CALL";
+  const lead = item.kind === "NEW_LEAD";
   const label = item.name || item.phoneE164;
   const wa = whatsAppUrl(item.phoneE164);
   const patch = useMutation({
     mutationFn: (body: { action: "done" | "snooze"; until?: string }) => api(`/api/followups/${item.taskId}`, { method: "PATCH", body }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["followups-today"] }),
   });
-  const due = missed ? `Missed ${formatShortWhen(item.dueAt)}` : item.overdue ? `Overdue · ${formatShortWhen(item.dueAt)}` : timeFmt.format(new Date(item.dueAt));
+  const due = missed ? `Missed ${formatShortWhen(item.dueAt)}` : lead ? `Came in ${formatShortWhen(item.dueAt)}` : item.overdue ? `Overdue · ${formatShortWhen(item.dueAt)}` : timeFmt.format(new Date(item.dueAt));
   const sub = [item.company, item.lastNote].filter(Boolean).join(" · ");
 
   return (
@@ -106,7 +185,7 @@ function Row({ item }: { item: FollowUpItem }) {
       <span
         aria-hidden
         className={`grid size-10 shrink-0 place-items-center rounded-full text-sm font-semibold ${
-          missed ? "bg-red-100 text-overdue dark:bg-red-950 dark:text-red-300" : "bg-brand-50 text-brand-700 dark:bg-slate-800 dark:text-brand-100"
+          missed ? "bg-red-100 text-overdue dark:bg-red-950 dark:text-red-300" : lead ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" : "bg-brand-50 text-brand-700 dark:bg-slate-800 dark:text-brand-100"
         }`}
       >
         {initials(item)}
@@ -121,6 +200,7 @@ function Row({ item }: { item: FollowUpItem }) {
             <span className="truncate font-medium">{label}</span>
           )}
           {missed && <Badge tone="red">Missed call</Badge>}
+          {lead && <Badge tone="green">New lead{item.source ? ` · ${item.source}` : ""}</Badge>}
           {item.status && <ContactStatusBadge status={item.status} />}
         </div>
         <div className="truncate text-sm text-slate-500 dark:text-slate-400">
@@ -136,7 +216,7 @@ function Row({ item }: { item: FollowUpItem }) {
             WhatsApp
           </a>
         )}
-        {missed && item.taskId && (
+        {item.taskId && (
           <>
             <button type="button" className="btn-ghost" disabled={patch.isPending} onClick={() => patch.mutate({ action: "done" })}>
               Done

@@ -32,7 +32,13 @@ class SyncPrefs(context: Context) {
         get() = if (prefs.contains(KEY_STOP)) prefs.getInt(KEY_STOP, 0) else null
         set(v) = prefs.edit().apply { if (v == null) remove(KEY_STOP) else putInt(KEY_STOP, v) }.apply()
 
+    /** ETag of the last GET /v1/dnc/hashes (only sent while the dnc_hashes table is loaded). */
+    var dncEtag: String?
+        get() = prefs.getString(KEY_DNC_ETAG, null)
+        set(v) = prefs.edit().apply { if (v == null) remove(KEY_DNC_ETAG) else putString(KEY_DNC_ETAG, v) }.apply()
+
     companion object {
+        private const val KEY_DNC_ETAG = "dnc_etag"
         private const val KEY_STOP = "last_stop_reason"
         private const val KEY_TREE = "saf_tree"
         private const val KEY_LAST = "last_sync_at"

@@ -4,9 +4,17 @@ import { requireDevice, requireSession } from "../auth/guards.js";
 import { HttpError, currentUser, type Deps } from "../context.js";
 import { Prisma } from "../generated/prisma/client.js";
 import { toE164 } from "../phone.js";
+import { isDnc } from "../activity/dnc.js";
 import { FollowUpPatch, MissedItem, followUpsToday, patchTask, phoneStatus, saveMissed } from "../activity/followups.js";
 
-const DialIntentBody = z.object({ clientId: z.uuid(), phone: z.string().trim().min(1).max(40) });
+const DialIntentBody = z.object({
+  clientId: z.uuid(),
+  phone: z.string().trim().min(1).max(40),
+  // Dial a do-not-call number anyway (the rep confirmed).
+  override: z.boolean().optional(),
+});
+const VersionQuery = z.object({ v: z.string().max(5).optional() });
+const isV2 = (req: FastifyRequest) => Number(VersionQuery.parse(req.query).v ?? "1") >= 2;
 const taskParam = (req: FastifyRequest) => z.uuid().parse((req.params as { taskId: string }).taskId);
 
 const intentDto = (i: { id: string; clientId: string; phoneE164: string; createdAt: Date }) => ({
@@ -45,7 +53,7 @@ export async function followupRoutes(app: FastifyInstance, deps: Deps) {
     return { results };
   });
 
-  app.get("/v1/followups/today", device, async (req) => followUpsToday(deps, currentUser(req).id));
+  app.get("/v1/followups/today", device, async (req) => followUpsToday(deps, currentUser(req).id, new Date(), { v2: isV2(req) }));
 
   app.patch("/v1/followups/:taskId", device, async (req) =>
     patchTask(deps, currentUser(req).id, taskParam(req), FollowUpPatch.parse(req.body)),
@@ -53,7 +61,7 @@ export async function followupRoutes(app: FastifyInstance, deps: Deps) {
 
   // ---- Dashboard / desktop ----
 
-  app.get("/api/followups/today", anyone, async (req) => followUpsToday(deps, currentUser(req).id));
+  app.get("/api/followups/today", anyone, async (req) => followUpsToday(deps, currentUser(req).id, new Date(), { v2: isV2(req) }));
 
   app.patch("/api/followups/:taskId", anyone, async (req) =>
     patchTask(deps, currentUser(req).id, taskParam(req), FollowUpPatch.parse(req.body)),
@@ -71,6 +79,9 @@ export async function followupRoutes(app: FastifyInstance, deps: Deps) {
     };
     const prior = await deps.db.dialIntent.findUnique({ where: { clientId: body.clientId } });
     if (prior) return own(prior);
+    if (!body.override && (await isDnc(deps.db, phoneE164))) {
+      throw new HttpError(409, "Number is on the do-not-call list", "DNC");
+    }
     try {
       return intentDto(await deps.db.dialIntent.create({ data: { clientId: body.clientId, userId, phoneE164 } }));
     } catch (e) {

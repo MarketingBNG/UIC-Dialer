@@ -17,6 +17,7 @@ import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -56,6 +57,8 @@ import com.usaindiacfo.uicrecorder.ui.dialer.Avatar
 import com.usaindiacfo.uicrecorder.ui.dialer.ContactDetailScreen
 import com.usaindiacfo.uicrecorder.ui.dialer.DialerScreen
 import com.usaindiacfo.uicrecorder.ui.dialer.PendingDialHost
+import com.usaindiacfo.uicrecorder.ui.lists.ListSessionScreen
+import com.usaindiacfo.uicrecorder.ui.lists.ListsScreen
 import com.usaindiacfo.uicrecorder.ui.settings.SettingsScreen
 import com.usaindiacfo.uicrecorder.ui.setup.SetupScreen
 import com.usaindiacfo.uicrecorder.ui.signin.SignInScreen
@@ -76,8 +79,11 @@ object Routes {
     const val ADMIN_CLIENTS = "admin/clients"
     const val ADMIN_AUDIT = "admin/audit"
     const val SETTINGS = "settings"
+    const val LISTS = "lists"
+    const val LIST_SESSION = "listSession/{id}"
 
     fun callDetail(id: String) = "callDetail/$id"
+    fun listSession(id: String) = "listSession/$id"
     fun contact(phone: String) = "contact/${android.net.Uri.encode(phone)}"
 }
 
@@ -134,11 +140,11 @@ fun AppNavigation(
         onOpenHandled()
     }
 
-    val showBottom = route in TAB_ROUTES || route == Routes.CONTACT || route == Routes.CALL_DETAIL
+    val showBottom = route in TAB_ROUTES || route == Routes.CONTACT || route == Routes.CALL_DETAIL || route == Routes.LIST_SESSION
     val selectedTab = when (route) {
         in TAB_ROUTES -> route
         Routes.CALL_DETAIL -> Routes.CALLS
-        Routes.CONTACT -> lastTab
+        Routes.CONTACT, Routes.LIST_SESSION -> lastTab
         else -> null
     }
 
@@ -147,7 +153,9 @@ fun AppNavigation(
         topBar = {
             if (route in TAB_ROUTES) TopAppBar(
                 title = { Text(TABS.first { it.route == route }.label, fontWeight = FontWeight.SemiBold) },
-                actions = { Avatar(user?.name ?: user?.email, onClick = { nav.navigate(Routes.SETTINGS) { launchSingleTop = true } }) },
+                actions = {
+                    if (route == Routes.CONTACTS) TextButton(onClick = { nav.navigate(Routes.LISTS) { launchSingleTop = true } }) { Text("Call lists") }
+                    Avatar(user?.name ?: user?.email, onClick = { nav.navigate(Routes.SETTINGS) { launchSingleTop = true } }) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
         },
@@ -187,12 +195,26 @@ fun AppNavigation(
                 })
             }
             composable(Routes.TODAY) {
-                TodayScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }, onOpenSetup = { nav.navigate(Routes.SETUP) })
+                TodayScreen(
+                    onOpenContact = { nav.navigate(Routes.contact(it)) },
+                    onOpenSetup = { nav.navigate(Routes.SETUP) },
+                    onOpenLists = { nav.navigate(Routes.LISTS) { launchSingleTop = true } },
+                )
             }
             composable(Routes.DIALER) { DialerScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
             composable(Routes.CONTACTS) { ContactsScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
             composable(Routes.CONTACT, arguments = listOf(navArgument("phone") { type = NavType.StringType })) {
                 ContactDetailScreen(phone = it.arguments?.getString("phone").orEmpty(), onBack = { nav.popBackStack() })
+            }
+            composable(Routes.LISTS) {
+                ListsScreen(onOpenList = { nav.navigate(Routes.listSession(it)) }, onBack = { nav.popBackStack() })
+            }
+            composable(Routes.LIST_SESSION, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
+                ListSessionScreen(
+                    listId = it.arguments?.getString("id").orEmpty(),
+                    onBack = { nav.popBackStack() },
+                    onOpenContact = { phone -> nav.navigate(Routes.contact(phone)) },
+                )
             }
             composable(Routes.CALLS) { CallsScreen(onOpenCall = { nav.navigate(Routes.callDetail(it)) }) }
             composable(Routes.CALL_DETAIL, arguments = listOf(navArgument("id") { type = NavType.StringType })) {

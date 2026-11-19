@@ -4,7 +4,7 @@ import { Link, useSearchParams } from "react-router";
 import { api, isManager, qs, type CallPage, type CallStatus, type Direction, type User } from "../api";
 import { useMe } from "../App";
 import { DIRECTION_LABEL, STATUS_LABEL, formatDuration, formatShortWhen, personName } from "../format";
-import { DirectionTag, Empty, ErrorBox, PageHeader, Spinner, StatusBadge, ViaTag } from "../ui";
+import { DirectionTag, Empty, ErrorBox, PageHeader, ScorePill, Spinner, StatusBadge, ViaTag } from "../ui";
 
 const FILTER_KEYS = ["q", "phone", "userId", "direction", "status", "from", "to"] as const;
 
@@ -73,6 +73,8 @@ export function CallsPage() {
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
   const items = calls.data?.pages.flatMap((p) => p.items) ?? [];
+  // The score column appears once any listed call has an AI score.
+  const hasScores = items.some((c) => c.score != null);
   const loadMoreError = calls.isFetchNextPageError ? calls.error : null;
   const loadMore = () => void calls.fetchNextPage();
 
@@ -198,6 +200,7 @@ export function CallsPage() {
                     <span>{formatShortWhen(c.startedAt)}</span>
                     <span>{formatDuration(c.durationS)}</span>
                     {manager && <span className="truncate">{personName(c.user)}</span>}
+                    {c.score != null && <ScorePill score={c.score} />}
                   </div>
                 </Link>
               </li>
@@ -229,6 +232,11 @@ export function CallsPage() {
                   <th scope="col" className="px-4 py-3 font-medium">
                     Status
                   </th>
+                  {hasScores && (
+                    <th scope="col" className="px-4 py-3 text-right font-medium">
+                      Score
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -252,6 +260,7 @@ export function CallsPage() {
                     <td className="px-4 py-3">
                       <StatusBadge status={c.status} />
                     </td>
+                    {hasScores && <td className="px-4 py-3 text-right tabular-nums">{c.score != null ? <ScorePill score={c.score} /> : "—"}</td>}
                   </tr>
                 ))}
               </tbody>

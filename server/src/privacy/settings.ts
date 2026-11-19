@@ -11,11 +11,20 @@ export const PrivacySettings = z.object({
   retentionMonths: z.number().int().min(1).max(240).nullable(),
   // Worker masks Aadhaar and card numbers in new transcripts before they are stored.
   maskPii: z.boolean(),
+  // Stage 3: delete audio after this many days (wins over retentionMonths). null = use months / off.
+  retentionDays: z.number().int().min(1).max(3650).nullable(),
+  // With retention: also blank the transcript text (summary, score and tags are kept).
+  retentionDeleteTranscript: z.boolean(),
 });
 export type PrivacySettings = z.infer<typeof PrivacySettings>;
 
 /** Off by default: keep everything forever, store transcripts as transcribed. */
-export const DEFAULT_PRIVACY_SETTINGS: PrivacySettings = { retentionMonths: null, maskPii: false };
+export const DEFAULT_PRIVACY_SETTINGS: PrivacySettings = {
+  retentionMonths: null,
+  maskPii: false,
+  retentionDays: null,
+  retentionDeleteTranscript: false,
+};
 
 export async function getPrivacySettings(db: Tx): Promise<PrivacySettings> {
   const row = await db.setting.findUnique({ where: { id: 1 }, select: { privacy: true } });

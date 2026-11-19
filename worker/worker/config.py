@@ -42,6 +42,9 @@ class Settings:
     # AI call summaries (summarize jobs; same batch size / wait as translation)
     summary_model: str = "claude-sonnet-5-5"
     summarize_enabled: bool = True
+    # AI call scores (score jobs). Off unless SCORE_ENABLED; the model defaults to the summary model.
+    score_enabled: bool = False
+    score_model: str = "claude-sonnet-5-5"
     # Sarvam (overflow when the Fireflies budget runs out)
     sarvam_api_key: str | None = None
     sarvam_model: str = "saaras:v3"
@@ -82,6 +85,9 @@ class Settings:
             summary_model=e.get("SUMMARY_MODEL") or "claude-sonnet-5-5",
             # Summaries are only queued when the server has SUMMARIZE_ENABLED (or an admin backfill).
             summarize_enabled=(e.get("SUMMARIZE_ENABLED") or "true").lower() not in ("false", "0", "no"),
+            # Scores are only queued when the server has SCORE_ENABLED (or an admin backfill); off by default.
+            score_enabled=(e.get("SCORE_ENABLED") or "false").lower() in ("true", "1", "yes"),
+            score_model=e.get("SCORE_MODEL") or e.get("SUMMARY_MODEL") or "claude-sonnet-5-5",
             sarvam_api_key=e.get("SARVAM_API_KEY") or None,
             sarvam_model=e.get("SARVAM_MODEL") or "saaras:v3",
             # BCP-47 code, or "unknown" to auto-detect per chunk.

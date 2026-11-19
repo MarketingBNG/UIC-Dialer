@@ -21,7 +21,8 @@ import kotlinx.coroutines.launch
 /** Manual DI: app-wide lazy singletons. Get it via `context.container` or `appContainer()` in Compose. */
 class AppContainer(private val context: Context) {
     val appContext: Context get() = context
-    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** Outlives screens; for fire-and-forget work such as releasing a list lease on exit. */
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val tokenStore by lazy {
         TokenStore(context).apply {
             // Session ended server-side: stop sync and drop cached call data, but keep unsent dialer outcomes
@@ -33,8 +34,10 @@ class AppContainer(private val context: Context) {
     val db by lazy { AppDatabase.build(context) }
     val googleSignIn by lazy { GoogleSignIn(BuildConfig.GOOGLE_WEB_CLIENT_ID) }
     val authRepository by lazy { AuthRepository(context, apiClient, tokenStore, db, googleSignIn) }
-    val deviceConfigRepository by lazy { DeviceConfigRepository(context, apiClient, db.clientHashes()) }
+    val deviceConfigRepository by lazy { DeviceConfigRepository(context, apiClient, db.clientHashes(), db.dncHashes()) }
     val contactCache by lazy { com.usaindiacfo.uicrecorder.dialer.ContactCache(context) }
+    val outcomeCatalog by lazy { com.usaindiacfo.uicrecorder.dialer.OutcomeCatalog(context) { apiClient } }
+    val dncCheck by lazy { com.usaindiacfo.uicrecorder.dialer.DncCheck(db.dncHashes()) }
     val activityRepository by lazy { ActivityRepository(context, db.pendingActivities()) { tokenStore.user.value?.id } }
 
     /**

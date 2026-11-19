@@ -9,6 +9,8 @@ import com.usaindiacfo.uicrecorder.data.api.ContactStatus
 import com.usaindiacfo.uicrecorder.data.api.FollowUpItem
 import com.usaindiacfo.uicrecorder.data.api.FollowUpKind
 import com.usaindiacfo.uicrecorder.data.api.FollowUpPatch
+import com.usaindiacfo.uicrecorder.data.api.MeToday
+import com.usaindiacfo.uicrecorder.data.api.MyCallList
 import com.usaindiacfo.uicrecorder.reminders.ReminderScheduler
 import com.usaindiacfo.uicrecorder.reminders.Reminders
 import com.usaindiacfo.uicrecorder.dialer.DialLogic
@@ -21,7 +23,7 @@ import kotlinx.coroutines.launch
 import java.io.IOException
 import java.time.Instant
 
-enum class TodayKind { FOLLOW_UP, MISSED_CALL }
+enum class TodayKind { FOLLOW_UP, MISSED_CALL, NEW_LEAD }
 
 /** One Today row; same fields as the server's FollowUpItem (GET /v1/followups/today). */
 data class TodayRow(
@@ -36,6 +38,8 @@ data class TodayRow(
     val lastNote: String? = null,
     val contactId: String? = null,
     val taskId: String? = null,
+    /** Lead source for NEW_LEAD rows ("New lead · Website"). */
+    val source: String? = null,
 ) {
     val title get() = name?.takeIf { it.isNotBlank() } ?: phoneE164
 }
@@ -45,6 +49,10 @@ data class TodayState(
     val today: List<TodayRow> = emptyList(),
     val loading: Boolean = false,
     val error: String? = null,
+    /** GET /v1/me/today; null offline or on older servers. */
+    val me: MeToday? = null,
+    /** My ACTIVE/PAUSED call lists. */
+    val lists: List<MyCallList> = emptyList(),
 )
 
 /** Overdue first, then today; each sorted by due time then key. */
@@ -64,9 +72,14 @@ internal fun ContactDto.toTodayRow(now: Instant = Instant.now()): TodayRow? {
 internal fun FollowUpItem.toTodayRow(): TodayRow? {
     val due = DialLogic.parseInstant(dueAt) ?: return null
     return TodayRow(
-        key = key, kind = if (kind == FollowUpKind.MISSED_CALL) TodayKind.MISSED_CALL else TodayKind.FOLLOW_UP,
+        key = key,
+        kind = when (kind) {
+            FollowUpKind.MISSED_CALL -> TodayKind.MISSED_CALL
+            FollowUpKind.NEW_LEAD -> TodayKind.NEW_LEAD
+            FollowUpKind.FOLLOW_UP -> TodayKind.FOLLOW_UP
+        },
         phoneE164 = phoneE164, name = name, company = company, status = status, dueAtMs = due.toEpochMilli(),
-        overdue = overdue, lastNote = lastNote, contactId = contactId, taskId = taskId,
+        overdue = overdue, lastNote = lastNote, contactId = contactId, taskId = taskId, source = source,
     )
 }
 
@@ -106,10 +119,13 @@ class TodayViewModel(private val c: AppContainer) : ViewModel() {
             shown.ifEmpty { cachedRows() } to friendlyError(e)
         }
         val (overdue, today) = splitToday(rows)
-        _state.update { TodayState(overdue = overdue, today = today, loading = false, error = error) }
+        // Targets and call lists are extras: older servers (404) or offline just hide them.
+        val me = runCatching { c.apiClient.meToday() }.getOrNull()
+        val lists = runCatching { c.apiClient.myCallLists().items }.getOrElse { _state.value.lists }
+        _state.update { TodayState(overdue = overdue, today = today, loading = false, error = error, me = me ?: it.me, lists = lists) }
     }
 
-    /** Missed-call task: Done (PATCH /v1/followups/:id). Hidden at once; shown again if the server refuses. */
+    /** Missed-call or new-lead task: Done (PATCH /v1/followups/:id). Hidden at once; shown again if the server refuses. */
     fun markDone(row: TodayRow) {
         removeLocally(row)
         val taskId = row.taskId ?: return

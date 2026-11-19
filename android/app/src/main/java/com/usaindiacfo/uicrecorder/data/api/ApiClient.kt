@@ -38,7 +38,7 @@ import kotlin.coroutines.resumeWithException
  * A non-2xx reply. [fromServer] is true when the body is our server's JSON error; false means something in
  * between answered (a proxy's HTML 404/502 page while the server is down or mid-deploy).
  */
-class ApiException(val code: Int, message: String, val fromServer: Boolean = false) : IOException(message) {
+class ApiException(val code: Int, message: String, val fromServer: Boolean = false, val errorCode: String? = null) : IOException(message) {
     val isAuth get() = code == 401
     val isForbidden get() = code == 403
 
@@ -177,8 +177,9 @@ class ApiClient(
         post("/v1/activities/batch", ActivityBatchRequest(items))
 
     /** Contacts the rep owns or has any activity on; [q] matches name, company or phone. */
-    suspend fun contacts(q: String? = null, cursor: String? = null, limit: Int = 50): ContactPage =
-        get("/v1/contacts", mapOf("q" to q?.takeIf { it.isNotBlank() }, "cursor" to cursor, "limit" to limit.toString()))
+    /** [filter]: interested | callback | never | mine (stage 2 servers; older ones ignore it). */
+    suspend fun contacts(q: String? = null, cursor: String? = null, limit: Int = 50, filter: String? = null): ContactPage =
+        get("/v1/contacts", mapOf("q" to q?.takeIf { it.isNotBlank() }, "cursor" to cursor, "limit" to limit.toString(), "filter" to filter))
 
     /** Follow-ups due by the end of today (IST), oldest first. */
     suspend fun followups(): ContactList = get("/v1/contacts/followups")
@@ -186,7 +187,37 @@ class ApiClient(
     // ---- Follow-ups (stage 1) ----
 
     /** Today's follow-ups and missed-call tasks, plus the next 24 h of follow-ups (for reminders). 404 on older servers. */
-    suspend fun followupsToday(): FollowUpsToday = get("/v1/followups/today")
+    /** v=2 also returns NEW_LEAD items (this app version understands them). */
+    suspend fun followupsToday(): FollowUpsToday = get("/v1/followups/today", mapOf("v" to "2"))
+
+    // ---- Stage 2/3 ----
+
+    suspend fun outcomes(): OutcomeList = get("/v1/outcomes")
+    suspend fun templates(): TemplateList = get("/v1/templates")
+    suspend fun script(id: String): ScriptDto = get("/v1/scripts/$id")
+    suspend fun myCallLists(): MyCallLists = get("/v1/call-lists")
+
+    /** Claims (or re-returns) my next contact. Throws ApiException 409 LIST_PAUSED / 403 NOT_ASSIGNED. */
+    suspend fun nextInList(listId: String): NextResponse = post("/v1/call-lists/$listId/next", JsonObject(emptyMap()))
+    suspend fun skipItem(itemId: String): NextResponse = post("/v1/call-lists/items/$itemId/skip", JsonObject(emptyMap()))
+    suspend fun releaseList(listId: String) = postUnit("/v1/call-lists/$listId/release", JsonObject(emptyMap()))
+    suspend fun meToday(): MeToday = get("/v1/me/today")
+    suspend fun markDnc(phone: String, reason: String?): DncDto =
+        post("/v1/dnc", DncRequest(phone, reason?.trim()?.takeIf { it.isNotEmpty() }?.take(200)))
+
+    /** Same as [clientNumberHashes] for the do-not-call list: null on 304. */
+    suspend fun dncHashes(etag: String? = null): Pair<ClientNumberHashes, String?>? {
+        val req = Request.Builder().url(url("/v1/dnc/hashes")).apply { if (etag != null) header("If-None-Match", etag) }.build()
+        return http.newCall(req).await().use { res ->
+            when {
+                res.code == 304 -> null
+                !res.isSuccessful -> throw res.toApiException()
+                else -> json.decodeFromString<ClientNumberHashes>(res.body.string()) to res.header("ETag")
+            }
+        }
+    }
+
+    suspend fun features(): Features = get("/api/features")
 
     /** Up to 50 missed calls; idempotent by clientId, each item reports its own result. */
     suspend fun postMissed(items: List<MissedCallItem>): MissedCallResponse =
@@ -335,8 +366,9 @@ class ApiClient(
     }
 
     private fun Response.toApiException(): ApiException {
-        val msg = runCatching { json.decodeFromString<ErrorBody>(body.string()).error }.getOrNull()
-        return ApiException(code, msg ?: message.ifBlank { "HTTP $code" }, fromServer = msg != null)
+        val parsed = runCatching { json.decodeFromString<ErrorBody>(body.string()) }.getOrNull()
+        val msg = parsed?.error
+        return ApiException(code, msg ?: message.ifBlank { "HTTP $code" }, fromServer = msg != null, errorCode = parsed?.code)
     }
 
     private inner class BearerInterceptor : Interceptor {

@@ -29,12 +29,16 @@ export interface CallItem {
   via?: DialVia | null;
   user: UserRef;
   transcript: { language: string | null } | null;
+  /** Overall AI score (0..100); absent on older servers. */
+  score?: number | null;
 }
 export interface CallPage {
   items: CallItem[];
   nextCursor: string | null;
 }
-export interface CallDetail extends Omit<CallItem, "transcript"> {
+export interface CallDetail extends Omit<CallItem, "transcript" | "score"> {
+  score?: ScoreDto | null;
+  scorePending?: boolean;
   filePath: string | null;
   /** Set when the retention setting deleted the audio (transcript kept). */
   audioDeletedAt?: string | null;
@@ -86,6 +90,8 @@ export interface User {
   lastLoginAt: string | null;
   createdAt: string;
   _count?: { calls: number };
+  targetCallsPerDay?: number | null;
+  targetTalkMinPerDay?: number | null;
 }
 export interface Device {
   id: string;
@@ -205,6 +211,10 @@ export interface DeviceConfig {
 export interface PrivacySettings {
   retentionMonths: number | null;
   maskPii: boolean;
+  /** Stage 3: days win over months; null = off. */
+  retentionDays?: number | null;
+  /** Stage 3: also blank transcript text (summary and score kept). */
+  retentionDeleteTranscript?: boolean;
 }
 export interface ClientNumber {
   id: string;
@@ -229,7 +239,14 @@ export type AuditAction =
   | "CLIENT_LIST_CHANGE"
   | "RETENTION_DELETE"
   | "EXPORT"
-  | "CRM_SYNC";
+  | "CRM_SYNC"
+  | "CALL_LIST_CHANGE"
+  | "CONTACT_IMPORT"
+  | "DNC_CHANGE"
+  | "LEAD_SOURCE_CHANGE"
+  | "OUTCOME_CHANGE"
+  | "TEMPLATE_CHANGE"
+  | "TARGET_CHANGE";
 /** Zoho CRM sync state of one call (absent on older servers). */
 export interface CallCrm {
   enabled: boolean;
@@ -274,6 +291,10 @@ export class ApiError extends Error {
   constructor(
     public status: number,
     message: string,
+    /** Machine-readable error code (DNC, LIST_PAUSED, NOT_ASSIGNED, OUTCOME_NEEDS_DATE, EXISTS). */
+    public code?: string,
+    /** The parsed JSON error body (e.g. contactId on EXISTS). */
+    public body?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -305,13 +326,17 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   }
   if (!res.ok) {
     let msg = `Request failed (${res.status})`;
+    let code: string | undefined;
+    let body: Record<string, unknown> | undefined;
     try {
-      const j = (await res.json()) as { error?: string };
+      const j = (await res.json()) as { error?: string; code?: string };
+      body = j as Record<string, unknown>;
       if (j.error) msg = j.error;
+      if (typeof j.code === "string") code = j.code;
     } catch {
       /* not JSON */
     }
-    throw new ApiError(res.status, msg);
+    throw new ApiError(res.status, msg, code, body);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -341,6 +366,13 @@ export interface Contact {
   nextFollowUpAt: string | null;
   lastActivityAt: string | null;
   owner: UserRef | null;
+  city?: string | null;
+  source?: string | null;
+  dnc?: DncInfo | null;
+}
+export interface DncInfo {
+  reason: string | null;
+  createdAt: string;
 }
 export interface ContactListItem extends Contact {
   activityCount: number;
@@ -360,7 +392,14 @@ export interface Activity {
   occurredAt: string;
   callId: string | null;
   via?: DialVia | null;
+  outcomeId?: string | null;
+  outcomeLabel?: string | null;
+  outcomeColor?: string | null;
+  callListItemId?: string | null;
+  channel?: MessageChannel | null;
+  templateId?: string | null;
 }
+export type MessageChannel = "WHATSAPP" | "SMS";
 export type TimelineItem =
   | (Activity & {
       kind: "activity";
@@ -389,6 +428,7 @@ export interface ContactPatch {
   status?: ContactStatus;
   nextFollowUpAt?: string | null;
   ownerId?: string;
+  city?: string | null;
 }
 export interface RepStats {
   user: UserRef;
@@ -403,7 +443,7 @@ export interface RepStats {
 // Stage 1: today's follow-ups (contact follow-ups + missed-call tasks) and the rep's phone heartbeat.
 export interface FollowUpItem {
   key: string;
-  kind: "FOLLOW_UP" | "MISSED_CALL";
+  kind: "FOLLOW_UP" | "MISSED_CALL" | "NEW_LEAD";
   contactId: string | null;
   taskId: string | null;
   phoneE164: string;
@@ -413,6 +453,8 @@ export interface FollowUpItem {
   dueAt: string;
   overdue: boolean;
   lastNote: string | null;
+  /** Contact source ("Website", "csv", "manual"); absent on older servers. */
+  source?: string | null;
 }
 export interface FollowUpsToday {
   items: FollowUpItem[];
@@ -425,3 +467,264 @@ export interface PhoneStatus {
   model: string | null;
   appVersion: string | null;
 }
+
+// Stage 2 + 3 ------------------------------------------------------------------------------------
+
+export type ContactFilterKey = "interested" | "callback" | "never" | "mine" | "dnc";
+export type OutcomeRule = "NONE" | "ASK_FOLLOW_UP" | "ASK_MEETING" | "ASK_CALLBACK" | "CLOSE_LEAD" | "RETRY" | "REMOVE_FROM_LISTS";
+export interface OutcomeDto {
+  id: string;
+  key: string | null;
+  label: string;
+  color: string;
+  sortOrder: number;
+  active: boolean;
+  baseOutcome: CallOutcome;
+  rule: OutcomeRule;
+  retryHours: number | null;
+  addToDnc: boolean;
+}
+export interface OutcomeInput {
+  label: string;
+  color: string;
+  baseOutcome: CallOutcome;
+  rule: OutcomeRule;
+  retryHours?: number | null;
+  addToDnc?: boolean;
+  active?: boolean;
+}
+export interface ScriptSection {
+  heading: string;
+  text: string;
+}
+export interface ScriptDto {
+  id: string;
+  name: string;
+  sections: ScriptSection[];
+  active: boolean;
+  updatedAt: string;
+}
+export interface TemplateDto {
+  id: string;
+  name: string;
+  body: string;
+  whatsapp: boolean;
+  sms: boolean;
+  active: boolean;
+  sortOrder: number;
+}
+
+export type CallListState = "ACTIVE" | "PAUSED" | "ARCHIVED";
+export type CallListItemState = "PENDING" | "IN_PROGRESS" | "DONE" | "SKIPPED" | "REMOVED";
+export interface ListProgress {
+  total: number;
+  done: number;
+  pending: number;
+  inProgress: number;
+  skipped: number;
+  removed: number;
+}
+export interface ListResult {
+  outcomeId: string | null;
+  label: string;
+  color: string;
+  count: number;
+}
+export interface ListSummary {
+  id: string;
+  name: string;
+  state: CallListState;
+  script: { id: string; name: string } | null;
+  assignees: UserRef[];
+  createdAt: string;
+  progress: ListProgress;
+  results: ListResult[];
+}
+export interface ContactFilter {
+  q?: string;
+  status?: ContactStatus;
+  filter?: ContactFilterKey;
+  ownerId?: string;
+}
+export interface CreateList {
+  name: string;
+  scriptId?: string | null;
+  assigneeIds: string[];
+  contactIds?: string[];
+  filter?: ContactFilter;
+}
+export interface AddItemsResult {
+  added: number;
+  excludedDnc: number;
+  excludedDuplicate: number;
+}
+export interface ListItemDto {
+  id: string;
+  position: number;
+  state: CallListItemState;
+  attempts: number;
+  retryAt: string | null;
+  lastOutcome: { id: string; label: string; color: string } | null;
+  lastActivityAt: string | null;
+  claimedBy: UserRef | null;
+  doneBy: UserRef | null;
+  contact: Contact;
+}
+export interface ListDetail {
+  list: ListSummary;
+  items: ListItemDto[];
+  nextCursor: string | null;
+}
+export interface MyList extends Omit<ListSummary, "assignees" | "script"> {
+  script: ScriptDto | null;
+  createdBy?: UserRef | null;
+}
+export interface NextResponse {
+  item: ListItemDto | null;
+  progress: ListProgress;
+  results: ListResult[];
+  code?: "LIST_EMPTY";
+}
+
+export interface ImportMapping {
+  name: number | null;
+  phone: number;
+  company: number | null;
+  city: number | null;
+}
+export interface ImportPreview {
+  columns: string[];
+  hasHeader: boolean;
+  mapping: ImportMapping;
+  total: number;
+  new: number;
+  existing: number;
+  /** Of `existing`: contacts outside your scope (another team's). The import leaves them alone. */
+  existingElsewhere: number;
+  bad: number;
+  duplicateInFile: number;
+  dnc: number;
+  badSample: string[];
+  sample: { name: string | null; phoneE164: string | null; company: string | null; city: string | null; status: "new" | "existing" | "bad" | "dnc" }[];
+}
+export interface ImportResult {
+  created: number;
+  updated: number;
+  skipped: number;
+  /** Numbers that are already another team's contacts: not changed, not added to the list. */
+  ownedElsewhere: number;
+  dncSkippedFromList: number;
+  contactIds: string[];
+}
+export interface NewLeadResult {
+  contact: Contact;
+  leadId: string | null;
+  assignedTo: UserRef | null;
+}
+
+export type DncSource = "MANUAL" | "OUTCOME" | "IMPORT";
+export interface DncDto {
+  id: string;
+  phoneE164: string | null;
+  raw: string;
+  reason: string | null;
+  source: DncSource;
+  createdBy: UserRef | null;
+  createdAt: string;
+}
+export interface DncPage {
+  items: DncDto[];
+  nextCursor: string | null;
+  count: number;
+}
+
+export interface TeamStatsRow {
+  user: UserRef;
+  calls: number;
+  connected: number;
+  talkTimeS: number;
+  connectRate: number | null;
+  firstCallAt: string | null;
+  lastCallAt: string | null;
+  messages: number;
+  followUpsDone: number;
+  followUpsOverdue: number;
+  target: { callsPerDay: number | null; talkMinPerDay: number | null };
+  vsTarget: { callsPct: number | null; talkPct: number | null };
+}
+export interface TeamStats {
+  from: string;
+  to: string;
+  days: number;
+  totals: { calls: number; connected: number; talkTimeS: number; connectRate: number | null; messages: number; followUpsDone: number; followUpsOverdue: number };
+  items: TeamStatsRow[];
+  leaderboard: { userId: string; rank: number; calls: number; connected: number; talkTimeS: number }[];
+}
+export interface MeToday {
+  calls: number;
+  connected: number;
+  talkTimeS: number;
+  messages: number;
+  target: { callsPerDay: number | null; talkMinPerDay: number | null };
+  progress: { callsPct: number | null; talkPct: number | null };
+}
+
+export interface FieldMap {
+  name?: string;
+  phone?: string;
+  company?: string;
+  city?: string;
+  note?: string;
+}
+export interface LeadSourceDto {
+  id: string;
+  name: string;
+  active: boolean;
+  repPool: UserRef[];
+  fieldMap: FieldMap | null;
+  tokenHint: string;
+  webhookUrl: string;
+  createdAt: string;
+  stats: { last7d: number; lastAt: string | null };
+}
+export interface LeadEventDto {
+  id: string;
+  source: { id: string; name: string } | null;
+  externalId: string | null;
+  contact: { id: string; name: string | null; phoneE164: string } | null;
+  assignedTo: UserRef | null;
+  status: string;
+  payload: unknown;
+  createdAt: string;
+}
+
+export interface ScoreDto {
+  overall: number;
+  scriptAdherence: number | null;
+  sentiment: Sentiment;
+  objections: { objection: string; handled: boolean }[];
+  nextStep: string | null;
+  strengths: string[];
+  improvements: string[];
+  model: string;
+  createdAt: string;
+}
+export interface Features {
+  scoring: boolean;
+  summaries: boolean;
+}
+
+/**
+ * Template rendering, identical on the server and Android: {name} = first word of the contact name (else "there"),
+ * {rep} = the rep's first name. Case-sensitive; unknown placeholders stay. split/join keeps "$" in names literal.
+ * Vectors: ("Hi {name}, {rep} here","Priya Shah","Kirti Arora") → "Hi Priya, Kirti here"; ("Hi {name}",null,"Kirti") →
+ * "Hi there"; ("{x} {name}","A","B") → "{x} A".
+ */
+export function renderTemplate(body: string, contactName: string | null | undefined, repName: string | null | undefined) {
+  const first = (s: string | null | undefined) => (s ?? "").trim().split(/\s+/)[0] ?? "";
+  const name = first(contactName) || "there";
+  const rep = first(repName);
+  return body.split("{name}").join(name).split("{rep}").join(rep);
+}
+/** A user's display name for {rep}: the name, else the email local part. */
+export const repName = (u: { name: string | null; email: string }) => (u.name?.trim() ? u.name : (u.email.split("@")[0] ?? ""));

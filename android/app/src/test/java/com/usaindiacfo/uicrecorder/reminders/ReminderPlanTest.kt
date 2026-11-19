@@ -102,4 +102,18 @@ class ReminderPlanTest {
         assertEquals("9:00 am", ReminderPlan.hourText(9))
         assertEquals("12:00 pm", ReminderPlan.hourText(12))
     }
+
+    @Test fun newLeadsNotifyOnceLikeMissedCalls() {
+        val lead = FollowUpItem(key = "task:l1", kind = FollowUpKind.NEW_LEAD, phoneE164 = "+919876543210", name = "Priya Shah", dueAt = "2026-11-18T04:00:00Z", source = "Website")
+        val anon = lead.copy(key = "task:l2", name = null)
+        val items = listOf(lead, anon, item("contact:a", "2026-11-18T10:00:00Z"))
+        assertEquals(listOf("task:l1", "task:l2"), ReminderPlan.newLeads(items, emptySet()).map { it.key })
+        assertEquals(listOf("task:l2"), ReminderPlan.newLeads(items, setOf("task:l1")).map { it.key })
+        assertEquals("New lead: Priya Shah", ReminderPlan.newLeadTitle(lead))
+        assertEquals("New lead: +919876543210", ReminderPlan.newLeadTitle(anon))
+        assertEquals("Website", ReminderPlan.newLeadBody(lead))
+        // Leads never get follow-up alarms; done leads are forgotten.
+        assertEquals(listOf("contact:a"), ReminderPlan.plan(items, emptyMap(), now).map { it.key })
+        assertEquals(setOf("task:l1"), ReminderPlan.liveLeadKeys(items, setOf("task:l1", "task:gone")))
+    }
 }

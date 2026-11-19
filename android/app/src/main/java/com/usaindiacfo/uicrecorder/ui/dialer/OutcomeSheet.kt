@@ -10,6 +10,11 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -35,7 +40,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import com.usaindiacfo.uicrecorder.appContainer
 import com.usaindiacfo.uicrecorder.data.api.ActivityType
-import com.usaindiacfo.uicrecorder.data.api.CallOutcome
+import com.usaindiacfo.uicrecorder.data.api.OutcomeDto
+import com.usaindiacfo.uicrecorder.dialer.OutcomeLogic
+import com.usaindiacfo.uicrecorder.dialer.OutcomePrompt
 import com.usaindiacfo.uicrecorder.data.api.ContactDto
 import com.usaindiacfo.uicrecorder.detect.CallLogMatcher
 import com.usaindiacfo.uicrecorder.dialer.DialLogic
@@ -110,21 +117,96 @@ fun PendingDialHost() {
 @Composable
 private fun OutcomeSheet(a: OutcomeAsk, onDone: () -> Unit) {
     val context = LocalContext.current
-    val repo = appContainer().activityRepository
+    val c = appContainer()
+    val repo = c.activityRepository
     val scope = rememberCoroutineScope()
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var outcome by remember { mutableStateOf(DialLogic.defaultOutcome(a.durationS)) }
+    var defs by remember { mutableStateOf(c.outcomeCatalog.outcomes) }
+    var selected by remember { mutableStateOf(OutcomeLogic.defaultFor(a.durationS, defs)) }
+    LaunchedEffect(Unit) {
+        c.outcomeCatalog.refresh()
+        defs = c.outcomeCatalog.outcomes
+        selected = selected?.let { s -> defs.firstOrNull { it.id == s.id } ?: s }
+    }
     var followUpAt by remember { mutableStateOf<Long?>(null) }
     var note by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
     var company by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
+    var confirmRemove by remember { mutableStateOf(false) }
+    var messageAfter by remember { mutableStateOf(false) }
+    var saved by remember { mutableStateOf(false) }
     val askName = a.contact?.name.isNullOrBlank()
     val askCompany = a.contact?.company.isNullOrBlank()
 
     fun skip() {
         DialPrefs(context).pending = null
         onDone()
+    }
+
+    fun save(def: OutcomeDto, withMessage: Boolean, confirmed: Boolean = false) {
+        val now = System.currentTimeMillis()
+        error = OutcomeLogic.validate(def, followUpAt, now)
+        if (error != null) return
+        if (OutcomeLogic.prompt(def.ruleEnum) == OutcomePrompt.CONFIRM_REMOVE && !confirmed) {
+            messageAfter = withMessage
+            confirmRemove = true
+            return
+        }
+        messageAfter = withMessage
+        scope.launch {
+            repo.log(
+                phone = a.dial.number,
+                type = ActivityType.CALL,
+                occurredAtMs = a.startedAtMs ?: a.dial.dialedAtMs,
+                clientId = a.dial.clientId,
+                outcome = def.baseOutcome,
+                outcomeId = def.id,
+                note = note,
+                followUpAtMs = OutcomeLogic.followUpFor(def, followUpAt, now),
+                durationS = a.durationS,
+                name = if (askName) name else null,
+                company = if (askCompany) company else null,
+                callListItemId = a.dial.callListItemId,
+            )
+            DialPrefs(context).pending = null
+            saved = true
+            if (!withMessage) onDone()
+        }
+    }
+
+    fun choose(def: OutcomeDto) {
+        selected = def
+        error = null
+        if (followUpAt != null && !OutcomeLogic.needsDate(def)) followUpAt = null
+        when (OutcomeLogic.prompt(def.ruleEnum)) {
+            OutcomePrompt.DATE -> pickFollowUpDate(context, followUpAt) { followUpAt = it; error = null }
+            OutcomePrompt.DATE_TIME -> pickFollowUp(context, followUpAt) { followUpAt = it; error = null }
+            OutcomePrompt.SAVE_NOW -> save(def, withMessage = false)
+            else -> if (OutcomeLogic.needsDate(def)) pickFollowUp(context, followUpAt) { followUpAt = it; error = null }
+        }
+    }
+
+    // After "Save + message": the outcome is queued; offer the template picker for this number.
+    if (saved && messageAfter) {
+        TemplatePickerSheet(phone = a.dial.number, contactName = a.contact?.name ?: name.takeIf { it.isNotBlank() }, onDismiss = onDone)
+        return
+    }
+
+    if (confirmRemove) {
+        val def = selected
+        AlertDialog(
+            onDismissRequest = { confirmRemove = false },
+            title = { Text(def?.label ?: "Remove") },
+            text = { Text(if (def?.addToDnc == true) "Remove this number from all call lists and mark do-not-call?" else "Remove this number from all call lists?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirmRemove = false
+                    if (def != null) save(def, messageAfter, confirmed = true)
+                }) { Text("Remove") }
+            },
+            dismissButton = { TextButton(onClick = { confirmRemove = false; messageAfter = false }) { Text("Cancel") } },
+        )
     }
 
     ModalBottomSheet(onDismissRequest = ::skip, sheetState = sheet) {
@@ -149,16 +231,30 @@ private fun OutcomeSheet(a: OutcomeAsk, onDone: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CallOutcome.entries.forEach { o ->
+                defs.forEach { d ->
                     FilterChip(
-                        selected = outcome == o, onClick = { outcome = o; error = null }, label = { Text(o.label) },
+                        selected = selected?.id == d.id, onClick = { choose(d) }, label = { Text(d.label) },
+                        leadingIcon = { ColorDot(d.color) },
                         modifier = Modifier.heightIn(min = 48.dp),
                     )
                 }
             }
-            if (outcome == CallOutcome.CALL_BACK) {
-                OutlinedButton(onClick = { pickFollowUp(context, followUpAt) { followUpAt = it; error = null } }) {
-                    Text(followUpAt?.let { "Call back: ${formatWhen(context, it)}" } ?: "Pick call-back date and time")
+            selected?.let { d ->
+                when (OutcomeLogic.prompt(d.ruleEnum)) {
+                    OutcomePrompt.RETRY -> Text(
+                        d.retryHours?.let { "Retry in $it h" } ?: "Retry later",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutcomePrompt.DATE -> OutlinedButton(onClick = { pickFollowUpDate(context, followUpAt) { followUpAt = it; error = null } }) {
+                        Text(followUpAt?.let { "Follow up: ${formatDate(context, it)}" } ?: "Pick follow-up date")
+                    }
+                    OutcomePrompt.DATE_TIME -> OutlinedButton(onClick = { pickFollowUp(context, followUpAt) { followUpAt = it; error = null } }) {
+                        val what = if (d.ruleEnum == com.usaindiacfo.uicrecorder.data.api.OutcomeRule.ASK_MEETING) "Meeting" else "Call back"
+                        Text(followUpAt?.let { "$what: ${formatWhen(context, it)}" } ?: "Pick ${what.lowercase()} date and time")
+                    }
+                    else -> if (OutcomeLogic.needsDate(d)) OutlinedButton(onClick = { pickFollowUp(context, followUpAt) { followUpAt = it; error = null } }) {
+                        Text(followUpAt?.let { "Call back: ${formatWhen(context, it)}" } ?: "Pick call-back date and time")
+                    }
                 }
             }
             OutlinedTextField(
@@ -170,30 +266,23 @@ private fun OutcomeSheet(a: OutcomeAsk, onDone: () -> Unit) {
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, androidx.compose.ui.Alignment.End)) {
                 TextButton(onClick = ::skip, modifier = Modifier.heightIn(min = 48.dp)) { Text("Skip") }
+                OutlinedButton(
+                    modifier = Modifier.heightIn(min = 48.dp),
+                    onClick = { selected?.let { save(it, withMessage = true) } ?: run { error = "Choose an outcome" } },
+                ) { Text("Save + message") }
                 Button(
                     modifier = Modifier.heightIn(min = 48.dp),
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = UicColors.callGreen, contentColor = androidx.compose.ui.graphics.Color.White),
-                    onClick = {
-                    error = DialLogic.validateOutcome(outcome, followUpAt, System.currentTimeMillis())
-                    if (error != null) return@Button
-                    scope.launch {
-                        repo.log(
-                            phone = a.dial.number,
-                            type = ActivityType.CALL,
-                            occurredAtMs = a.startedAtMs ?: a.dial.dialedAtMs,
-                            clientId = a.dial.clientId,
-                            outcome = outcome,
-                            note = note,
-                            followUpAtMs = if (outcome == CallOutcome.CALL_BACK) followUpAt else null,
-                            durationS = a.durationS,
-                            name = if (askName) name else null,
-                            company = if (askCompany) company else null,
-                        )
-                        DialPrefs(context).pending = null
-                        onDone()
-                    }
-                }) { Text("Save") }
+                    onClick = { selected?.let { save(it, withMessage = false) } ?: run { error = "Choose an outcome" } },
+                ) { Text("Save") }
             }
         }
     }
+}
+
+/** Small colour dot for an outcome ("#RRGGBB"). */
+@Composable
+fun ColorDot(hex: String?, size: androidx.compose.ui.unit.Dp = 10.dp) {
+    val color = OutcomeLogic.parseColor(hex)?.let { androidx.compose.ui.graphics.Color(it) } ?: MaterialTheme.colorScheme.outline
+    Box(Modifier.size(size).background(color, CircleShape))
 }

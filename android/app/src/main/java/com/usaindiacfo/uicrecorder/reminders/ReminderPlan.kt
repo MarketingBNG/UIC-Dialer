@@ -55,6 +55,24 @@ object ReminderPlan {
             .sortedBy { it.atMs }
             .toList()
 
+    /**
+     * NEW_LEAD items to notify now: new keys only ([notified] = keys already shown), like a missed call.
+     * Leads are notified once; follow-up alarms stay FOLLOW_UP only.
+     */
+    fun newLeads(items: List<FollowUpItem>, notified: Set<String>): List<FollowUpItem> =
+        items.filter { it.kind == FollowUpKind.NEW_LEAD && it.key !in notified }.distinctBy { it.key }
+
+    /** Keys worth remembering: notified leads that the server still returns (keeps the set small). */
+    fun liveLeadKeys(items: List<FollowUpItem>, notified: Set<String>): Set<String> =
+        notified intersect items.filter { it.kind == FollowUpKind.NEW_LEAD }.map { it.key }.toSet()
+
+    fun newLeadTitle(item: FollowUpItem): String = "New lead: ${item.name?.takeIf { it.isNotBlank() } ?: item.phoneE164}"
+
+    /** "Website · company" or null. */
+    fun newLeadBody(item: FollowUpItem): String? =
+        listOfNotNull(item.source?.takeIf { it.isNotBlank() }, item.company?.takeIf { it.isNotBlank() }, item.lastNote?.takeIf { it.isNotBlank() })
+            .joinToString(" · ").ifEmpty { null }
+
     /** Snoozes worth keeping: not older than the grace period and for an item that still exists. */
     fun liveSnoozes(snoozes: Map<String, Long>, keys: Set<String>, nowMs: Long): Map<String, Long> =
         snoozes.filter { (k, at) -> at > nowMs - GRACE_MS && k in keys }

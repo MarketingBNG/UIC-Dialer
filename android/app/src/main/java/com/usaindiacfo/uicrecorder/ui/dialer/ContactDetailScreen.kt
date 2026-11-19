@@ -8,7 +8,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -70,6 +74,8 @@ data class ContactDetailState(
     val error: String? = null,
     val message: String? = null,
     val saving: Boolean = false,
+    /** On the local hashed do-not-call list (covers contacts the server doesn't know yet). */
+    val localDnc: Boolean = false,
 )
 
 class ContactDetailViewModel(private val c: AppContainer, val phone: String) : ViewModel() {
@@ -77,7 +83,7 @@ class ContactDetailViewModel(private val c: AppContainer, val phone: String) : V
     val state: StateFlow<ContactDetailState> = _state.asStateFlow()
 
     fun load() = viewModelScope.launch {
-        _state.update { it.copy(loading = true) }
+        _state.update { it.copy(loading = true, localDnc = c.dncCheck.isDnc(phone)) }
         try {
             val r = c.apiClient.contactByPhone(phone)
             _state.update { it.copy(loading = false, contact = r.contact, activities = r.activities, error = null) }
@@ -107,6 +113,18 @@ class ContactDetailViewModel(private val c: AppContainer, val phone: String) : V
     }
 
     fun logWhatsApp() = viewModelScope.launch { c.activityRepository.log(phone, ActivityType.WHATSAPP) }
+
+    /** POST /v1/dnc, then refresh the local hashes so every screen warns at once. */
+    fun markDnc(reason: String) = viewModelScope.launch {
+        try {
+            c.apiClient.markDnc(_state.value.contact?.phoneE164 ?: phone, reason)
+            c.deviceConfigRepository.syncDnc()
+            _state.update { it.copy(message = "Marked do-not-call") }
+            load()
+        } catch (e: IOException) {
+            _state.update { it.copy(message = friendlyError(e)) }
+        }
+    }
 }
 
 
@@ -126,6 +144,10 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
         name = state.contact?.name.orEmpty()
         company = state.contact?.company.orEmpty()
     }
+    var menu by remember { mutableStateOf(false) }
+    var askDnc by remember { mutableStateOf(false) }
+    var dncReason by remember { mutableStateOf("") }
+    var templates by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("") }
     var noteFollowUp by remember { mutableStateOf<Long?>(null) }
     val contact = state.contact
@@ -135,12 +157,46 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
         TopAppBar(
             title = { Text("Contact") },
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+            actions = {
+                IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "More") }
+                DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Mark do-not-call") },
+                        enabled = state.contact?.dnc == null && !state.localDnc,
+                        onClick = { menu = false; dncReason = ""; askDnc = true },
+                    )
+                }
+            },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
+        if (askDnc) AlertDialog(
+            onDismissRequest = { askDnc = false },
+            title = { Text("Mark do-not-call") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Calls to this number will ask for confirmation, and it is left out of call lists.")
+                    OutlinedTextField(dncReason, { dncReason = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("Reason") }, singleLine = true)
+                }
+            },
+            confirmButton = { TextButton(onClick = { askDnc = false; vm.markDnc(dncReason) }) { Text("Mark") } },
+            dismissButton = { TextButton(onClick = { askDnc = false }) { Text("Cancel") } },
+        )
+        if (templates) TemplatePickerSheet(phone = number, contactName = contact?.name, onDismiss = { templates = false; vm.load() })
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            if (contact?.dnc != null || state.localDnc) {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                    Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text("Do not call", color = UicColors.overdue, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            contact?.dnc?.reason?.takeIf { it.isNotBlank() } ?: "This number is on the do-not-call list.",
+                            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
+            }
             // Header: avatar, name, number, status, follow-up, actions
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -151,6 +207,7 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
                             val sub = listOfNotNull(
                                 number.takeIf { !contact?.name.isNullOrBlank() },
                                 contact?.company?.takeIf { it.isNotBlank() },
+                                contact?.city?.takeIf { it.isNotBlank() },
                             ).joinToString(" · ")
                             if (sub.isNotEmpty()) Text(sub, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodyMedium)
                         }
@@ -173,7 +230,7 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(
-                            onClick = { call(number) },
+                            onClick = { call(number, dnc = contact?.dnc) },
                             modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = UicColors.callGreen, contentColor = Color.White),
                         ) { Text("Call") }
@@ -181,6 +238,10 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
                             onClick = { if (Dialer.whatsApp(context, number)) vm.logWhatsApp() },
                             modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                         ) { Text("WhatsApp") }
+                        OutlinedButton(
+                            onClick = { templates = true },
+                            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
+                        ) { Text("Message") }
                     }
                 }
             }
@@ -217,10 +278,11 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
                         if (i > 0) HorizontalDivider()
                         Column(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                if (a.outcomeLabel != null) ColorDot(a.outcomeColor)
                                 Text(
                                     buildList {
-                                        add(a.type.label)
-                                        a.outcome?.let { add(it.label) }
+                                        add(if (a.type == ActivityType.WHATSAPP && a.channel == "SMS") "SMS" else a.type.label)
+                                        (a.outcomeLabel ?: a.outcome?.label)?.let { add(it) }
                                         formatDuration(a.durationS)?.takeIf { a.type == ActivityType.CALL }?.let(::add)
                                     }.joinToString(" · "),
                                     style = MaterialTheme.typography.bodyMedium,

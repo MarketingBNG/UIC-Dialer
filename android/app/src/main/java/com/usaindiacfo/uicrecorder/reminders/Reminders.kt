@@ -96,13 +96,24 @@ object Reminders {
         val c = context.container
         if (c.tokenStore.user.value == null) return true
         return try {
-            ReminderScheduler.reschedule(context, fetchToday(c))
+            val today = fetchToday(c)
+            ReminderScheduler.reschedule(context, today)
+            notifyNewLeads(context, today.items)
             true
         } catch (_: IOException) {
             false
         } catch (_: kotlinx.serialization.SerializationException) { // e.g. a proxy page with status 200
             false
         }
+    }
+
+    /** "New lead: <name>" once per NEW_LEAD task (the server assigned the lead to this rep). */
+    fun notifyNewLeads(context: Context, items: List<FollowUpItem>) {
+        val store = ReminderStore(context)
+        val notified = store.notifiedLeads
+        val fresh = ReminderPlan.newLeads(items, notified)
+        fresh.forEach { Notifications.showNewLead(context, it) }
+        store.notifiedLeads = ReminderPlan.liveLeadKeys(items, notified) + fresh.map { it.key }
     }
 
     /**

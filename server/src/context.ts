@@ -31,6 +31,10 @@ export class HttpError extends Error {
   constructor(
     readonly statusCode: number,
     message: string,
+    /** Machine-readable reason sent as `code` (e.g. DNC, LIST_PAUSED, NOT_ASSIGNED, OUTCOME_NEEDS_DATE, EXISTS). */
+    readonly code?: string,
+    /** Extra JSON fields sent next to `error` / `code` (e.g. { contactId }). */
+    readonly extra?: Record<string, unknown>,
   ) {
     super(message);
   }

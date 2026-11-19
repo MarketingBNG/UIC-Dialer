@@ -181,6 +181,14 @@ export function Toggle({ checked, onChange, label, hint }: { checked: boolean; o
   );
 }
 
+/** AI call score out of 100: green 75+, amber 50+, red below. */
+export const ScorePill = ({ score }: { score: number }) => (
+  <Badge tone={score >= 75 ? "green" : score >= 50 ? "amber" : "red"}>
+    <span className="tabular-nums">{score}</span>
+    <span className="sr-only"> out of 100</span>
+  </Badge>
+);
+
 const CONTACT_TONE: Record<ContactStatus, Tone> = {
   NEW: "gray",
   INTERESTED: "green",

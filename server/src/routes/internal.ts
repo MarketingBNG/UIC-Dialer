@@ -15,6 +15,7 @@ import {
   claimJobs,
   claimOverflowJobs,
   completeJob,
+  completeScore,
   completeSummary,
   completeTranslation,
   failJob,
@@ -49,6 +50,20 @@ const Summary = z.object({
   sentiment: z.enum(SENTIMENTS),
   tags: z.array(z.string().max(100)).max(20),
   speakerRoles: z.array(z.object({ speaker: z.string().max(200), role: z.enum(SPEAKER_ROLES) })).max(50),
+  usage: Usage.optional(),
+});
+
+const Score = z.object({
+  workerId: z.string().min(1).max(100),
+  model: z.string().min(1).max(100),
+  overall: z.number().int().min(0).max(100),
+  scriptAdherence: z.number().int().min(0).max(100).nullable(),
+  sentiment: z.enum(SENTIMENTS),
+  objections: z.array(z.object({ objection: z.string().max(500), handled: z.boolean() })).max(10),
+  nextStep: z.string().max(2000).nullable(),
+  strengths: z.array(z.string().max(500)).max(5),
+  improvements: z.array(z.string().max(500)).max(5),
+  scriptId: z.uuid().nullable(),
   usage: Usage.optional(),
 });
 
@@ -105,6 +120,20 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
       await deps.db.call.updateMany({ where: { id: { in: transcribing } }, data: { status: "TRANSCRIBING" } });
     }
     const byId = new Map(calls.map((c) => [c.id, c]));
+    // Score jobs: the script of the call list the call was made from (call -> activity -> list item -> list).
+    const scoring = jobs.filter((j) => j.kind === "score").map((j) => j.callId);
+    const scripts = new Map<string, { id: string; name: string; sections: unknown }>();
+    if (scoring.length > 0) {
+      const acts = await deps.db.activity.findMany({
+        where: { callId: { in: scoring }, callListItem: { list: { scriptId: { not: null } } } },
+        orderBy: { occurredAt: "desc" },
+        select: { callId: true, callListItem: { select: { list: { select: { script: { select: { id: true, name: true, sections: true } } } } } } },
+      });
+      for (const a of acts) {
+        const s = a.callListItem?.list.script;
+        if (a.callId && s && !scripts.has(a.callId)) scripts.set(a.callId, s);
+      }
+    }
     // Admin setting: the worker masks Aadhaar / card numbers before posting a transcript or translation.
     const { maskPii } = await getPrivacySettings(deps.db);
     return {
@@ -119,7 +148,15 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
         audioPath: `/internal/audio/${j.callId}`,
         maskPii,
         // Summaries: the staff member on the call, so Claude can tell Agent from Customer.
-        ...(j.kind === "summarize" ? { agentName: byId.get(j.callId)?.user.name ?? byId.get(j.callId)?.user.email ?? null } : {}),
+        ...(j.kind === "summarize" || j.kind === "score"
+          ? { agentName: byId.get(j.callId)?.user.name ?? byId.get(j.callId)?.user.email ?? null }
+          : {}),
+        ...(j.kind === "score"
+          ? (() => {
+              const s = scripts.get(j.callId);
+              return { scriptId: s?.id ?? null, script: s ? { name: s.name, sections: s.sections } : null };
+            })()
+          : {}),
       })),
     };
   });
@@ -188,8 +225,17 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
   app.post<{ Params: { jobId: string } }>("/internal/jobs/:jobId/summary", resultOpts, async (req, reply) => {
     const jobId = z.uuid().parse(req.params.jobId);
     const body = Summary.parse(req.body);
-    if (!(await completeSummary(deps.db, jobId, body.workerId, body))) {
+    if (!(await completeSummary(deps.db, jobId, body.workerId, body, { score: deps.config.SCORE_ENABLED }))) {
       throw new HttpError(409, "Job is not a summarize job locked by this worker");
+    }
+    return reply.code(204).send();
+  });
+
+  app.post<{ Params: { jobId: string } }>("/internal/jobs/:jobId/score", resultOpts, async (req, reply) => {
+    const jobId = z.uuid().parse(req.params.jobId);
+    const body = Score.parse(req.body);
+    if (!(await completeScore(deps.db, jobId, body.workerId, body))) {
+      throw new HttpError(409, "Job is not a score job locked by this worker");
     }
     return reply.code(204).send();
   });
