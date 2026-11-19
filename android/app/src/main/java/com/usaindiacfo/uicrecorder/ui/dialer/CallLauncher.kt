@@ -13,6 +13,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import com.usaindiacfo.uicrecorder.appContainer
@@ -54,16 +55,25 @@ fun rememberCaller(): Caller {
     val dncCheck = appContainer().dncCheck
     val scope = rememberCoroutineScope()
     var waiting by remember { mutableStateOf<DialRequest?>(null) }
+    // The number survives rotation / process death while the permission dialog is open; the callbacks can't.
+    var waitingNumber by rememberSaveable { mutableStateOf<String?>(null) }
+    var waitingItemId by rememberSaveable { mutableStateOf<String?>(null) }
     var warn by remember { mutableStateOf<DialRequest?>(null) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
-        waiting?.let { r -> Dialer.call(context, r.number, r.callListItemId)?.let(r.onDialed) }
+        val r = waiting
+        if (r != null) Dialer.call(context, r.number, r.callListItemId)?.let(r.onDialed)
+        else waitingNumber?.let { Dialer.call(context, it, waitingItemId) }
         waiting = null
+        waitingNumber = null
+        waitingItemId = null
     }
     val place: (DialRequest) -> Unit = { r ->
         if (context.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
             Dialer.call(context, r.number, r.callListItemId)?.let(r.onDialed)
         } else {
             waiting = r
+            waitingNumber = r.number
+            waitingItemId = r.callListItemId
             launcher.launch(Manifest.permission.CALL_PHONE)
         }
     }

@@ -33,15 +33,16 @@ describe("contacts search and filters", () => {
     const word = `gstr${randomUUID().slice(0, 6)}`;
     const phone = randomMobile();
     const c = (await activity(rep.headers, phone, { note: `asked about ${word} filing`, outcome: "INTERESTED" })).json().contact;
-    await activity(other.headers, randomMobile(), { note: `${word} too` });
+    const o = (await activity(other.headers, randomMobile(), { note: `${word} too` })).json().contact;
     const byNote = await inject("GET", `/v1/contacts?q=${word}`, rep.headers);
     expect(ids(byNote)).toEqual([c.id]);
     const city = `Nagpur${randomUUID().slice(0, 4)}`;
     expect((await inject("PATCH", `/v1/contacts/${c.id}`, rep.headers, { city })).json().city).toBe(city);
     expect(ids(await inject("GET", `/v1/contacts?q=${city.toLowerCase()}`, rep.headers))).toEqual([c.id]);
     expect(ids(await inject("GET", `/v1/contacts?q=${phone.slice(-6)}`, rep.headers))).toContain(c.id);
-    // Admin sees both on the dashboard.
-    expect(ids(await inject("GET", `/api/contacts?q=${word}`, admin))).toHaveLength(2);
+    // Admin sees both on the dashboard. Search is fuzzy (trigram), so similar words other tests left in the
+    // shared DB may match too: check both are there, not the exact count.
+    expect(ids(await inject("GET", `/api/contacts?q=${word}`, admin))).toEqual(expect.arrayContaining([c.id, o.id]));
   });
 
   it("filters: interested, callback, never, mine; dnc on the dashboard", async () => {

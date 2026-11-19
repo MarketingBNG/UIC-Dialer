@@ -20,6 +20,8 @@ const GoogleLogin = z.object({
 /** Desktop app (UIC Dialer) sign-in: PKCE-style S256 challenge from the app; the code comes back via uicdialer://. */
 export const DESKTOP_SCHEME = "uicdialer";
 const DESKTOP_CODE_TTL_S = 120;
+/** Header the desktop app adds when it redeems its sign-in code (see desktop/src/main.js). */
+export const DESKTOP_HEADER = "x-uic-desktop";
 const Challenge = z.string().regex(/^[A-Za-z0-9_-]{43}$/);
 const DesktopStart = z.object({ desktop: Challenge.optional() });
 const DesktopExchange = z.object({ code: z.string().min(20).max(4096), verifier: z.string().regex(/^[A-Za-z0-9_-]{43,128}$/) });
@@ -102,7 +104,7 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
     if (!deps.oidc) throw new HttpError(503, "Dashboard sign-in is not configured");
     const { desktop } = DesktopStart.parse(req.query);
     const { url, verifier, state, nonce } = await deps.oidc.start();
-    const sealed = await deps.tokens.seal({ verifier, state, nonce, ...(desktop ? { desktop } : {}) }, 600);
+    const sealed = await deps.tokens.seal({ typ: "oidc", verifier, state, nonce, ...(desktop ? { desktop } : {}) }, 600);
     reply.setCookie(OIDC_COOKIE, sealed, { ...cookieOpts, maxAge: 600 });
     return reply.redirect(url);
   });
@@ -114,6 +116,7 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
     if (!sealed) return reply.redirect("/?error=expired");
     try {
       const checks = await deps.tokens.unseal(sealed);
+      if (checks["typ"] !== "oidc") throw new Error("Not an OIDC state cookie");
       const currentUrl = new URL(req.url, deps.config.PUBLIC_URL);
       const claims = await deps.oidc.finish(currentUrl, {
         verifier: String(checks["verifier"]),
@@ -123,7 +126,7 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
       const user = await resolveUser(deps.db, deps.config, claimsToIdentity(claims));
       if (typeof checks["desktop"] === "string") {
         // Signed in from the desktop app's browser tab: hand a one-time code back to the app instead of a cookie.
-        const code = await deps.tokens.seal({ uid: user.id, ch: checks["desktop"], jti: randomUUID() }, DESKTOP_CODE_TTL_S);
+        const code = await deps.tokens.seal({ typ: "desktop_code", uid: user.id, ch: checks["desktop"], jti: randomUUID() }, DESKTOP_CODE_TTL_S);
         const target = escapeHtml(`${DESKTOP_SCHEME}://auth?code=${encodeURIComponent(code)}&state=${encodeURIComponent(checks["desktop"])}`);
         return reply
           .type("text/html; charset=utf-8")
@@ -134,7 +137,7 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
               `<p>Signed in. Returning to UIC Dialer…</p><p><a href="${target}">Open UIC Dialer</a></p><p>You can close this tab.</p>`,
           );
       }
-      const session = await deps.tokens.seal({ uid: user.id }, SESSION_TTL_S);
+      const session = await deps.tokens.seal({ typ: "session", uid: user.id }, SESSION_TTL_S);
       reply.setCookie(SESSION_COOKIE, session, { ...cookieOpts, maxAge: SESSION_TTL_S });
       return reply.redirect("/");
     } catch (e) {
@@ -145,6 +148,9 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   app.get("/auth/desktop/exchange", strict, async (req, reply) => {
+    // Only the desktop app sends this header. A link or form on another site can't add it, so a victim's
+    // browser can't be signed in as someone else (login CSRF).
+    if (req.headers[DESKTOP_HEADER] !== "1") return reply.redirect("/?error=failed");
     const { code, verifier } = DesktopExchange.parse(req.query);
     let claims;
     try {
@@ -152,8 +158,8 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
     } catch {
       return reply.redirect("/?error=expired");
     }
-    const { uid, ch, jti } = claims;
-    if (typeof uid !== "string" || typeof ch !== "string" || typeof jti !== "string" || s256(verifier) !== ch) {
+    const { typ, uid, ch, jti } = claims;
+    if (typ !== "desktop_code" || typeof uid !== "string" || typeof ch !== "string" || typeof jti !== "string" || s256(verifier) !== ch) {
       return reply.redirect("/?error=failed");
     }
     const now = Date.now();
@@ -162,7 +168,7 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
     usedCodes.set(jti, now + DESKTOP_CODE_TTL_S * 1000);
     const user = await deps.db.user.findUnique({ where: { id: uid } });
     if (!user?.active) return reply.redirect("/?error=denied");
-    const session = await deps.tokens.seal({ uid: user.id }, SESSION_TTL_S);
+    const session = await deps.tokens.seal({ typ: "session", uid: user.id }, SESSION_TTL_S);
     reply.setCookie(SESSION_COOKIE, session, { ...cookieOpts, maxAge: SESSION_TTL_S });
     return reply.redirect("/");
   });

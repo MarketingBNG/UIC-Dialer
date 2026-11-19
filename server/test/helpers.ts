@@ -70,7 +70,7 @@ export async function setupTestApp(env: Record<string, string> = {}) {
   /** Dashboard session cookie for an existing user. */
   const sessionFor = async (email: string) => {
     const user = await db.user.findUniqueOrThrow({ where: { email } });
-    const sealed = await tokens.seal({ uid: user.id }, SESSION_TTL_S);
+    const sealed = await tokens.seal({ typ: "session", uid: user.id }, SESSION_TTL_S);
     return { cookie: `${SESSION_COOKIE}=${sealed}`, origin: PUBLIC_URL };
   };
 

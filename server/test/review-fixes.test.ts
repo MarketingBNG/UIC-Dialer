@@ -139,3 +139,35 @@ describe("followUpsDone", () => {
     expect(done.get(rep.id)).toBe(1);
   });
 });
+
+describe("review fixes (round 3)", () => {
+  it("PATCH /api/contacts/:id refuses an inactive owner", async () => {
+    const rep = await teamRep();
+    const gone = await t.db.user.create({ data: { email: uniqueEmail("rfgone"), team, active: false } });
+    const c = await t.db.contact.create({ data: { phoneE164: `+91${randomMobile()}`, ownerId: rep.user.id } });
+    const res = await inject("PATCH", `/api/contacts/${c.id}`, mgr, { ownerId: gone.id });
+    expect(res.statusCode).toBe(400);
+    expect((await t.db.contact.findUniqueOrThrow({ where: { id: c.id } })).ownerId).toBe(rep.user.id);
+  });
+
+  it("a corrupt upload never touches the stored file", async () => {
+    const { Readable } = await import("node:stream");
+    const { ChecksumMismatchError } = await import("../src/storage/local.js");
+    const rel = `rf/${randomUUID()}.m4a`;
+    await t.storage.save(Readable.from([Buffer.from("good")]), rel, 1000);
+    await expect(t.storage.save(Readable.from([Buffer.from("bad!")]), rel, 1000, "0".repeat(64))).rejects.toBeInstanceOf(ChecksumMismatchError);
+    expect(await t.storage.size(rel)).toBe(4);
+    const chunks: Buffer[] = [];
+    for await (const ch of t.storage.read(rel)) chunks.push(ch as Buffer);
+    expect(Buffer.concat(chunks).toString()).toBe("good");
+    await t.storage.remove(rel);
+  });
+
+  it("registering the same recording twice at once returns one call", async () => {
+    const rep = await teamRep();
+    const meta = { originalSha256: randomUUID().replace(/-/g, "").padEnd(64, "a"), direction: "OUTGOING", startedAt: new Date().toISOString(), phoneNumber: randomMobile() };
+    const res = await Promise.all([1, 2, 3].map(() => inject("POST", "/v1/calls", rep.headers, meta)));
+    for (const r of res) expect(r.statusCode).toBeLessThan(300);
+    expect(new Set(res.map((r) => r.json().callId)).size).toBe(1);
+  });
+});

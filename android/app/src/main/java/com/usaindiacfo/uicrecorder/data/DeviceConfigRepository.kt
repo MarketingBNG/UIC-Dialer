@@ -82,6 +82,19 @@ class DeviceConfigRepository(
         }
     }
 
+    /**
+     * After a sign-out or server-side session end: drop the previous rep's own excluded numbers and mark the cache
+     * stale, so the next rep's first sync fetches their config instead of skipping (or uploading) calls by the old
+     * rep's list for up to 6 h. Org-wide settings (business-only, folders) are kept as the offline fallback.
+     */
+    suspend fun forgetUser() {
+        val cur = current()
+        context.configStore.edit {
+            it.remove(keyFetchedAt)
+            if (it[keyJson] != null) it[keyJson] = api.json.encodeToString(cur.copy(excludedNumbers = emptyList()))
+        }
+    }
+
     /** Refreshes when the cache is older than [maxAgeMs]; falls back to the cache on network errors. */
     suspend fun refreshIfStale(maxAgeMs: Long = 6 * 3600_000L): DeviceConfig {
         val fetchedAt = context.configStore.data.first()[keyFetchedAt] ?: 0

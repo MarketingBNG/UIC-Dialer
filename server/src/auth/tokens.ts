@@ -3,6 +3,8 @@ import { EncryptJWT, SignJWT, jwtDecrypt, jwtVerify } from "jose";
 import type { Db } from "../db.js";
 
 export const ACCESS_TTL_S = 15 * 60;
+/** A rotated refresh token presented again this soon is a retry or a race, not theft. */
+export const REUSE_GRACE_MS = 60_000;
 const REFRESH_TTL_MS = 90 * 24 * 3600 * 1000;
 const ISSUER = "uic-recorder";
 
@@ -53,8 +55,9 @@ export class TokenService {
   }
 
   /**
-   * Rotates a refresh token. Reusing an already-rotated token is treated as theft:
-   * the device is revoked and all its tokens are invalidated.
+   * Rotates a refresh token. Reusing an already-rotated token is treated as theft (the device is revoked and
+   * all its tokens are invalidated), except within REUSE_GRACE_MS of its rotation: a retry after a lost
+   * response, or two refreshes racing, then gets a fresh pair instead of signing the rep out.
    */
   async rotate(refreshToken: string) {
     const row = await this.db.refreshToken.findUnique({
@@ -62,11 +65,17 @@ export class TokenService {
       include: { device: { include: { user: true } } },
     });
     if (!row) return null;
-    if (row.revokedAt) {
-      await this.revokeDevice(row.deviceId);
-      return null;
-    }
     const { device } = row;
+    if (row.revokedAt) {
+      // Only a token that was rotated (replacedBy set) gets the grace window; a logged-out token never does.
+      const inGrace = row.replacedBy != null && Date.now() - row.revokedAt.getTime() <= REUSE_GRACE_MS;
+      if (!inGrace) {
+        await this.revokeDevice(row.deviceId);
+        return null;
+      }
+      if (row.expiresAt < new Date() || device.revokedAt || !device.user.active) return null;
+      return { ...(await this.issueForDevice(device.userId, device.id)), user: device.user };
+    }
     if (row.expiresAt < new Date() || device.revokedAt || !device.user.active) return null;
 
     const next = await this.issueForDevice(device.userId, device.id);
@@ -75,8 +84,10 @@ export class TokenService {
       where: { id: row.id, revokedAt: null },
       data: { revokedAt: new Date(), replacedBy: next.refreshTokenId },
     });
-    if (count === 0) {
-      await this.revokeDevice(row.deviceId);
+    // Lost a race with a concurrent rotation of the same token: that is the grace case, so the pair just
+    // issued stands (the other request's pair stays valid too).
+    if (count === 0 && (await this.db.device.findUnique({ where: { id: device.id } }))?.revokedAt) {
+      await this.db.refreshToken.updateMany({ where: { id: next.refreshTokenId }, data: { revokedAt: new Date() } });
       return null;
     }
     return { ...next, user: device.user };
@@ -89,12 +100,14 @@ export class TokenService {
     });
   }
 
-  async revokeDevice(deviceId: string): Promise<void> {
+  /** Revokes the device and all its refresh tokens. False when no such device exists. */
+  async revokeDevice(deviceId: string): Promise<boolean> {
     const now = new Date();
-    await this.db.$transaction([
-      this.db.device.update({ where: { id: deviceId }, data: { revokedAt: now } }),
+    const [d] = await this.db.$transaction([
+      this.db.device.updateMany({ where: { id: deviceId }, data: { revokedAt: now } }),
       this.db.refreshToken.updateMany({ where: { deviceId, revokedAt: null }, data: { revokedAt: now } }),
     ]);
+    return d.count > 0;
   }
 
   // ---- Dashboard session / OIDC state (encrypted cookies) ---------------

@@ -69,12 +69,17 @@ describe("app sign-in with Google", () => {
 
 describe("refresh tokens", () => {
   it("rotates, and reuse of an old token revokes the device", async () => {
-    const s = await t.loginDevice(uniqueEmail());
+    const email = uniqueEmail();
+    const s = await t.loginDevice(email);
     const r1 = await t.app.inject({ method: "POST", url: "/v1/auth/refresh", payload: { refreshToken: s.refreshToken } });
     expect(r1.statusCode).toBe(200);
     const next = r1.json();
 
-    // Replaying the first token = theft signal.
+    // Replaying the first token after the grace window = theft signal.
+    await t.db.refreshToken.updateMany({
+      where: { revokedAt: { not: null }, device: { user: { email } } },
+      data: { revokedAt: new Date(Date.now() - 5 * 60_000) },
+    });
     const replay = await t.app.inject({ method: "POST", url: "/v1/auth/refresh", payload: { refreshToken: s.refreshToken } });
     expect(replay.statusCode).toBe(401);
 
@@ -83,6 +88,24 @@ describe("refresh tokens", () => {
     expect(r2.statusCode).toBe(401);
     const cfg = await t.app.inject({ method: "GET", url: "/v1/device/config", headers: { authorization: `Bearer ${next.accessToken}` } });
     expect(cfg.statusCode).toBe(401);
+  });
+
+  it("a retry of a just-rotated token (lost response) gets a fresh pair, not a revoked device", async () => {
+    const s = await t.loginDevice(uniqueEmail());
+    const r1 = await t.app.inject({ method: "POST", url: "/v1/auth/refresh", payload: { refreshToken: s.refreshToken } });
+    expect(r1.statusCode).toBe(200);
+    const retry = await t.app.inject({ method: "POST", url: "/v1/auth/refresh", payload: { refreshToken: s.refreshToken } });
+    expect(retry.statusCode).toBe(200);
+    const r2 = await t.app.inject({ method: "POST", url: "/v1/auth/refresh", payload: { refreshToken: retry.json().refreshToken } });
+    expect(r2.statusCode).toBe(200);
+  });
+
+  it("revoking an unknown device is a 404", async () => {
+    const admin = await t.loginDevice(uniqueEmail(), "ADMIN");
+    const res = await t.app.inject({ method: "POST", url: `/api/devices/${randomUUID()}/revoke`, headers: admin.headers });
+    expect(res.statusCode).toBe(404);
+    const u = await t.app.inject({ method: "PATCH", url: `/api/users/${randomUUID()}`, headers: admin.headers, payload: { name: "x" } });
+    expect(u.statusCode).toBe(404);
   });
 
   it("deactivating a user blocks the app immediately", async () => {
@@ -133,9 +156,19 @@ describe("app uses the dashboard API with its token", () => {
 describe("desktop app sign-in handoff", () => {
   const verifier = "v".repeat(20) + randomUUID().replace(/-/g, "");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
-  const codeFor = async (uid: string, ch = challenge) => t.tokens.seal({ uid, ch, jti: randomUUID() }, 120);
-  const exchange = (code: string, v = verifier) =>
-    t.app.inject({ method: "GET", url: `/auth/desktop/exchange?code=${encodeURIComponent(code)}&verifier=${v}` });
+  const codeFor = async (uid: string, ch = challenge) => t.tokens.seal({ typ: "desktop_code", uid, ch, jti: randomUUID() }, 120);
+  const exchange = (code: string, v = verifier, headers: Record<string, string> = { "x-uic-desktop": "1" }) =>
+    t.app.inject({ method: "GET", url: `/auth/desktop/exchange?code=${encodeURIComponent(code)}&verifier=${v}`, headers });
+
+  it("refuses an exchange without the desktop header (login CSRF from another site)", async () => {
+    const user = await t.db.user.create({ data: { email: uniqueEmail() } });
+    const code = await codeFor(user.id);
+    const res = await exchange(code, verifier, {});
+    expect(res.headers.location).toBe("/?error=failed");
+    expect(res.headers["set-cookie"]).toBeUndefined();
+    // The refused attempt doesn't use up the code: the app can still redeem it.
+    expect((await exchange(code)).headers.location).toBe("/");
+  });
 
   it("sets a session cookie for the right verifier, once", async () => {
     const user = await t.db.user.create({ data: { email: uniqueEmail() } });
@@ -160,5 +193,14 @@ describe("desktop app sign-in handoff", () => {
     const user = await t.db.user.create({ data: { email: uniqueEmail(), active: false } });
     expect((await exchange(await codeFor(user.id))).headers.location).toBe("/?error=denied");
     expect((await exchange("x".repeat(40))).headers.location).toBe("/?error=expired");
+  });
+
+  it("a desktop code is not a session cookie, and a session is not a desktop code", async () => {
+    const user = await t.db.user.create({ data: { email: uniqueEmail() } });
+    const code = await codeFor(user.id);
+    const res = await t.app.inject({ method: "GET", url: "/api/me", cookies: { uic_session: code } });
+    expect(res.statusCode).toBe(401);
+    const session = await t.tokens.seal({ typ: "session", uid: user.id, ch: challenge, jti: randomUUID() }, 120);
+    expect((await exchange(session)).headers.location).toBe("/?error=failed");
   });
 });

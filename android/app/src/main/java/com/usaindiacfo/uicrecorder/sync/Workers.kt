@@ -130,6 +130,11 @@ class ActivityWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(c
                         if (e.code == 404 && e.fromServer) { batched = false; continue } else throw e
                     }
                     val byId = results.associateBy { it.clientId }
+                    // Nothing in this batch was answered: re-reading it now would resend the same rows in a tight loop.
+                    if (batch.none { byId[it.clientId] != null }) {
+                        batch.forEach { dao.bumpAttempts(it.clientId) }
+                        return Result.retry()
+                    }
                     for (row in batch) {
                         val r = byId[row.clientId]
                         when {

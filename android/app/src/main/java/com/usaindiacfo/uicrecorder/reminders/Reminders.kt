@@ -65,6 +65,8 @@ object Reminders {
         ReminderScheduler.cancelAll(context)
         runCatching { context.container.db.pendingMissed().deleteAll() }
         WorkManager.getInstance(context).cancelUniqueWork(SYNC)
+        // Posted reminders / missed calls / new leads carry the previous rep's clients: take them down too.
+        runCatching { androidx.core.app.NotificationManagerCompat.from(context).cancelAll() }
     }
 
     /**

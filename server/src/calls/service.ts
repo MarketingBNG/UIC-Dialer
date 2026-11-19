@@ -1,11 +1,11 @@
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
 import { HttpError, type Deps } from "../context.js";
-import type { CallSource, DialVia } from "../generated/prisma/client.js";
+import { Prisma, type CallSource, type DialVia } from "../generated/prisma/client.js";
 import { LINK_WINDOW_MS, closeMissedTasks, linkCallToActivity } from "../activity/service.js";
 import { decideCallVia } from "../activity/via.js";
 import { toE164 } from "../phone.js";
-import { UploadTooLargeError, mimeFromContentType } from "../storage/local.js";
+import { ChecksumMismatchError, UploadTooLargeError, mimeFromContentType } from "../storage/local.js";
 
 export const sha256Hex = z.string().regex(/^[a-f0-9]{64}$/);
 
@@ -54,13 +54,22 @@ export async function registerCall(
     durationS: body.durationS ?? null,
     originalName: body.originalName ?? null,
   };
-  const existing = await deps.db.call.findUnique({
-    where: { userId_originalSha256: { userId, originalSha256: body.originalSha256 } },
-  });
-  if (existing && existing.status !== "PENDING_UPLOAD") return { callId: existing.id, alreadyUploaded: true };
-  let call = existing
-    ? await deps.db.call.update({ where: { id: existing.id }, data })
-    : await deps.db.call.create({ data: { ...data, userId, originalSha256: body.originalSha256 } });
+  const key = { userId_originalSha256: { userId, originalSha256: body.originalSha256 } };
+  let existing = await deps.db.call.findUnique({ where: key });
+  if (!existing) {
+    try {
+      existing = await deps.db.call.create({ data: { ...data, userId, originalSha256: body.originalSha256 } });
+    } catch (e) {
+      // The same recording registered twice at once: continue with the row the other request created.
+      if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")) throw e;
+      existing = await deps.db.call.findUniqueOrThrow({ where: key });
+      if (existing.status !== "PENDING_UPLOAD") return { callId: existing.id, alreadyUploaded: true };
+    }
+  } else {
+    if (existing.status !== "PENDING_UPLOAD") return { callId: existing.id, alreadyUploaded: true };
+    existing = await deps.db.call.update({ where: { id: existing.id }, data });
+  }
+  let call = existing;
   // Imported files carry no dialling history.
   if (!call.via && source !== "IMPORT") call = await setCallVia(deps, call, bodyVia);
   if (call.phoneE164 && (call.direction === "OUTGOING" || (call.direction === "INCOMING" && (call.durationS ?? 0) > 0))) {
@@ -139,6 +148,22 @@ async function markStored(
   });
 }
 
+/** markStored; a losing concurrent upload of a different file removes its own copy (never the winner's). */
+async function markStoredOrDiscard(
+  deps: Deps,
+  call: { id: string; source: CallSource },
+  rel: string,
+  saved: { sha256: string; size: number },
+  mime: string,
+): Promise<boolean> {
+  const won = await markStored(deps, call, rel, saved, mime);
+  if (!won) {
+    const winner = await deps.db.call.findUnique({ where: { id: call.id }, select: { filePath: true } });
+    if (winner?.filePath !== rel) await deps.storage.remove(rel);
+  }
+  return won;
+}
+
 const intHeader = (v: string | string[] | undefined): number | undefined => {
   if (typeof v !== "string" || !/^\d{1,15}$/.test(v)) return undefined;
   return Number(v);
@@ -179,7 +204,7 @@ export async function storeAudio(
   if (!call) throw new HttpError(404, "Call not found");
   if (call.status !== "PENDING_UPLOAD") return { callId: call.id, alreadyUploaded: true, complete: true };
 
-  const rel = deps.storage.callPath(userId, call.id, call.startedAt, mime);
+  const rel = deps.storage.callPath(userId, call.id, call.startedAt, mime, expected.data);
 
   if (offset !== undefined && total !== undefined) {
     // One writer per partial file. A dropped request can still be flushing its last bytes when the phone's
@@ -209,27 +234,27 @@ export async function storeAudio(
       await deps.storage.removePartial(call.id, expected.data);
       throw new HttpError(422, "More bytes than Upload-Length");
     }
-    const saved = await deps.storage.finishPartial(call.id, expected.data, rel);
-    if (saved.sha256 !== expected.data) {
-      await deps.storage.remove(rel);
-      throw new HttpError(422, "Checksum mismatch");
+    let saved;
+    try {
+      saved = await deps.storage.finishPartial(call.id, expected.data, rel);
+    } catch (e) {
+      if (e instanceof ChecksumMismatchError) throw new HttpError(422, "Checksum mismatch");
+      throw e;
     }
-    const won = await markStored(deps, call, rel, saved, mime);
+    const won = await markStoredOrDiscard(deps, call, rel, saved, mime);
     return { callId: call.id, alreadyUploaded: !won, complete: true };
   }
 
   let saved;
   try {
-    saved = await deps.storage.save(req.raw, rel, maxBytes);
+    // Verified before it is moved into place, so a corrupt upload never touches a stored file.
+    saved = await deps.storage.save(req.raw, rel, maxBytes, expected.data);
   } catch (e) {
     if (e instanceof UploadTooLargeError) throw new HttpError(413, "File too large");
+    if (e instanceof ChecksumMismatchError) throw new HttpError(422, "Checksum mismatch");
     throw e;
   }
-  if (saved.sha256 !== expected.data) {
-    await deps.storage.remove(rel);
-    throw new HttpError(422, "Checksum mismatch");
-  }
-  const won = await markStored(deps, call, rel, saved, mime);
+  const won = await markStoredOrDiscard(deps, call, rel, saved, mime);
   return { callId: call.id, alreadyUploaded: !won, complete: true };
 }
 

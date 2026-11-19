@@ -136,3 +136,36 @@ def test_run_processes_jobs_in_parallel():
     assert sorted(finished) == sorted(f"j{i}" for i in range(8))
     assert peak == 4
     assert elapsed < 1.2  # 8 jobs x 0.2s sequentially would be 1.6s+
+
+
+def test_success_result_is_posted_while_heartbeat_still_runs(monkeypatch):
+    import worker.main as m
+    from worker.providers import Transcript
+
+    alive = {}
+
+    class Hb:
+        def __init__(self, api, job_id):
+            pass
+
+        def __enter__(self):
+            alive["on"] = True
+            return self
+
+        def __exit__(self, *_):
+            alive["on"] = False
+
+    class FakeApi:
+        def download(self, path, dest):
+            dest.write_bytes(b"x")
+
+        def post_result(self, job_id, payload):
+            alive["at_post"] = alive["on"]
+
+    class P:
+        def transcribe(self, *_):
+            return Transcript(text="ok", provider="p")
+
+    monkeypatch.setattr(m, "_Heartbeat", Hb)
+    process_job(FakeApi(), P(), {"jobId": "j1", "callId": "c1", "audioPath": "a"}, None)
+    assert alive["at_post"] is True and alive["on"] is False

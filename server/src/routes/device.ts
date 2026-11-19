@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import { createReadStream } from "node:fs";
+import { stat } from "node:fs/promises";
 import path from "node:path";
 import { z } from "zod";
 import { requireDevice } from "../auth/guards.js";
@@ -83,6 +84,9 @@ export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
     if (!latestApp) throw new HttpError(404, "No app published");
     // Inside the mounted storage dir so it survives redeploys.
     const file = path.join(deps.storage.root, "apk", latestApp.fileName);
+    const found = await stat(file).catch(() => null);
+    if (!found?.isFile()) throw new HttpError(404, "App file missing");
+    reply.header("content-length", found.size);
     reply.header("content-type", "application/vnd.android.package-archive");
     reply.header("content-disposition", `attachment; filename="${latestApp.fileName}"`);
     return reply.send(createReadStream(file));

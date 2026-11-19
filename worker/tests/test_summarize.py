@@ -176,3 +176,19 @@ def test_api_post_summary_ignores_lost_lock():
     route = respx.post("http://api.test/internal/jobs/j1/summary").mock(return_value=httpx.Response(409))
     api.post_summary("j1", {"summary": "x"})
     assert json.loads(route.calls[0].request.content)["workerId"] == "t1"
+
+
+class BadReplyBatches(FakeBatches):
+    def results(self, _id):
+        for req in self.created[-1]:
+            yield SimpleNamespace(custom_id=req["custom_id"], result=SimpleNamespace(type="succeeded", message=reply("oops")))
+
+
+def test_summarize_batch_live_fallback_counts_the_failed_batch_reply():
+    res = summarize_batch(client(reply(GOOD), batches=BadReplyBatches()), {"j1": (TRANSCRIPT, None)}, poll_s=0)
+    _, usage = res["j1"]
+    assert usage["input_tokens"] == 200 and usage["output_tokens"] == 40
+    res = summarize_batch(client(reply("bad"), reply("bad"), batches=BadReplyBatches()), {"j1": (TRANSCRIPT, None)},
+                          poll_s=0)
+    assert isinstance(res["j1"], SummaryError)
+    assert res["j1"].usage["input_tokens"] == 300 and res["j1"].usage["output_tokens"] == 60

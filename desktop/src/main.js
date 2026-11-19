@@ -88,9 +88,15 @@ function finishSignIn(link) {
   exchange.searchParams.set("verifier", match.flow.verifier);
   log("sign-in callback received");
   showWindow();
+  // A pending reload would abort the exchange after the server has used up the single-use code.
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
   // Loaded in the window so the session cookie lands in the window's own cookie jar. The server redirects to
   // "/" on success or "/?error=…", which the sign-in page explains.
-  void win.loadURL(exchange.href);
+  // The header proves the request comes from this app; the server refuses the exchange without it.
+  void win.loadURL(exchange.href, { extraHeaders: "X-UIC-Desktop: 1\n" });
 }
 
 /** Acts on a link from the page. Returns true when the window may follow it itself. */
@@ -272,7 +278,8 @@ function refreshTray() {
       {
         label: "Start with Windows",
         type: "checkbox",
-        checked: app.getLoginItemSettings().openAtLogin,
+        // Windows matches the Run entry on path AND args, so ask with the same args it was saved with.
+        checked: app.getLoginItemSettings({ args: ["--hidden"] }).openAtLogin,
         // --hidden: starts in the tray, so it's ready for calls without a window popping up at login.
         click: (item) => {
           app.setLoginItemSettings({ openAtLogin: item.checked, args: ["--hidden"] });

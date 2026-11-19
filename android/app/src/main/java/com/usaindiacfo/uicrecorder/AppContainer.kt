@@ -51,7 +51,10 @@ class AppContainer(private val context: Context) {
             if (now == signedIn) return@collect
             signedIn = now
             if (now) com.usaindiacfo.uicrecorder.reminders.Reminders.init(context)
-            else com.usaindiacfo.uicrecorder.reminders.Reminders.clearSession(context)
+            else {
+                com.usaindiacfo.uicrecorder.reminders.Reminders.clearSession(context)
+                runCatching { deviceConfigRepository.forgetUser() }
+            }
         }
     }
 

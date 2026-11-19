@@ -182,7 +182,13 @@ export class ZohoClient {
       }
       if (res.status === 204) return null;
       const text = await res.text();
-      const json = text ? (JSON.parse(text) as T & { code?: string; message?: string }) : null;
+      let json: (T & { code?: string; message?: string }) | null = null;
+      try {
+        json = text ? (JSON.parse(text) as T & { code?: string; message?: string }) : null;
+      } catch {
+        // Non-JSON body (e.g. a proxy's HTML 502 page): keep the HTTP status so outages stay global errors.
+        throw new ZohoError(res.status, `Zoho ${method} ${path.split("?")[0]}: HTTP ${res.status} (non-JSON response)`, undefined, undefined, res.ok || res.status >= 500);
+      }
       if (!res.ok) {
         // Per-record errors come inside data[0] (e.g. INVALID_DATA for a deleted record id).
         type Err = { code?: string; message?: string; details?: Record<string, unknown> };

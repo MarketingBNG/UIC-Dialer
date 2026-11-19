@@ -68,6 +68,11 @@ describe("POST /v1/leads/inbound", () => {
     expect(bad.statusCode).toBe(400);
     expect(await t.db.leadEvent.count({ where: { sourceId: s.id, status: "INVALID" } })).toBe(1);
     expect((await post(s.token, { name: "No phone", id: "x1" })).statusCode).toBe(400);
+    // A retry of the same lead with a usable phone is not stuck on the earlier rejection.
+    const fixed = await post(s.token, { name: "Now with phone", id: "x1", phone: randomMobile() });
+    expect(fixed.statusCode).toBe(200);
+    expect(fixed.json()).toMatchObject({ ok: true, status: "ASSIGNED" });
+    expect(await t.db.leadEvent.count({ where: { sourceId: s.id, status: "INVALID" } })).toBe(0);
     const text = await t.app.inject({ method: "POST", url: "/v1/leads/inbound", headers: { authorization: `Bearer ${s.token}`, "content-type": "text/plain" }, payload: "phone=1" });
     expect(text.statusCode).toBe(415);
     await inject("PATCH", `/api/lead-sources/${s.id}`, admin, { active: false });

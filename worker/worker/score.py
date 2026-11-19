@@ -103,11 +103,11 @@ def _clean_list(v, limit: int, width: int) -> list[str]:
 def parse_reply(msg, has_script: bool) -> dict:
     if msg.stop_reason in ("refusal", "max_tokens"):
         raise ScoreError(f"stop_reason={msg.stop_reason}")
-    text = next(b.text for b in msg.content if b.type == "text")
     try:
+        text = next(b.text for b in msg.content if b.type == "text")
         d = json.loads(text)
         overall = _clamp(d["overall"])
-    except (ValueError, KeyError, TypeError) as e:
+    except (StopIteration, ValueError, KeyError, TypeError) as e:
         raise ScoreError(f"bad score reply: {e}") from e
     adherence = d.get("scriptAdherence")
     try:

@@ -14,7 +14,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Never cancel on main: a cancelled run could drop or cut off an app publish.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   server:
@@ -125,8 +126,11 @@ jobs:
   release:
     name: Publish app update
     needs: [server, worker, android, secrets]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read # find the last successful run (see "Did the app change?")
     # Repository secrets: UIC_KEYSTORE_B64 (base64 of the release .jks), UIC_KEYSTORE_PASSWORD,
     # UIC_API_URL (https://...), UIC_GOOGLE_WEB_CLIENT_ID, APP_PUBLISH_TOKEN (same as the server's env var).
     env:
@@ -138,9 +142,13 @@ jobs:
           fetch-depth: 0
       - name: Did the app change?
         id: changed
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then echo "app=true" >> "$GITHUB_OUTPUT"; exit 0; fi
-          before="${{ github.event.before }}"
+          # Compare with the last successful run on main, not just the previous push: if an earlier release
+          # failed or was skipped, its android/ change still gets published now.
+          before=$(gh api "repos/${{ github.repository }}/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=1" --jq '.workflow_runs[0].head_sha // empty' 2>/dev/null || true)
           if [ -z "$before" ] || ! git cat-file -e "$before" 2>/dev/null; then echo "app=true" >> "$GITHUB_OUTPUT"; exit 0; fi
           if git diff --quiet "$before" "${{ github.sha }}" -- android/; then echo "app=false" >> "$GITHUB_OUTPUT"; else echo "app=true" >> "$GITHUB_OUTPUT"; fi
       - name: Secrets present?

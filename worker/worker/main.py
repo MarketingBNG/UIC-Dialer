@@ -218,14 +218,19 @@ def process_job(api: Api, provider: Provider, job: dict, language: str | None) -
             log.exception("job failed", job_id=job_id)
             api.post_result(job_id, {"ok": False, "error": f"{type(e).__name__}: {e}", "retryable": True})
             return
-    text, segments = t.text, t.segments
-    if job.get("maskPii"):
-        # Admin privacy setting: Aadhaar / card numbers never reach the database.
-        text, segments = mask_text(text), mask_segments(segments)
-    payload = {"ok": True, "text": text, "provider": t.provider, "segments": segments}
-    if t.language:
-        payload["language"] = t.language
-    api.post_result(job_id, payload)
+        text, segments = t.text, t.segments
+        if job.get("maskPii"):
+            # Admin privacy setting: Aadhaar / card numbers never reach the database.
+            text, segments = mask_text(text), mask_segments(segments)
+            # Word-level timings (Sarvam) split a number across words, so masking each word misses it:
+            # drop the word list wherever the segment text needed masking.
+            segments = [{k: v for k, v in m.items() if k != "words"}
+                        if isinstance(m, dict) and isinstance(o, dict) and m.get("text") != o.get("text") else m
+                        for m, o in zip(segments, t.segments)]
+        payload = {"ok": True, "text": text, "provider": t.provider, "segments": segments}
+        if t.language:
+            payload["language"] = t.language
+        api.post_result(job_id, payload)
     log.info("job done", job_id=job_id, call_id=job["callId"], seconds=round(time.monotonic() - started, 1),
              chars=len(text))
 

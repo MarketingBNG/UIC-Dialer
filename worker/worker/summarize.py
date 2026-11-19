@@ -101,11 +101,11 @@ def _clean_list(v, limit: int, width: int) -> list[str]:
 def parse_reply(msg, speakers: list[str]) -> dict:
     if msg.stop_reason in ("refusal", "max_tokens"):
         raise SummaryError(f"stop_reason={msg.stop_reason}")
-    text = next(b.text for b in msg.content if b.type == "text")
     try:
+        text = next(b.text for b in msg.content if b.type == "text")
         d = json.loads(text)
         summary = str(d["summary"]).strip()
-    except (ValueError, KeyError, TypeError) as e:
+    except (StopIteration, ValueError, KeyError, TypeError) as e:
         raise SummaryError(f"bad summary reply: {e}") from e
     if not summary:
         raise SummaryError("empty summary")
@@ -127,6 +127,13 @@ def parse_reply(msg, speakers: list[str]) -> dict:
 
 def _usage(msg, model: str) -> dict:
     return {"model": model, "input_tokens": msg.usage.input_tokens, "output_tokens": msg.usage.output_tokens}
+
+
+def _add_usage(a: dict, b: dict | None) -> dict:
+    if not b:
+        return dict(a)
+    return {**b, "model": b.get("model") or a["model"], "input_tokens": a["input_tokens"] + b["input_tokens"],
+            "output_tokens": a["output_tokens"] + b["output_tokens"]}
 
 
 def summarize_call(client, transcript: dict, agent: str | None = None, model: str = SONNET) -> tuple[dict, dict]:
@@ -178,9 +185,12 @@ def summarize_batch(client, calls: dict[str, tuple[dict, str | None]], model: st
         try:
             results[r.custom_id] = (parse_reply(msg, speakers), _usage(msg, model))
         except SummaryError:
-            # Rare: redo this one call live.
+            # Rare: redo this one call live. The failed batch reply was billed too, so its tokens are added.
+            failed = _usage(msg, model)
             try:
-                results[r.custom_id] = summarize_call(client, calls[r.custom_id][0], agent, model)
+                out, usage = summarize_call(client, calls[r.custom_id][0], agent, model)
+                results[r.custom_id] = (out, _add_usage(failed, usage))
             except Exception as e:  # noqa: BLE001 - fails only this call
+                e.usage = _add_usage(failed, getattr(e, "usage", None))
                 results[r.custom_id] = e
     return results

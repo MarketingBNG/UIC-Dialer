@@ -297,7 +297,17 @@ export class CrmSync {
     // Crash window: if the server dies after Zoho creates the Call but before crm_call_id is saved below, the
     // retry creates a second Call. Accepted (rare; both carry the same UIC link in Description) rather than
     // searching Zoho before every create.
-    const crmCallId = await this.upsert("Calls", call.crmCallId, callRecord);
+    let crmCallId: string;
+    try {
+      crmCallId = await this.upsert("Calls", call.crmCallId, callRecord);
+    } catch (err) {
+      // The linked Contact / Lead was deleted or converted in Zoho: forget it so the retry matches again
+      // instead of failing on the dead id until the call runs out of attempts.
+      if (err instanceof ZohoError && err.code === "INVALID_DATA" && ["Who_Id", "What_Id"].includes(String(err.details?.["api_name"]))) {
+        await this.db.call.update({ where: { id: call.id }, data: { crmRecordModule: null, crmRecordId: null } });
+      }
+      throw err;
+    }
     // Saved straight away so a failing note never causes a second Call record.
     await this.db.call.update({ where: { id: call.id }, data: { crmCallId, crmRecordModule: module, crmRecordId: record.id } });
 

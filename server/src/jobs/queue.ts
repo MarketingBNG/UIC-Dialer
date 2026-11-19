@@ -246,6 +246,8 @@ export async function queueTranslationBackfill(db: Db): Promise<number> {
     SELECT gen_random_uuid(), t."call_id", 'translate', 0, 'QUEUED', 0, now(), now(), now()
     FROM "transcripts" t
     WHERE t."text_en" IS NULL
+      -- Retention blanks old transcripts; a Claude job on one would bump updated_at and re-sync an empty note to Zoho.
+      AND t."text" <> ''
       AND NOT EXISTS (
         SELECT 1 FROM "jobs" j
         WHERE j."call_id" = t."call_id" AND j."kind" = 'translate' AND j."status" IN ('QUEUED', 'RUNNING')
@@ -260,7 +262,8 @@ export async function failJob(db: Db, jobId: string, workerId: string, error: st
     // Retention removed the audio (possibly right after this job was claimed): retrying can't help,
     // and the call keeps its status (its transcript, if any, stays).
     const call = await tx.call.findUnique({ where: { id: job.callId }, select: { audioDeletedAt: true } });
-    const audioGone = call?.audioDeletedAt != null;
+    // Only transcribe / compress read the audio; Claude jobs work from the transcript and keep retrying.
+    const audioGone = (job.kind === "transcribe" || job.kind === "compress") && call?.audioDeletedAt != null;
     const giveUp = !retryable || audioGone || job.attempts >= MAX_ATTEMPTS;
     const backoffMs = 2 ** job.attempts * 60_000;
     await tx.job.update({
@@ -421,6 +424,8 @@ export async function queueSummaryBackfill(db: Db): Promise<number> {
     SELECT gen_random_uuid(), t."call_id", 'summarize', 0, 'QUEUED', 0, now(), now(), now()
     FROM "transcripts" t
     WHERE t."summary" IS NULL
+      -- Retention blanks old transcripts; a Claude job on one would bump updated_at and re-sync an empty note to Zoho.
+      AND t."text" <> ''
       AND NOT EXISTS (
         SELECT 1 FROM "jobs" j
         WHERE j."call_id" = t."call_id" AND j."status" IN ('QUEUED', 'RUNNING')

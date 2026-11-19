@@ -185,12 +185,15 @@ export async function leadRoutes(app: FastifyInstance, deps: Deps) {
       if (!req.body || typeof req.body !== "object" || Array.isArray(req.body)) throw new HttpError(400, "Body must be a JSON object");
       const body = req.body as Record<string, unknown>;
       const f = extractLead(body, (source.fieldMap as FieldMap | null) ?? null);
+      const phoneE164 = toE164(f.phone, deps.config.DEFAULT_PHONE_REGION);
       if (f.externalId) {
         const prior = await deps.db.leadEvent.findUnique({ where: { sourceId_externalId: { sourceId: source.id, externalId: f.externalId } } });
-        if (prior?.status === "INVALID") return reply.code(400).send({ error: "No valid phone number in the lead" });
-        if (prior) return { ok: true, ...(await leadResultOf(deps, prior.id)) };
+        if (prior?.status === "INVALID") {
+          // Not final: a retry with a usable phone (fixed payload or field map) replaces the rejected event.
+          if (!phoneE164) return reply.code(400).send({ error: "No valid phone number in the lead" });
+          await deps.db.leadEvent.deleteMany({ where: { id: prior.id, status: "INVALID" } });
+        } else if (prior) return { ok: true, ...(await leadResultOf(deps, prior.id)) };
       }
-      const phoneE164 = toE164(f.phone, deps.config.DEFAULT_PHONE_REGION);
       if (!phoneE164) {
         try {
           await deps.db.leadEvent.create({

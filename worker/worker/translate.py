@@ -89,8 +89,15 @@ def request_params(model: str, texts: list[str]) -> dict:
 def parse_reply(msg, expected: int) -> list[str]:
     if msg.stop_reason in ("refusal", "max_tokens"):
         raise TranslationError(f"stop_reason={msg.stop_reason}")
-    text = next(b.text for b in msg.content if b.type == "text")
-    en = json.loads(text)["en"]
+    try:
+        text = next(b.text for b in msg.content if b.type == "text")
+        en = json.loads(text)["en"]
+        if not isinstance(en, list):
+            raise TypeError("en is not a list")
+    except (StopIteration, ValueError, KeyError, TypeError) as e:
+        # A malformed reply must not escape as a non-TranslationError: in translate_batch that would
+        # abort the whole batch (every already-billed result lost) instead of retrying this one call.
+        raise TranslationError(f"bad translation reply: {e}") from e
     if len(en) != expected:
         raise TranslationError(f"expected {expected} lines, got {len(en)}")
     return en
@@ -106,6 +113,13 @@ def merge(segments: list[dict], idx: list[int], en: list[str]) -> list[dict]:
 
 def _usage(msg, model: str) -> dict:
     return {"model": model, "input_tokens": msg.usage.input_tokens, "output_tokens": msg.usage.output_tokens}
+
+
+def _add_usage(a: dict, b: dict | None) -> dict:
+    if not b:
+        return dict(a)
+    return {**b, "model": b.get("model") or a["model"], "input_tokens": a["input_tokens"] + b["input_tokens"],
+            "output_tokens": a["output_tokens"] + b["output_tokens"]}
 
 
 def translate_segments(client, segments: list[dict], model: str | None = None) -> tuple[list[dict], dict]:
@@ -154,9 +168,13 @@ def translate_batch(client, calls: dict[str, list[dict]], model: str | None = No
             msg = r.result.message
             results[r.custom_id] = (merge(calls[r.custom_id], idx, parse_reply(msg, len(send))), _usage(msg, m))
         except TranslationError:
-            # Rare (a dropped line): redo this one call live, with retry and Opus fallback.
+            # Rare (a dropped line): redo this one call live, with retry and Opus fallback. The failed batch
+            # reply was billed too, so its tokens are added to whatever the live retry reports.
+            failed = _usage(msg, m)
             try:
-                results[r.custom_id] = translate_segments(client, calls[r.custom_id], model)
+                segs, usage = translate_segments(client, calls[r.custom_id], model)
+                results[r.custom_id] = (segs, _add_usage(failed, usage))
             except Exception as e:  # noqa: BLE001 - API/network errors fail only this call, not the batch
+                e.usage = _add_usage(failed, getattr(e, "usage", None))
                 results[r.custom_id] = e
     return results

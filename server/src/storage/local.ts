@@ -23,6 +23,8 @@ const EXT_BY_MIME: Record<string, string> = {
 export const ALLOWED_AUDIO_MIME = Object.keys(EXT_BY_MIME);
 
 export class UploadTooLargeError extends Error {}
+/** The bytes did not hash to what the client promised; nothing was moved into place. */
+export class ChecksumMismatchError extends Error {}
 
 /** Stores audio on the local disk. Paths are always built server-side. */
 export class LocalStorage {
@@ -36,11 +38,15 @@ export class LocalStorage {
     await mkdir(path.join(this.root, ".tmp"), { recursive: true });
   }
 
-  /** Relative path for a call: <userId>/<yyyy>/<mm>/<callId><ext> */
-  callPath(userId: string, callId: string, startedAt: Date, mime: string): string {
+  /**
+   * Relative path for a call: <userId>/<yyyy>/<mm>/<callId>[-<sha256 prefix>]<ext>. Passing the upload's hash
+   * gives each distinct file its own name, so a losing concurrent upload never overwrites the winner's file.
+   */
+  callPath(userId: string, callId: string, startedAt: Date, mime: string, sha256?: string): string {
     const yyyy = String(startedAt.getUTCFullYear());
     const mm = String(startedAt.getUTCMonth() + 1).padStart(2, "0");
-    return path.posix.join(userId, yyyy, mm, `${callId}${EXT_BY_MIME[mime] ?? ".bin"}`);
+    const tag = sha256 ? `-${sha256.slice(0, 16)}` : "";
+    return path.posix.join(userId, yyyy, mm, `${callId}${tag}${EXT_BY_MIME[mime] ?? ".bin"}`);
   }
 
   private abs(rel: string): string {
@@ -51,9 +57,10 @@ export class LocalStorage {
 
   /**
    * Streams `body` to a temp file while hashing it, then moves it into place.
-   * Throws UploadTooLargeError past `maxBytes`; the temp file is removed on any failure.
+   * Throws UploadTooLargeError past `maxBytes`, and ChecksumMismatchError (before touching `rel`) when
+   * `expectedSha256` is given and differs; the temp file is removed on any failure.
    */
-  async save(body: Readable, rel: string, maxBytes: number): Promise<{ sha256: string; size: number }> {
+  async save(body: Readable, rel: string, maxBytes: number, expectedSha256?: string): Promise<{ sha256: string; size: number }> {
     const tmp = path.join(this.root, ".tmp", randomUUID());
     const hash = createHash("sha256");
     let size = 0;
@@ -67,10 +74,12 @@ export class LocalStorage {
     });
     try {
       await pipeline(body, meter, createWriteStream(tmp, { flags: "wx" }));
+      const sha256 = hash.digest("hex");
+      if (expectedSha256 !== undefined && sha256 !== expectedSha256) throw new ChecksumMismatchError("Checksum mismatch");
       const dest = this.abs(rel);
       await mkdir(path.dirname(dest), { recursive: true });
       await rename(tmp, dest);
-      return { sha256: hash.digest("hex"), size };
+      return { sha256, size };
     } catch (err) {
       await rm(tmp, { force: true });
       throw err;
@@ -131,7 +140,10 @@ export class LocalStorage {
     return size;
   }
 
-  /** Hashes the complete partial file and moves it to `rel`. The caller compares the hash. */
+  /**
+   * Hashes the complete partial file and moves it to `rel` only if it matches the promised `sha256`;
+   * otherwise the partial is removed and ChecksumMismatchError is thrown without touching `rel`.
+   */
   async finishPartial(callId: string, sha256: string, rel: string): Promise<{ sha256: string; size: number }> {
     const file = this.partialAbs(callId, sha256);
     const hash = createHash("sha256");
@@ -140,10 +152,15 @@ export class LocalStorage {
       hash.update(chunk as Buffer);
       size += (chunk as Buffer).length;
     }
+    const actual = hash.digest("hex");
+    if (actual !== sha256) {
+      await rm(file, { force: true });
+      throw new ChecksumMismatchError("Checksum mismatch");
+    }
     const dest = this.abs(rel);
     await mkdir(path.dirname(dest), { recursive: true });
     await rename(file, dest);
-    return { sha256: hash.digest("hex"), size };
+    return { sha256: actual, size };
   }
 
   async removePartial(callId: string, sha256: string): Promise<void> {

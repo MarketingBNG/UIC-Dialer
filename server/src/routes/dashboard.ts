@@ -335,6 +335,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     if (id === currentUser(req).id && (body.active === false || (body.role && body.role !== "ADMIN"))) {
       throw new HttpError(400, "You can't demote or deactivate yourself");
     }
+    if (!(await deps.db.user.findUnique({ where: { id }, select: { id: true } }))) throw new HttpError(404, "User not found");
     const user = await deps.db.user.update({ where: { id }, data: body });
     if (body.active === false) {
       // Deactivation kills app sessions right away.
@@ -366,7 +367,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
 
   app.post("/api/devices/:id/revoke", admins, async (req, reply) => {
     const id = idParam(req);
-    await deps.tokens.revokeDevice(id);
+    if (!(await deps.tokens.revokeDevice(id))) throw new HttpError(404, "Device not found");
     await audit(req, "DEVICE_REVOKE", undefined, { deviceId: id });
     return reply.code(204).send();
   });

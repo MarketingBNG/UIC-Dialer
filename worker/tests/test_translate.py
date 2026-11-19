@@ -90,3 +90,34 @@ def test_failed_attempts_carry_the_usage_already_paid_for():
         translate_segments(c, [{"text": "नमस्ते"}, {"text": "ठीक है"}])
     assert len(c.calls) == 3
     assert e.value.usage == {"model": OPUS, "input_tokens": 30, "output_tokens": 15}
+
+
+class _Batches:
+    def __init__(self, msg):
+        self.msg = msg
+
+    def create(self, requests):
+        self.reqs = requests
+        return SimpleNamespace(id="b1")
+
+    def retrieve(self, _id):
+        return SimpleNamespace(id="b1", processing_status="ended")
+
+    def results(self, _id):
+        for r in self.reqs:
+            yield SimpleNamespace(custom_id=r["custom_id"], result=SimpleNamespace(type="succeeded", message=self.msg))
+
+
+def test_batch_live_fallback_counts_the_failed_batch_reply():
+    from worker.translate import translate_batch
+    segs = [{"text": "नमस्ते"}, {"text": "ठीक है"}]
+    c = SequenceClient([reply(["Hello", "Okay"])])
+    c.batches = _Batches(reply(["Hello"]))
+    res = translate_batch(c, {"j1": segs}, poll_s=0)
+    out, usage = res["j1"]
+    assert [s["en"] for s in out] == ["Hello", "Okay"]
+    assert usage["input_tokens"] == 20 and usage["output_tokens"] == 10
+    c = FakeClient(["only one"])
+    c.batches = _Batches(reply(["Hello"]))
+    res = translate_batch(c, {"j1": segs}, poll_s=0)
+    assert isinstance(res["j1"], TranslationError) and res["j1"].usage["input_tokens"] == 40

@@ -35,18 +35,13 @@ export async function upsertDnc(
   const key = numberKey(input.raw);
   const existing = await db.dncNumber.findUnique({ where: { key } });
   if (existing) return { row: existing, created: false };
-  try {
-    const row = await db.dncNumber.create({
-      data: { key, raw: input.raw.slice(0, 40), phoneE164: input.phoneE164, reason: input.reason, source: input.source, createdById: input.createdById },
-    });
-    return { row, created: true };
-  } catch (e) {
-    // A concurrent add of the same number won.
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002") {
-      return { row: await db.dncNumber.findUniqueOrThrow({ where: { key } }), created: false };
-    }
-    throw e;
-  }
+  // ON CONFLICT DO NOTHING rather than catching P2002: inside a transaction (activity outcomes) a failed insert
+  // aborts the whole transaction, so a concurrent add of the same number must not raise.
+  const { count } = await db.dncNumber.createMany({
+    data: [{ key, raw: input.raw.slice(0, 40), phoneE164: input.phoneE164, reason: input.reason, source: input.source, createdById: input.createdById }],
+    skipDuplicates: true,
+  });
+  return { row: await db.dncNumber.findUniqueOrThrow({ where: { key } }), created: count === 1 };
 }
 
 export const dncInfo = (row: DncNumber | undefined | null) => (row ? { reason: row.reason, createdAt: row.createdAt } : null);

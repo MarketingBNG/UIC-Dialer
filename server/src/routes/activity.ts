@@ -405,11 +405,7 @@ export async function activityRoutes(app: FastifyInstance, deps: Deps) {
     await findContact({ AND: [{ id }, contactScope(user)] });
     if (body.ownerId !== undefined) {
       if (user.role === "AGENT") throw new HttpError(403, "Only managers can change the owner");
-      const owner = await deps.db.user.findUnique({ where: { id: body.ownerId } });
-      if (!owner) throw new HttpError(400, "Unknown owner");
-      if (user.role === "MANAGER" && (!user.team || owner.team !== user.team) && owner.id !== user.id) {
-        throw new HttpError(403, "Owner must be in your team");
-      }
+      await checkAssignable(deps, user, body.ownerId);
     }
     const c = await deps.db.contact.update({
       where: { id },

@@ -48,7 +48,9 @@ export function requireSession(deps: Deps, roles?: Role[]) {
     if (!cookie) throw new HttpError(401, "Not signed in");
     let uid: unknown;
     try {
-      ({ uid } = await deps.tokens.unseal(cookie));
+      const claims = await deps.tokens.unseal(cookie);
+      // Only real session cookies: a sealed desktop code or OIDC state must not work as a session.
+      if (claims["typ"] === "session") uid = claims["uid"];
     } catch {
       throw new HttpError(401, "Session expired");
     }
