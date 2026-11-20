@@ -254,10 +254,12 @@ internal fun DirectionIcon(d: Direction) {
 @Composable
 internal fun StatusBadge(s: CallStatus) {
     val cs = MaterialTheme.colorScheme
-    val (bg, fg) = when (s) {
-        CallStatus.TRANSCRIBED -> cs.primaryContainer to cs.onPrimaryContainer
-        CallStatus.FAILED -> cs.errorContainer to cs.onErrorContainer
-        else -> cs.surfaceVariant to cs.onSurfaceVariant
+    val text = CallStatusText.of(s)
+    val (bg, fg) = when (text.tone) {
+        StatusTone.GOOD -> cs.primaryContainer to cs.onPrimaryContainer
+        StatusTone.BAD -> cs.errorContainer to cs.onErrorContainer
+        StatusTone.INFO, StatusTone.BUSY -> cs.secondaryContainer to cs.onSecondaryContainer
+        StatusTone.NEUTRAL -> cs.surfaceVariant to cs.onSurfaceVariant
     }
     Surface(color = bg, contentColor = fg, shape = MaterialTheme.shapes.small) {
         Text(s.label(), style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
@@ -274,12 +276,6 @@ private fun Message(text: String, action: String?, onAction: () -> Unit) {
 
 internal fun Direction.label() = name.lowercase().replaceFirstChar { it.uppercase() }
 
-internal fun CallStatus.label() = when (this) {
-    CallStatus.PENDING_UPLOAD -> "Pending"
-    CallStatus.UPLOADED -> "Queued"
-    CallStatus.TRANSCRIBING -> "Transcribing"
-    CallStatus.TRANSCRIBED -> "Transcribed"
-    CallStatus.FAILED -> "Failed"
-}
+internal fun CallStatus.label() = CallStatusText.of(this).label
 
 internal fun formatDuration(s: Int): String = if (s >= 3600) "%d:%02d:%02d".format(s / 3600, s / 60 % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)

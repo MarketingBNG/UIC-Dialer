@@ -4,6 +4,9 @@ import com.usaindiacfo.uicdialer.data.api.CallOutcome
 import com.usaindiacfo.uicdialer.data.api.OutcomeDto
 import com.usaindiacfo.uicdialer.data.api.OutcomeRule
 
+/** One-tap follow-up times offered after a dated outcome ("Pick…" opens the platform picker instead). */
+enum class QuickPick(val label: String) { IN_1_HOUR("In 1 hour"), TOMORROW_11("Tomorrow 11 am"), NEXT_WEEK("Next week") }
+
 /** What the outcome sheet asks for once an outcome is chosen. */
 enum class OutcomePrompt { NONE, DATE, DATE_TIME, RETRY, SAVE_NOW, CONFIRM_REMOVE }
 
@@ -31,6 +34,34 @@ object OutcomeLogic {
         OutcomeRule.ASK_FOLLOW_UP, OutcomeRule.ASK_MEETING, OutcomeRule.ASK_CALLBACK -> true
         OutcomeRule.NONE -> def.baseOutcome == CallOutcome.CALL_BACK
         else -> false
+    }
+
+    /** True when tapping [def] can save at once (no date to pick). REMOVE_FROM_LISTS still confirms first. */
+    fun savesOnTap(def: OutcomeDto): Boolean = !needsDate(def)
+
+    /** Quick picks for [def]: none when it needs no date; date-only rules (follow-up) skip "In 1 hour". */
+    fun quickPicks(def: OutcomeDto): List<QuickPick> = when {
+        !needsDate(def) -> emptyList()
+        prompt(def.ruleEnum) == OutcomePrompt.DATE -> listOf(QuickPick.TOMORROW_11, QuickPick.NEXT_WEEK)
+        else -> QuickPick.entries
+    }
+
+    /**
+     * Epoch ms for [pick] from [nowMs] in [zone]: now + 1 h (rounded up to the next 5 minutes);
+     * tomorrow 11:00; next week = 7 days from today at 11:00.
+     */
+    fun quickPickMs(pick: QuickPick, nowMs: Long, zone: java.time.ZoneId): Long {
+        val today = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+        val at11 = java.time.LocalTime.of(11, 0)
+        return when (pick) {
+            QuickPick.IN_1_HOUR -> {
+                val step = 5 * 60_000L
+                val t = nowMs + 3600_000L
+                (t + step - 1) / step * step
+            }
+            QuickPick.TOMORROW_11 -> today.plusDays(1).atTime(at11).atZone(zone).toInstant().toEpochMilli()
+            QuickPick.NEXT_WEEK -> today.plusDays(7).atTime(at11).atZone(zone).toInstant().toEpochMilli()
+        }
     }
 
     /** RETRY: the phone sets now + N h (the server recomputes it from the call time). */

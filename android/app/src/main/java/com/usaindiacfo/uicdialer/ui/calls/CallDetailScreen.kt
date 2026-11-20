@@ -158,7 +158,7 @@ fun CallDetailScreen(id: String, onBack: () -> Unit) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 4.dp))
                     }
                     when {
-                        transcript == null -> item(key = "none") { Text("No transcript yet (${call.status.label().lowercase()})", style = MaterialTheme.typography.bodyMedium) }
+                        transcript == null -> item(key = "none") { Text("No transcript yet. " + CallStatusText.of(call.status).explanation, style = MaterialTheme.typography.bodyMedium) }
                         state.segments.isEmpty() -> item(key = "text") { Text(transcript, style = MaterialTheme.typography.bodyMedium) }
                         else -> itemsIndexed(state.segments, key = { i, _ -> "s$i" }, contentType = { _, _ -> "seg" }) { _, s ->
                             SegmentRow(s, state.showsEnglish, roles, active = s.startMs != null && ps.positionMs >= s.startMs) {
@@ -188,6 +188,7 @@ private fun Meta(call: CallDetail) {
             Text(call.direction.label(), Modifier.padding(start = 8.dp).weight(1f))
             StatusBadge(call.status)
         }
+        Text(CallStatusText.of(call.status).explanation, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         val phone = call.phoneE164 ?: call.phoneRaw
         if (!call.contactName.isNullOrBlank() && phone != null) MetaLine("Number", phone)
         MetaLine("When", formatWhen(call.startedAt))
@@ -296,7 +297,7 @@ private val PauseIcon: ImageVector by lazy {
 /** Why there is no player: not uploaded yet, or removed by the server's retention setting. */
 internal fun noAudioText(call: CallDetail): String =
     if (call.audioDeletedAt != null) "Audio deleted by the retention setting. The transcript is kept."
-    else "Audio not uploaded yet"
+    else "No recording yet: waiting for the phone to upload it."
 
 /** Queues the recording in the system DownloadManager (Downloads folder) with a fresh access token. */
 private suspend fun downloadRecording(context: Context, container: AppContainer, call: CallDetail) {

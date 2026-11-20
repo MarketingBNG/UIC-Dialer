@@ -1,3 +1,4 @@
+import { CALL_STATUSES, callStatusText } from "./callStatus";
 import type { CallOutcome, CallStatus, ContactStatus, DialVia, Direction } from "./api";
 
 // Times show in the viewer's own time zone (IST for the India team), like the Android app.
@@ -52,13 +53,8 @@ export const DIRECTION_LABEL: Record<Direction, string> = {
   MISSED: "Missed",
   UNKNOWN: "Unknown",
 };
-export const STATUS_LABEL: Record<CallStatus, string> = {
-  PENDING_UPLOAD: "Waiting for upload",
-  UPLOADED: "Uploaded",
-  TRANSCRIBING: "Transcribing",
-  TRANSCRIBED: "Transcribed",
-  FAILED: "Failed",
-};
+/** Plain call-status labels; the mapping itself lives in ./callStatus. */
+export const STATUS_LABEL = Object.fromEntries(CALL_STATUSES.map((s) => [s, callStatusText(s).label])) as Record<CallStatus, string>;
 
 export const JOB_STATUS_LABEL: Record<string, string> = { WAITING_BUDGET: "Waiting for budget" };
 export const jobStatusLabel = (k: string) => JOB_STATUS_LABEL[k] ?? k.charAt(0) + k.slice(1).toLowerCase();

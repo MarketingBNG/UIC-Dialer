@@ -34,6 +34,7 @@ import androidx.work.WorkManager
 import com.usaindiacfo.uicdialer.appContainer
 import com.usaindiacfo.uicdialer.data.db.RecordingSource
 import com.usaindiacfo.uicdialer.data.db.RecordingStatus
+import com.usaindiacfo.uicdialer.ui.calls.CallStatusText
 import com.usaindiacfo.uicdialer.ui.setup.SetupChecks
 import com.usaindiacfo.uicdialer.update.UpdateBanner
 
@@ -85,9 +86,9 @@ fun SyncStatus(onOpenSetup: () -> Unit) {
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Stat("Synced", uploaded, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
-            Stat("Pending", pending, MaterialTheme.colorScheme.tertiary, Modifier.weight(1f))
-            Stat("Failed", failed, MaterialTheme.colorScheme.error, Modifier.weight(1f))
+            Stat(CallStatusText.of(RecordingStatus.UPLOADED).label, uploaded, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
+            Stat(CallStatusText.of(RecordingStatus.PENDING).label, pending, MaterialTheme.colorScheme.tertiary, Modifier.weight(1f))
+            Stat(CallStatusText.of(RecordingStatus.FAILED).label, failed, MaterialTheme.colorScheme.error, Modifier.weight(1f))
         }
 
         Text(

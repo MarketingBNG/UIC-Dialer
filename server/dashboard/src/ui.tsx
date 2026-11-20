@@ -14,7 +14,9 @@ import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { CallStatus, ContactStatus, DialVia, Direction } from "./api";
-import { CONTACT_STATUS_LABEL, DIRECTION_LABEL, STATUS_LABEL, VIA_LABEL } from "./format";
+import { CONTACT_STATUS_LABEL, DIRECTION_LABEL, VIA_LABEL } from "./format";
+import { callStatusText } from "./callStatus";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
@@ -79,14 +81,19 @@ export function ToneBadge({ tone = "gray", children, className }: { tone?: Tone;
   );
 }
 
-const STATUS_TONE: Record<CallStatus, Tone> = {
-  PENDING_UPLOAD: "gray",
-  UPLOADED: "blue",
-  TRANSCRIBING: "amber",
-  TRANSCRIBED: "green",
-  FAILED: "red",
-};
-export const StatusBadge = ({ status }: { status: CallStatus }) => <Badge variant={STATUS_TONE[status]}>{STATUS_LABEL[status]}</Badge>;
+export function StatusBadge({ status }: { status: CallStatus }) {
+  const t = callStatusText(status);
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge variant={t.tone} tabIndex={0}>
+          {t.label}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-64">{t.explanation}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 const DIR_ICON: Record<Direction, ReactNode> = {
   INCOMING: <ArrowDownLeft className="size-4" />,

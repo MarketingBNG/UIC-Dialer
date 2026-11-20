@@ -2,8 +2,8 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api, type OutcomeDto } from "./api";
 import { fromLocalInput } from "./format";
-import { OutcomeButtons, datePrompt, useOutcomes } from "./components/Outcomes";
-import { AlertTriangle, Check, ClipboardCheck, Phone, PhoneCall, ShieldAlert } from "lucide-react";
+import { OutcomeButtons, datePrompt, quickPicks, useOutcomes } from "./components/Outcomes";
+import { AlertTriangle, CalendarClock, Check, ClipboardCheck, Phone, PhoneCall, ShieldAlert } from "lucide-react";
 import type * as React from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
@@ -259,23 +259,26 @@ export function DialerProvider({ children }: { children: ReactNode }) {
 function OutcomeDialog({ open, call, onClose, onDone }: { open: boolean; call: PendingCall; onClose: () => void; onDone: () => void }) {
   const qc = useQueryClient();
   const outcomes = useOutcomes();
+  /** The tapped outcome when it still needs a time (quick picks) or a remove-from-lists confirm. */
   const [picked, setPicked] = useState<OutcomeDto | null>(null);
   const [followUp, setFollowUp] = useState("");
+  const [custom, setCustom] = useState(false);
   const [note, setNote] = useState("");
+  const [showNote, setShowNote] = useState(false);
   const prompt = picked ? datePrompt(picked) : null;
   const save = useMutation({
-    mutationFn: () =>
+    mutationFn: ({ o, followUpAt }: { o: OutcomeDto; followUpAt?: string }) =>
       api("/api/activities", {
         method: "POST",
         body: {
           clientId: call.clientId,
           phone: call.phone,
           type: "CALL",
-          outcomeId: picked?.id,
+          outcomeId: o.id,
           // Base outcome too, for safety with servers that predate custom outcomes.
-          outcome: picked?.baseOutcome,
+          outcome: o.baseOutcome,
           note: note.trim() || undefined,
-          followUpAt: prompt ? (fromLocalInput(followUp) ?? undefined) : undefined,
+          followUpAt: datePrompt(o) ? followUpAt : undefined,
           callListItemId: call.callListItemId,
           occurredAt: new Date(call.at).toISOString(),
         },
@@ -296,55 +299,117 @@ function OutcomeDialog({ open, call, onClose, onDone }: { open: boolean; call: P
       onDone();
     },
   });
-  const needsDate = !!prompt && !followUp;
+
+  /** One tap: outcomes that need nothing more save right away; dated ones show quick picks; remove asks first. */
+  function choose(o: OutcomeDto) {
+    save.reset();
+    setCustom(false);
+    setFollowUp("");
+    if (datePrompt(o) || o.rule === "REMOVE_FROM_LISTS") setPicked(o);
+    else {
+      setPicked(null);
+      save.mutate({ o });
+    }
+  }
+  const back = () => {
+    setPicked(null);
+    setCustom(false);
+    save.reset();
+  };
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && !save.isPending && onClose()}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>How did the call to {call.label} go?</DialogTitle>
-          <DialogDescription>Pick what happened. The recording is linked automatically once the phone uploads it.</DialogDescription>
+          <DialogDescription>One tap logs it. The recording is linked automatically once the phone uploads it.</DialogDescription>
         </DialogHeader>
-        <fieldset>
-          <legend className="mb-2 text-sm font-medium text-slate-700">Outcome</legend>
-          {outcomes.isPending ? (
-            <div role="status" className="grid grid-cols-2 gap-2">
-              <span className="sr-only">Loading outcomes…</span>
-              {[0, 1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-11" />
+        {!picked ? (
+          <fieldset>
+            <legend className="sr-only">Outcome</legend>
+            {outcomes.isPending ? (
+              <div role="status" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <span className="sr-only">Loading outcomes…</span>
+                {[0, 1, 2, 3].map((i) => (
+                  <Skeleton key={i} className="h-14" />
+                ))}
+              </div>
+            ) : (
+              <OutcomeButtons
+                items={outcomes.items}
+                value={save.isPending ? (save.variables?.o.id ?? null) : null}
+                disabled={save.isPending}
+                onPick={choose}
+              />
+            )}
+          </fieldset>
+        ) : prompt ? (
+          <div className="space-y-2">
+            <p className="flex items-center gap-2 text-sm font-medium">
+              <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: picked.color }} />
+              {picked.label}: {prompt.toLowerCase()}?
+            </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {quickPicks(picked).map((q) => (
+                <Button
+                  key={q.key}
+                  className="h-auto min-h-12 text-base"
+                  disabled={save.isPending}
+                  onClick={() => save.mutate({ o: picked, followUpAt: q.at.toISOString() })}
+                >
+                  {q.label}
+                </Button>
               ))}
+              <Button variant="outline" className="h-auto min-h-12 text-base" disabled={save.isPending} onClick={() => setCustom(true)}>
+                <CalendarClock /> Pick…
+              </Button>
             </div>
-          ) : (
-            <OutcomeButtons
-              items={outcomes.items}
-              value={picked?.id ?? null}
-              onPick={(o) => {
-                setPicked(o);
-                save.reset();
-              }}
-            />
-          )}
-        </fieldset>
-        {prompt && (
-          <div>
-            <Label htmlFor="oc-fu">{prompt}</Label>
-            <Input id="oc-fu" type="datetime-local" value={followUp} onChange={(e) => setFollowUp(e.target.value)} />
+            {custom && (
+              <div className="flex flex-wrap items-end gap-2">
+                <div className="grow">
+                  <Label htmlFor="oc-fu">{prompt}</Label>
+                  <Input id="oc-fu" type="datetime-local" autoFocus value={followUp} onChange={(e) => setFollowUp(e.target.value)} />
+                </div>
+                <Button
+                  disabled={!followUp || save.isPending}
+                  onClick={() => save.mutate({ o: picked, followUpAt: fromLocalInput(followUp) ?? undefined })}
+                >
+                  <Check /> {save.isPending ? "Saving…" : "Save"}
+                </Button>
+              </div>
+            )}
+            <Button variant="link" className="px-0" disabled={save.isPending} onClick={back}>
+              Back to outcomes
+            </Button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <Alert variant="warning">
+              <AlertTriangle />
+              <AlertDescription>
+                {picked.label}: this removes the contact from all call lists{picked.addToDnc ? " and marks the number do-not-call" : ""}.
+              </AlertDescription>
+            </Alert>
+            <div className="flex gap-2">
+              <Button variant="outline" disabled={save.isPending} onClick={back}>
+                Back
+              </Button>
+              <Button variant="destructive" disabled={save.isPending} onClick={() => save.mutate({ o: picked })}>
+                <Check /> {save.isPending ? "Saving…" : "Confirm & save"}
+              </Button>
+            </div>
           </div>
         )}
-        {picked?.rule === "RETRY" && <p className="text-sm text-muted-foreground">Will retry in {picked.retryHours ?? "?"} h.</p>}
-        {picked?.rule === "CLOSE_LEAD" && <p className="text-sm text-muted-foreground">Closes the lead and takes it off other call lists.</p>}
-        {picked?.rule === "REMOVE_FROM_LISTS" && (
-          <Alert variant="warning">
-            <AlertTriangle />
-            <AlertDescription>
-              This removes the contact from all call lists{picked.addToDnc ? " and marks the number do-not-call" : ""}. Press Confirm &amp; save to go ahead.
-            </AlertDescription>
-          </Alert>
+        {showNote ? (
+          <div>
+            <Label htmlFor="oc-note">Note (optional)</Label>
+            <Textarea id="oc-note" rows={3} maxLength={2000} autoFocus value={note} onChange={(e) => setNote(e.target.value)} />
+          </div>
+        ) : (
+          <Button variant="link" className="self-start px-0" onClick={() => setShowNote(true)}>
+            Add note
+          </Button>
         )}
-        <div>
-          <Label htmlFor="oc-note">Note (optional)</Label>
-          <Textarea id="oc-note" rows={3} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
-        </div>
         <FormError error={save.isError ? save.error : null} />
         <DialogFooter>
           <Button variant="ghost" className="sm:mr-auto" disabled={save.isPending} onClick={onDone}>
@@ -352,9 +417,6 @@ function OutcomeDialog({ open, call, onClose, onDone }: { open: boolean; call: P
           </Button>
           <Button variant="outline" disabled={save.isPending} onClick={onClose}>
             Later
-          </Button>
-          <Button disabled={!picked || needsDate || save.isPending} onClick={() => save.mutate()}>
-            <Check /> {save.isPending ? "Saving…" : picked?.rule === "REMOVE_FROM_LISTS" ? "Confirm & save" : "Save"}
           </Button>
         </DialogFooter>
       </DialogContent>

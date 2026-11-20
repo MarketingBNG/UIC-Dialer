@@ -134,8 +134,13 @@ private fun OutcomeSheet(a: OutcomeAsk, onDone: () -> Unit) {
     var company by remember { mutableStateOf("") }
     var error by remember { mutableStateOf<String?>(null) }
     var confirmRemove by remember { mutableStateOf(false) }
+    /** "Message after saving" toggle: when on, the template picker opens once the outcome is queued. */
     var messageAfter by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
+    /** The tapped outcome that still needs a time (quick picks are showing). */
+    var dating by remember { mutableStateOf<OutcomeDto?>(null) }
+    var showDetails by remember { mutableStateOf(false) }
     val askName = a.contact?.name.isNullOrBlank()
     val askCompany = a.contact?.company.isNullOrBlank()
 
@@ -144,16 +149,18 @@ private fun OutcomeSheet(a: OutcomeAsk, onDone: () -> Unit) {
         onDone()
     }
 
-    fun save(def: OutcomeDto, withMessage: Boolean, confirmed: Boolean = false) {
+    fun save(def: OutcomeDto, pickedMs: Long?, confirmed: Boolean = false) {
+        if (saving) return
         val now = System.currentTimeMillis()
-        error = OutcomeLogic.validate(def, followUpAt, now)
+        selected = def
+        followUpAt = pickedMs
+        error = OutcomeLogic.validate(def, pickedMs, now)
         if (error != null) return
         if (OutcomeLogic.prompt(def.ruleEnum) == OutcomePrompt.CONFIRM_REMOVE && !confirmed) {
-            messageAfter = withMessage
             confirmRemove = true
             return
         }
-        messageAfter = withMessage
+        saving = true
         scope.launch {
             repo.log(
                 phone = a.dial.number,
@@ -163,7 +170,7 @@ private fun OutcomeSheet(a: OutcomeAsk, onDone: () -> Unit) {
                 outcome = def.baseOutcome,
                 outcomeId = def.id,
                 note = note,
-                followUpAtMs = OutcomeLogic.followUpFor(def, followUpAt, now),
+                followUpAtMs = OutcomeLogic.followUpFor(def, pickedMs, now),
                 durationS = a.durationS,
                 name = if (askName) name else null,
                 company = if (askCompany) company else null,
@@ -171,23 +178,29 @@ private fun OutcomeSheet(a: OutcomeAsk, onDone: () -> Unit) {
             )
             DialPrefs(context).pending = null
             saved = true
-            if (!withMessage) onDone()
+            if (!messageAfter) onDone()
         }
     }
 
+    /** One tap: outcomes that need nothing more save now; dated ones show the quick picks. */
     fun choose(def: OutcomeDto) {
-        selected = def
         error = null
-        if (followUpAt != null && !OutcomeLogic.needsDate(def)) followUpAt = null
-        when (OutcomeLogic.prompt(def.ruleEnum)) {
-            OutcomePrompt.DATE -> pickFollowUpDate(context, followUpAt) { followUpAt = it; error = null }
-            OutcomePrompt.DATE_TIME -> pickFollowUp(context, followUpAt) { followUpAt = it; error = null }
-            OutcomePrompt.SAVE_NOW -> save(def, withMessage = false)
-            else -> if (OutcomeLogic.needsDate(def)) pickFollowUp(context, followUpAt) { followUpAt = it; error = null }
+        if (OutcomeLogic.savesOnTap(def)) {
+            dating = null
+            save(def, null)
+        } else {
+            selected = def
+            dating = def
         }
     }
 
-    // After "Save + message": the outcome is queued; offer the template picker for this number.
+    fun pickCustom(def: OutcomeDto) {
+        val onPicked: (Long) -> Unit = { save(def, it) }
+        if (OutcomeLogic.prompt(def.ruleEnum) == OutcomePrompt.DATE) pickFollowUpDate(context, followUpAt, onPicked)
+        else pickFollowUp(context, followUpAt, onPicked)
+    }
+
+    // After saving with "Message after saving": the outcome is queued; offer the template picker for this number.
     if (saved && messageAfter) {
         TemplatePickerSheet(phone = a.dial.number, contactName = a.contact?.name ?: name.takeIf { it.isNotBlank() }, onDismiss = onDone)
         return
@@ -202,10 +215,10 @@ private fun OutcomeSheet(a: OutcomeAsk, onDone: () -> Unit) {
             confirmButton = {
                 TextButton(onClick = {
                     confirmRemove = false
-                    if (def != null) save(def, messageAfter, confirmed = true)
+                    if (def != null) save(def, null, confirmed = true)
                 }) { Text("Remove") }
             },
-            dismissButton = { TextButton(onClick = { confirmRemove = false; messageAfter = false }) { Text("Cancel") } },
+            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("Cancel") } },
         )
     }
 
@@ -230,51 +243,68 @@ private fun OutcomeSheet(a: OutcomeAsk, onDone: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                defs.forEach { d ->
-                    FilterChip(
-                        selected = selected?.id == d.id, onClick = { choose(d) }, label = { Text(d.label) },
-                        leadingIcon = { ColorDot(d.color) },
-                        modifier = Modifier.heightIn(min = 48.dp),
-                    )
-                }
-            }
-            selected?.let { d ->
-                when (OutcomeLogic.prompt(d.ruleEnum)) {
-                    OutcomePrompt.RETRY -> Text(
-                        d.retryHours?.let { "Retry in $it h" } ?: "Retry later",
-                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    OutcomePrompt.DATE -> OutlinedButton(onClick = { pickFollowUpDate(context, followUpAt) { followUpAt = it; error = null } }) {
-                        Text(followUpAt?.let { "Follow up: ${formatDate(context, it)}" } ?: "Pick follow-up date")
-                    }
-                    OutcomePrompt.DATE_TIME -> OutlinedButton(onClick = { pickFollowUp(context, followUpAt) { followUpAt = it; error = null } }) {
-                        val what = if (d.ruleEnum == com.usaindiacfo.uicdialer.data.api.OutcomeRule.ASK_MEETING) "Meeting" else "Call back"
-                        Text(followUpAt?.let { "$what: ${formatWhen(context, it)}" } ?: "Pick ${what.lowercase()} date and time")
-                    }
-                    else -> if (OutcomeLogic.needsDate(d)) OutlinedButton(onClick = { pickFollowUp(context, followUpAt) { followUpAt = it; error = null } }) {
-                        Text(followUpAt?.let { "Call back: ${formatWhen(context, it)}" } ?: "Pick call-back date and time")
+            val d = dating
+            if (d == null) {
+                // Big tap targets: one per outcome, in the admin's order and colours. The likely one has a thicker border.
+                defs.forEach { o ->
+                    val color = OutcomeLogic.parseColor(o.color)?.let { androidx.compose.ui.graphics.Color(it) } ?: MaterialTheme.colorScheme.primary
+                    val suggested = selected?.id == o.id
+                    OutlinedButton(
+                        onClick = { choose(o) },
+                        enabled = !saving,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                        border = androidx.compose.foundation.BorderStroke(if (suggested) 2.dp else 1.dp, color),
+                        colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(containerColor = color.copy(alpha = if (suggested) 0.16f else 0.08f)),
+                    ) {
+                        ColorDot(o.color, 14.dp)
+                        Text(
+                            o.label + if (OutcomeLogic.needsDate(o)) " …" else "",
+                            Modifier.weight(1f).padding(start = 12.dp),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
                     }
                 }
+            } else {
+                val what = when {
+                    OutcomeLogic.prompt(d.ruleEnum) == OutcomePrompt.DATE -> "Follow up"
+                    d.ruleEnum == com.usaindiacfo.uicdialer.data.api.OutcomeRule.ASK_MEETING -> "Meeting"
+                    else -> "Call back"
+                }
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ColorDot(d.color, 14.dp)
+                    Text("${d.label} · $what when?", style = MaterialTheme.typography.titleSmall)
+                }
+                OutcomeLogic.quickPicks(d).forEach { p ->
+                    Button(
+                        onClick = { save(d, OutcomeLogic.quickPickMs(p, System.currentTimeMillis(), java.time.ZoneId.systemDefault())) },
+                        enabled = !saving,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                    ) { Text(p.label, style = MaterialTheme.typography.titleMedium) }
+                }
+                OutlinedButton(onClick = { pickCustom(d) }, enabled = !saving, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+                    Text("Pick…", style = MaterialTheme.typography.titleMedium)
+                }
+                TextButton(onClick = { dating = null; error = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Back") }
             }
-            OutlinedTextField(
-                value = note, onValueChange = { note = it.take(2000) },
-                label = { Text("Note (optional)") }, modifier = Modifier.fillMaxWidth(), minLines = 2,
-            )
-            if (askName) OutlinedTextField(name, { name = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("Name (optional)") }, singleLine = true)
-            if (askCompany) OutlinedTextField(company, { company = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("Company (optional)") }, singleLine = true)
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, androidx.compose.ui.Alignment.End)) {
-                TextButton(onClick = ::skip, modifier = Modifier.heightIn(min = 48.dp)) { Text("Skip") }
-                OutlinedButton(
-                    modifier = Modifier.heightIn(min = 48.dp),
-                    onClick = { selected?.let { save(it, withMessage = true) } ?: run { error = "Choose an outcome" } },
-                ) { Text("Save + message") }
-                Button(
-                    modifier = Modifier.heightIn(min = 48.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = UicColors.callGreen, contentColor = androidx.compose.ui.graphics.Color.White),
-                    onClick = { selected?.let { save(it, withMessage = false) } ?: run { error = "Choose an outcome" } },
-                ) { Text("Save") }
+            if (showDetails) {
+                OutlinedTextField(
+                    value = note, onValueChange = { note = it.take(2000) },
+                    label = { Text("Note (optional)") }, modifier = Modifier.fillMaxWidth(), minLines = 2,
+                )
+                if (askName) OutlinedTextField(name, { name = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("Name (optional)") }, singleLine = true)
+                if (askCompany) OutlinedTextField(company, { company = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("Company (optional)") }, singleLine = true)
+            }
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!showDetails) TextButton(onClick = { showDetails = true }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text(if (askName || askCompany) "Add note / name" else "Add note")
+                }
+                FilterChip(
+                    selected = messageAfter, onClick = { messageAfter = !messageAfter },
+                    label = { Text("Message after saving") }, modifier = Modifier.heightIn(min = 48.dp),
+                )
+                TextButton(onClick = ::skip, modifier = Modifier.heightIn(min = 48.dp)) { Text("Don't log") }
             }
         }
     }

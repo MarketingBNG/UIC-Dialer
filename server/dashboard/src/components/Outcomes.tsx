@@ -53,6 +53,30 @@ export function datePrompt(o: OutcomeDto): string | null {
   }
 }
 
+export type QuickPick = { key: string; label: string; at: Date };
+
+/**
+ * One-tap times offered after a dated outcome: in 1 hour (rounded up to 5 min), tomorrow 11 am, next week
+ * (7 days from today) 11 am. A follow-up date rule has no time of day, so it skips "In 1 hour".
+ */
+export function quickPicks(o: OutcomeDto, now = new Date()): QuickPick[] {
+  if (!datePrompt(o)) return [];
+  const step = 5 * 60_000;
+  const inHour = new Date(Math.ceil((now.getTime() + 3600_000) / step) * step);
+  const at11 = (days: number) => {
+    const d = new Date(now);
+    d.setDate(d.getDate() + days);
+    d.setHours(11, 0, 0, 0);
+    return d;
+  };
+  const picks: QuickPick[] = [
+    { key: "1h", label: "In 1 hour", at: inHour },
+    { key: "tomorrow", label: "Tomorrow 11 am", at: at11(1) },
+    { key: "week", label: "Next week", at: at11(7) },
+  ];
+  return o.rule === "ASK_FOLLOW_UP" ? picks.slice(1) : picks;
+}
+
 /** Readable text on an outcome colour: dark text on light colours. */
 function textOn(hex: string) {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex);
@@ -72,17 +96,28 @@ export function OutcomeChip({ label, color }: { label: string; color: string | n
   );
 }
 
-/** Outcome buttons coloured by `color`; the selected one is filled. */
-export function OutcomeButtons({ items, value, onPick }: { items: OutcomeDto[]; value: string | null; onPick: (o: OutcomeDto) => void }) {
+/** Large outcome buttons coloured by `color`; the selected one is filled. Dated outcomes end in "…". */
+export function OutcomeButtons({
+  items,
+  value,
+  onPick,
+  disabled,
+}: {
+  items: OutcomeDto[];
+  value: string | null;
+  onPick: (o: OutcomeDto) => void;
+  disabled?: boolean;
+}) {
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
       {items.map((o) => {
         const on = o.id === value;
         const style: CSSProperties = on ? { backgroundColor: o.color, borderColor: o.color, color: textOn(o.color) } : { borderColor: o.color };
         return (
-          <Button key={o.id} variant="outline" aria-pressed={on} className="min-h-11 border-2 text-foreground hover:opacity-90" style={style} onClick={() => onPick(o)}>
+          <Button key={o.id} variant="outline" aria-pressed={on} disabled={disabled} className="h-auto min-h-14 justify-start border-2 px-4 text-base text-foreground hover:opacity-90" style={style} onClick={() => onPick(o)}>
             {!on && <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: o.color }} />}
             {o.label}
+            {datePrompt(o) ? " …" : ""}
           </Button>
         );
       })}

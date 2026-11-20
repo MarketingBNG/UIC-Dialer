@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { callStatusText } from "../callStatus";
 import { DirectionTag, ErrorBox, FormError, Spinner, StatusBadge, ViaTag } from "../ui";
 
 const SPEEDS = [1, 1.25, 1.5, 2];
@@ -267,7 +268,7 @@ export function CallDetailPage() {
             )}
             {!c.transcript ? (
               <p className="text-sm text-muted-foreground">
-                {c.status === "FAILED" ? "Transcription failed." : c.status === "TRANSCRIBING" ? "Transcribing now…" : "Not transcribed yet."}
+                {callStatusText(c.status).explanation}
               </p>
             ) : segments.length ? (
               <ol className="space-y-1">
