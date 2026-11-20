@@ -246,9 +246,9 @@ private fun RowMenu(row: TodayRow, vm: TodayViewModel, extra: List<Pair<String, 
                 open = false
                 if (Dialer.whatsApp(context, row.phoneE164)) vm.logWhatsApp(row.phoneE164)
             })
-            if (row.taskId != null) DropdownMenuItem(text = { Text("Done") }, onClick = { open = false; vm.markDone(row) })
+            if (row.taskIds.isNotEmpty()) DropdownMenuItem(text = { Text(if (row.taskIds.size > 1) "Done (all ${row.taskIds.size})" else "Done") }, onClick = { open = false; vm.markDone(row) })
             DropdownMenuItem(
-                text = { Text(if (row.taskId != null) "Snooze 1 hour" else "Snooze (move to end)") },
+                text = { Text(if (row.taskIds.isNotEmpty()) "Snooze 1 hour" else "Snooze (move to end)") },
                 onClick = { open = false; vm.snooze(row) },
             )
             extra.forEach { (label, action) -> DropdownMenuItem(text = { Text(label) }, onClick = { open = false; action() }) }

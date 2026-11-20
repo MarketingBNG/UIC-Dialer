@@ -42,8 +42,49 @@ object TodayQueue {
         }
     }
 
+    /** Label importance: 0 overdue, 1 missed call, 2 due today, 3 new lead. */
+    fun labelRank(row: TodayRow): Int = when {
+        row.overdue -> 0
+        row.kind == TodayKind.MISSED_CALL -> 1
+        row.kind == TodayKind.NEW_LEAD -> 3
+        else -> 2
+    }
+
+    /**
+     * One entry per phone number: items for the same number merge into the most important one (by [labelRank],
+     * then earliest due), with the earliest due time, overdue if any is, and every key / task id kept.
+     */
+    fun merge(rows: List<TodayRow>): List<TodayRow> =
+        rows.distinctBy { it.key }.groupBy { it.phoneE164 }.values.map { group ->
+            if (group.size == 1) return@map group[0]
+            val best = group.minWith(compareBy<TodayRow>({ labelRank(it) }, { it.dueAtMs }, { it.key }))
+            val rank = labelRank(best)
+            val same = group.count { labelRank(it) == rank }
+            val noun = when (rank) {
+                0 -> "overdue"
+                1 -> if (same > 1) "missed calls" else "missed call"
+                3 -> if (same > 1) "new leads" else "new lead"
+                else -> "due today"
+            }
+            val others = group.size - same
+            val text = (if (same > 1) "$same $noun" else label(best)) + if (others > 0) " +$others more" else ""
+            best.copy(
+                key = "phone:${best.phoneE164}",
+                dueAtMs = group.minOf { it.dueAtMs },
+                overdue = group.any { it.overdue },
+                name = best.name ?: group.firstNotNullOfOrNull { it.name },
+                company = best.company ?: group.firstNotNullOfOrNull { it.company },
+                contactId = best.contactId ?: group.firstNotNullOfOrNull { it.contactId },
+                lastNote = best.lastNote ?: group.firstNotNullOfOrNull { it.lastNote },
+                count = group.size,
+                keys = group.map { it.key },
+                taskIds = group.mapNotNull { it.taskId },
+                mergedLabel = text,
+            )
+        }
+
     /** The one status label a row shows. */
-    fun label(row: TodayRow): String = when {
+    fun label(row: TodayRow): String = row.mergedLabel ?: when {
         row.kind == TodayKind.MISSED_CALL -> "Missed call"
         row.overdue -> "Overdue"
         row.kind == TodayKind.NEW_LEAD -> "New lead"

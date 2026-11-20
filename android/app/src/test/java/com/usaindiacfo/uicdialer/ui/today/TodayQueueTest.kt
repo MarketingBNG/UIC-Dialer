@@ -60,4 +60,53 @@ class TodayQueueTest {
         assertEquals("40 of 40", TodayQueue.listProgress(40, 40))
         assertEquals("1 of 0", TodayQueue.listProgress(0, 0))
     }
+
+    private fun task(key: String, phone: String, due: Long, kind: TodayKind = TodayKind.MISSED_CALL, overdue: Boolean = false) =
+        TodayRow(key = key, kind = kind, phoneE164 = phone, name = "Rahul Mehta", dueAtMs = due, overdue = overdue, taskId = "t-$key")
+
+    @Test fun sameNumberMergesIntoOneEntry() {
+        val rows = (1..5).map { task("m$it", "+919800000001", due = 10L + it) } + task("x", "+919800000002", 5)
+        val q = TodayQueue.order(TodayQueue.merge(rows))
+        assertEquals(2, q.size)
+        val rahul = q.single { it.phoneE164 == "+919800000001" }
+        assertEquals(5, rahul.count)
+        assertEquals("5 missed calls", TodayQueue.label(rahul))
+        assertEquals(11L, rahul.dueAtMs)
+        assertEquals((1..5).map { "t-m$it" }, rahul.taskIds)
+        assertEquals((1..5).map { "m$it" }, rahul.keys)
+    }
+
+    @Test fun mergedTakesMostImportantLabelAndEarliestDue() {
+        val p = "+919800000003"
+        val rows = listOf(
+            task("lead", p, 1, kind = TodayKind.NEW_LEAD),
+            task("m", p, 8),
+            task("late", p, 9, kind = TodayKind.FOLLOW_UP, overdue = true),
+        )
+        val e = TodayQueue.merge(rows).single()
+        assertEquals("Overdue +2 more", TodayQueue.label(e))
+        assertEquals(1L, e.dueAtMs)
+        assertEquals(true, e.overdue)
+        assertEquals(0, TodayQueue.tier(e))
+        assertEquals(3, e.taskIds.size)
+    }
+
+    @Test fun missedBeatsDueTodayAndNewLead() {
+        val p = "+919800000004"
+        val e = TodayQueue.merge(listOf(task("f", p, 1, kind = TodayKind.FOLLOW_UP), task("m", p, 5), task("l", p, 2, kind = TodayKind.NEW_LEAD))).single()
+        assertEquals("Missed call +2 more", TodayQueue.label(e))
+    }
+
+    @Test fun singleItemUnchanged() {
+        val r = task("only", "+919800000005", 3)
+        assertEquals(listOf(r), TodayQueue.merge(listOf(r)))
+        assertEquals("Missed call", TodayQueue.label(r))
+    }
+
+    @Test fun calledMergedEntryGoesToEnd() {
+        val rows = listOf(task("a", "+919800000006", 1), task("b", "+919800000006", 2), task("c", "+919800000007", 3))
+        val merged = TodayQueue.merge(rows)
+        val key = merged.first { it.count == 2 }.key
+        assertEquals(listOf("c", key), TodayQueue.order(merged, setOf(key)).map { it.key })
+    }
 }

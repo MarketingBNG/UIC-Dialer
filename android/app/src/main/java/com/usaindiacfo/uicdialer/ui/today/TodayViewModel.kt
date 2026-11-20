@@ -40,6 +40,14 @@ data class TodayRow(
     val taskId: String? = null,
     /** Lead source for NEW_LEAD rows ("New lead · Website"). */
     val source: String? = null,
+    /** Open items merged into this entry (same number); 1 for a single item. */
+    val count: Int = 1,
+    /** Keys of every merged item (just [key] for a single item). */
+    val keys: List<String> = listOf(key),
+    /** Task ids of every merged item; Done / Snooze apply to all of them. */
+    val taskIds: List<String> = listOfNotNull(taskId),
+    /** Label shown for a merged entry ("3 missed calls"); null = the usual single label. */
+    val mergedLabel: String? = null,
 ) {
     val title get() = name?.takeIf { it.isNotBlank() } ?: phoneE164
 }
@@ -56,7 +64,7 @@ data class TodayState(
     /** Keys called or snoozed from the queue this session; they move to the end. */
     val called: Set<String> = emptySet(),
 ) {
-    val queue: List<TodayRow> get() = TodayQueue.order(overdue + today, called)
+    val queue: List<TodayRow> get() = TodayQueue.order(TodayQueue.merge(overdue + today), called)
 }
 
 /** Overdue first, then today; each sorted by due time then key. */
@@ -129,14 +137,17 @@ class TodayViewModel(private val c: AppContainer) : ViewModel() {
         _state.update { TodayState(overdue = overdue, today = today, loading = false, error = error, me = me ?: it.me, lists = lists, called = it.called) }
     }
 
-    /** Missed-call or new-lead task: Done (PATCH /v1/followups/:id). Hidden at once; shown again if the server refuses. */
+    /**
+     * Missed-call or new-lead task(s): Done (PATCH /v1/followups/:id for every merged task). Hidden at once; shown
+     * again if the server refuses.
+     */
     fun markDone(row: TodayRow) {
         removeLocally(row)
-        val taskId = row.taskId ?: return
+        if (row.taskIds.isEmpty()) return
         viewModelScope.launch {
             try {
-                c.apiClient.patchFollowUp(taskId, FollowUpPatch("done"))
-                c.contactCache.today = c.contactCache.today?.let { t -> t.copy(items = t.items.filterNot { it.key == row.key }) }
+                row.taskIds.forEach { c.apiClient.patchFollowUp(it, FollowUpPatch("done")) }
+                c.contactCache.today = c.contactCache.today?.let { t -> t.copy(items = t.items.filterNot { it.key in row.keys }) }
             } catch (e: IOException) {
                 _state.update { it.copy(error = friendlyError(e)) }
                 refresh()
@@ -145,15 +156,16 @@ class TodayViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     /** A dial from the queue started: the next contact comes up once the rep is back. */
-    fun onCalled(row: TodayRow) = _state.update { it.copy(called = it.called + row.key) }
+    fun onCalled(row: TodayRow) = _state.update { it.copy(called = it.called + row.keys + row.key) }
 
-    /** Snooze: a task moves 1 hour on the server; a contact follow-up just goes to the end of the queue. */
+    /** Snooze: every merged task moves 1 hour on the server; a contact follow-up just goes to the end of the queue. */
     fun snooze(row: TodayRow) {
-        _state.update { it.copy(called = it.called + row.key) }
-        val taskId = row.taskId ?: return
+        _state.update { it.copy(called = it.called + row.keys + row.key) }
+        if (row.taskIds.isEmpty()) return
         viewModelScope.launch {
             try {
-                c.apiClient.patchFollowUp(taskId, FollowUpPatch("snooze", until = Instant.now().plusSeconds(3600).toString()))
+                val until = Instant.now().plusSeconds(3600).toString()
+                row.taskIds.forEach { c.apiClient.patchFollowUp(it, FollowUpPatch("snooze", until = until)) }
             } catch (e: IOException) {
                 _state.update { it.copy(error = friendlyError(e)) }
             }
@@ -163,5 +175,5 @@ class TodayViewModel(private val c: AppContainer) : ViewModel() {
     fun logWhatsApp(phone: String) = viewModelScope.launch { c.activityRepository.log(phone, ActivityType.WHATSAPP) }
 
     private fun removeLocally(row: TodayRow) =
-        _state.update { s -> s.copy(overdue = s.overdue - row, today = s.today - row) }
+        _state.update { s -> s.copy(overdue = s.overdue.filterNot { it.key in row.keys }, today = s.today.filterNot { it.key in row.keys }) }
 }

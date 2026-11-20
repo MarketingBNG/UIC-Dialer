@@ -51,16 +51,60 @@ function initials(name: string | null, phone: string) {
 }
 
 /** One queue entry: a follow-up / missed call / new lead, or an active call list (its next item is claimed only when it reaches the top). */
-type Entry = { kind: "fu"; key: string; item: FollowUpItem } | { kind: "list"; key: string; list: MyList };
+type Entry = { kind: "fu"; key: string; group: Group } | { kind: "list"; key: string; list: MyList };
 
 const rank = (i: FollowUpItem) => (i.overdue ? 0 : i.kind === "NEW_LEAD" ? 2 : 1);
+
+/** Every open item for one phone number, shown as one queue entry. `item` is the most important one (earliest due, overdue if any is). */
+type Group = { key: string; item: FollowUpItem; items: FollowUpItem[]; taskIds: string[]; count: string | null; more: number };
+
+/** Label importance: overdue > missed call > due today > new lead. */
+const labelRank = (i: FollowUpItem) => (i.overdue ? 0 : i.kind === "MISSED_CALL" ? 1 : i.kind === "NEW_LEAD" ? 3 : 2);
+const NOUNS: Record<number, [string, string]> = { 0: ["overdue", "overdue"], 1: ["missed call", "missed calls"], 2: ["due today", "due today"], 3: ["new lead", "new leads"] };
+
+/** One entry per phone number: items for the same number merge (most important label, earliest due time, a count when >1). */
+export function groupByPhone(items: FollowUpItem[]): Group[] {
+  const byPhone = new Map<string, FollowUpItem[]>();
+  for (const i of items) byPhone.set(i.phoneE164, [...(byPhone.get(i.phoneE164) ?? []), i]);
+  return [...byPhone.values()].map((g) => {
+    const taskIds = g.map((i) => i.taskId).filter((t): t is string => !!t);
+    if (g.length === 1) return { key: g[0]!.key, item: g[0]!, items: g, taskIds, count: null, more: 0 };
+    const best = [...g].sort((a, b) => labelRank(a) - labelRank(b) || Date.parse(a.dueAt) - Date.parse(b.dueAt))[0]!;
+    const r = labelRank(best);
+    const same = g.filter((i) => labelRank(i) === r).length;
+    const others = g.length - same;
+    const earliest = g.reduce((a, b) => (Date.parse(b.dueAt) < Date.parse(a.dueAt) ? b : a)).dueAt;
+    const item: FollowUpItem = {
+      ...best,
+      dueAt: earliest,
+      overdue: g.some((i) => i.overdue),
+      name: best.name ?? g.find((i) => i.name)?.name ?? null,
+      company: best.company ?? g.find((i) => i.company)?.company ?? null,
+      contactId: best.contactId ?? g.find((i) => i.contactId)?.contactId ?? null,
+      lastNote: best.lastNote ?? g.find((i) => i.lastNote)?.lastNote ?? null,
+    };
+    return { key: `phone:${best.phoneE164}`, item, items: g, taskIds, count: same > 1 ? `${same} ${NOUNS[r]![1]}` : null, more: others };
+  });
+}
 const remaining = (l: MyList) => l.progress.pending + l.progress.inProgress;
 
-/** The single label a row shows. */
+/** The single label a queue entry shows ("3 missed calls" when merged), plus "+N more" for other merged items. */
+function GroupLabel({ group }: { group: Group }) {
+  const { item, count, more } = group;
+  const variant = item.overdue || item.kind === "MISSED_CALL" ? "red" : item.kind === "NEW_LEAD" ? "green" : "blue";
+  return (
+    <>
+      {count ? <Badge variant={variant}>{count}</Badge> : <ItemLabel item={item} />}
+      {more > 0 && <span className="text-xs text-muted-foreground">+{more} more</span>}
+    </>
+  );
+}
+
+/** The single label an item shows (overdue > missed call > due today > new lead). */
 function ItemLabel({ item }: { item: FollowUpItem }) {
+  if (item.overdue && item.kind !== "MISSED_CALL") return <Badge variant="red">Overdue</Badge>;
   if (item.kind === "MISSED_CALL") return <Badge variant="red">Missed call</Badge>;
   if (item.kind === "NEW_LEAD") return <Badge variant="green">New lead</Badge>;
-  if (item.overdue) return <Badge variant="red">Overdue</Badge>;
   if (item.status) return <ContactStatusBadge status={item.status} />;
   return <Badge variant="blue">Follow-up</Badge>;
 }
@@ -104,9 +148,9 @@ export function TodayPage() {
     calling.current = { key, seen: false };
   };
 
-  const fuEntries: Entry[] = [...(fu.data?.items ?? [])]
-    .sort((a, b) => rank(a) - rank(b))
-    .map((item) => ({ kind: "fu", key: item.key, item }));
+  const fuEntries: Entry[] = groupByPhone(fu.data?.items ?? [])
+    .sort((a, b) => rank(a.item) - rank(b.item))
+    .map((group) => ({ kind: "fu", key: group.key, group }));
   const listEntries: Entry[] = (lists.data?.items ?? [])
     .filter((l) => l.state === "ACTIVE" && remaining(l) > 0)
     .map((list) => ({ kind: "list", key: `list:${list.id}`, list }));
@@ -139,7 +183,7 @@ export function TodayPage() {
               </p>
             </Empty>
           ) : next.kind === "fu" ? (
-            <FollowUpNext key={next.key} item={next.item} onCall={() => startCall(next.key)} onSkip={() => handle(next.key)} />
+            <FollowUpNext key={next.key} group={next.group} onCall={() => startCall(next.key)} onSkip={() => handle(next.key)} />
           ) : (
             <ListNext key={next.key} list={next.list} onFinished={() => handle(next.key)} />
           )}
@@ -185,20 +229,21 @@ function BigCall({ onClick, text = "Call" }: { onClick: () => void; text?: strin
   );
 }
 
-function useTaskPatch(taskId: string | null, onDone?: () => void) {
+/** Done / Snooze for every task merged into one entry (the existing per-task PATCH, once per task). */
+function useTaskPatch(taskIds: string[], onDone?: () => void) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { action: "done" | "snooze"; until?: string }) => api(`/api/followups/${taskId}`, { method: "PATCH", body }),
-    onSuccess: () => {
-      onDone?.();
-      void qc.invalidateQueries({ queryKey: ["followups-today"] });
-    },
+    mutationFn: (body: { action: "done" | "snooze"; until?: string }) =>
+      Promise.all(taskIds.map((id) => api(`/api/followups/${id}`, { method: "PATCH", body }))),
+    onSuccess: () => onDone?.(),
+    onSettled: () => void qc.invalidateQueries({ queryKey: ["followups-today"] }),
   });
 }
 
-function FollowUpNext({ item, onCall, onSkip }: { item: FollowUpItem; onCall: () => void; onSkip: () => void }) {
+function FollowUpNext({ group, onCall, onSkip }: { group: Group; onCall: () => void; onSkip: () => void }) {
   const dialer = useDialer();
-  const patch = useTaskPatch(item.taskId, onSkip);
+  const { item } = group;
+  const patch = useTaskPatch(group.taskIds, onSkip);
   const label = item.name || item.phoneE164;
   const wa = whatsAppUrl(item.phoneE164);
   const onThisCall = dialer.pending?.phone === cleanNumber(item.phoneE164);
@@ -216,7 +261,7 @@ function FollowUpNext({ item, onCall, onSkip }: { item: FollowUpItem; onCall: ()
             ) : (
               <span className="truncate text-xl font-semibold">{label}</span>
             )}
-            <ItemLabel item={item} />
+            <GroupLabel group={group} />
           </div>
           <div className="truncate text-sm text-muted-foreground">{[item.name ? item.phoneE164 : null, item.company].filter(Boolean).join(" · ")}</div>
         </div>
@@ -249,10 +294,10 @@ function FollowUpNext({ item, onCall, onSkip }: { item: FollowUpItem; onCall: ()
             </a>
           </Button>
         )}
-        {item.taskId && (
+        {group.taskIds.length > 0 && (
           <>
             <Button variant="ghost" disabled={patch.isPending} onClick={() => patch.mutate({ action: "done" })}>
-              <Check /> Mark done
+              <Check /> {group.taskIds.length > 1 ? `Mark all ${group.taskIds.length} done` : "Mark done"}
             </Button>
             <Button variant="ghost" disabled={patch.isPending} onClick={() => patch.mutate({ action: "snooze", until: new Date(Date.now() + SNOOZE_MS).toISOString() })}>
               <BellOff /> Snooze 1 h
@@ -403,7 +448,7 @@ function UpNext({ entries, onCall, onSkip }: { entries: Entry[]; onCall: (key: s
       </h2>
       <Card className="divide-y overflow-hidden p-0">
         <ul className="divide-y">
-          {shown.map((e) => (e.kind === "fu" ? <FollowUpRow key={e.key} item={e.item} onCall={() => onCall(e.key)} onSkip={() => onSkip(e.key)} /> : <ListRow key={e.key} list={e.list} />))}
+          {shown.map((e) => (e.kind === "fu" ? <FollowUpRow key={e.key} group={e.group} onCall={() => onCall(e.key)} onSkip={() => onSkip(e.key)} /> : <ListRow key={e.key} list={e.list} />))}
         </ul>
       </Card>
       {entries.length > SHORT_LIST && (
@@ -416,15 +461,16 @@ function UpNext({ entries, onCall, onSkip }: { entries: Entry[]; onCall: (key: s
   );
 }
 
-function FollowUpRow({ item, onCall, onSkip }: { item: FollowUpItem; onCall: () => void; onSkip: () => void }) {
+function FollowUpRow({ group, onCall, onSkip }: { group: Group; onCall: () => void; onSkip: () => void }) {
   const dialer = useDialer();
-  const patch = useTaskPatch(item.taskId);
+  const { item } = group;
+  const patch = useTaskPatch(group.taskIds);
   const label = item.name || item.phoneE164;
   const wa = whatsAppUrl(item.phoneE164);
   const actions: MenuAction[] = [];
   if (wa) actions.push({ label: "WhatsApp", icon: MessageCircle, href: wa });
-  if (item.taskId) {
-    actions.push({ label: "Mark done", icon: Check, onSelect: () => patch.mutate({ action: "done" }) });
+  if (group.taskIds.length > 0) {
+    actions.push({ label: group.taskIds.length > 1 ? `Mark all ${group.taskIds.length} done` : "Mark done", icon: Check, onSelect: () => patch.mutate({ action: "done" }) });
     actions.push({ label: "Snooze 1 hour", icon: BellOff, onSelect: () => patch.mutate({ action: "snooze", until: new Date(Date.now() + SNOOZE_MS).toISOString() }) });
   }
   actions.push({ label: "Skip for now", icon: SkipForward, onSelect: onSkip });
@@ -435,7 +481,7 @@ function FollowUpRow({ item, onCall, onSkip }: { item: FollowUpItem; onCall: () 
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate font-medium">{label}</span>
-          <ItemLabel item={item} />
+          <GroupLabel group={group} />
         </div>
         <div className="truncate text-sm text-muted-foreground">{[item.company, dueText(item)].filter(Boolean).join(" · ")}</div>
         <FormError error={patch.isError ? patch.error : null} />
