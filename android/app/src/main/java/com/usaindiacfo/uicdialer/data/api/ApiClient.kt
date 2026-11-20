@@ -2,7 +2,9 @@ package com.usaindiacfo.uicdialer.data.api
 
 import android.content.ContentResolver
 import android.net.Uri
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
@@ -150,7 +152,7 @@ class ApiClient(
     /** Returns null when the server says the list is unchanged since [etag] (304), else the list and its ETag. */
     suspend fun clientNumberHashes(etag: String? = null): Pair<ClientNumberHashes, String?>? {
         val req = Request.Builder().url(url("/v1/device/client-numbers")).apply { if (etag != null) header("If-None-Match", etag) }.build()
-        return http.newCall(req).await().use { res ->
+        return http.newCall(req).read { res ->
             when {
                 res.code == 304 -> null
                 !res.isSuccessful -> throw res.toApiException()
@@ -162,7 +164,7 @@ class ApiClient(
 
     /** Streams the published APK to [dest]. Verify LatestApp.sha256 before installing. */
     suspend fun downloadApk(dest: File) {
-        longHttp.newCall(Request.Builder().url(url("/v1/app/download")).build()).await().use { res ->
+        longHttp.newCall(Request.Builder().url(url("/v1/app/download")).build()).read { res ->
             if (!res.isSuccessful) throw res.toApiException()
             dest.outputStream().use { out -> res.body.byteStream().copyTo(out) }
         }
@@ -208,7 +210,7 @@ class ApiClient(
     /** Same as [clientNumberHashes] for the do-not-call list: null on 304. */
     suspend fun dncHashes(etag: String? = null): Pair<ClientNumberHashes, String?>? {
         val req = Request.Builder().url(url("/v1/dnc/hashes")).apply { if (etag != null) header("If-None-Match", etag) }.build()
-        return http.newCall(req).await().use { res ->
+        return http.newCall(req).read { res ->
             when {
                 res.code == 304 -> null
                 !res.isSuccessful -> throw res.toApiException()
@@ -360,7 +362,13 @@ class ApiClient(
 
     private suspend fun send(req: Request): String = http.newCall(req).awaitBody()
 
-    private suspend fun Call.awaitBody(): String = await().use { res ->
+    /**
+     * Runs the call and reads its response off the main thread. await() resumes on the caller's dispatcher
+     * (often Main), and reading a body that isn't fully buffered there throws NetworkOnMainThreadException.
+     */
+    private suspend fun <T> Call.read(block: (Response) -> T): T = withContext(Dispatchers.IO) { await().use(block) }
+
+    private suspend fun Call.awaitBody(): String = read { res ->
         if (!res.isSuccessful) throw res.toApiException()
         res.body.string()
     }
