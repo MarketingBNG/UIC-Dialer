@@ -44,7 +44,7 @@ export async function publishRoutes(app: FastifyInstance, deps: Deps) {
       throw new HttpError(409, `Server already has versionCode ${current.versionCode}; bump it`);
     }
 
-    const fileName = `uic-recorder-${meta.versionCode}.apk`;
+    const fileName = `uic-dialer-${meta.versionCode}.apk`;
     let saved;
     try {
       saved = await deps.storage.save(req.raw, `apk/${fileName}`, MAX_APK_BYTES);

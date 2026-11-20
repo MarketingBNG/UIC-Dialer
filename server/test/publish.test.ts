@@ -52,9 +52,9 @@ describe("POST /internal/app/publish", () => {
     expect((await publish(randomBytes(10), 50)).statusCode).toBe(409);
     expect((await publish(randomBytes(3000), 103)).statusCode).toBe(201);
     const dir = path.join(t.config.STORAGE_DIR, "apk");
-    expect(existsSync(path.join(dir, "uic-recorder-101.apk"))).toBe(false);
-    expect(existsSync(path.join(dir, "uic-recorder-102.apk"))).toBe(true);
-    expect(existsSync(path.join(dir, "uic-recorder-103.apk"))).toBe(true);
+    expect(existsSync(path.join(dir, "uic-dialer-101.apk"))).toBe(false);
+    expect(existsSync(path.join(dir, "uic-dialer-102.apk"))).toBe(true);
+    expect(existsSync(path.join(dir, "uic-dialer-103.apk"))).toBe(true);
   });
 
   it("rejects a bad token and a checksum mismatch", async () => {

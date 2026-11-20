@@ -1,7 +1,7 @@
 [project]
 name = "uic-worker"
 version = "0.1.0"
-description = "UIC Recorder transcription worker: claims jobs from the API and posts transcripts back."
+description = "UIC Dialer transcription worker: claims jobs from the API and posts transcripts back."
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "anthropic==2.5.0",

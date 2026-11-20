@@ -51,7 +51,7 @@ Adapt this with your lawyer. Under the DPDP Act a notice should say what is coll
 
 > **Call recording notice: [Company name]**
 >
-> Calls made or received on company work phones, or on personal phones enrolled in the UIC Recorder app, are recorded. We use the recordings and their transcripts for quality, training, record-keeping and resolving client queries.
+> Calls made or received on company work phones, or on personal phones enrolled in the UIC Dialer app, are recorded. We use the recordings and their transcripts for quality, training, record-keeping and resolving client queries.
 >
 > **What we collect:** call audio, the phone number, call time and duration, and a written transcript and English translation of the call.
 >

@@ -405,7 +405,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     const url = deps.config.CLIQ_WEBHOOK_URL;
     if (!url) throw new HttpError(409, "Alerts are off: CLIQ_WEBHOOK_URL is not set on the server");
     const by = currentUser(req);
-    const ok = await cliqSender(url, (m) => req.log.warn(m))(`Test alert from UIC Recorder, sent by ${by.name ?? by.email}.`);
+    const ok = await cliqSender(url, (m) => req.log.warn(m))(`Test alert from UIC Dialer, sent by ${by.name ?? by.email}.`);
     if (!ok) throw new HttpError(502, "Zoho Cliq did not accept the message; check the webhook URL");
     return { sent: true };
   });

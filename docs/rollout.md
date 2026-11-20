@@ -1,6 +1,6 @@
 # Phone rollout guide
 
-How to build, sign, publish and set up UIC Recorder on staff phones. Work through it once per phone.
+How to build, sign, publish and set up UIC Dialer on staff phones. Work through it once per phone.
 Screenshots: add them under `docs/img/rollout/<brand>-<step>.png` when you do the first phone of each brand
 (the steps below name each screen so the screenshots can be matched later).
 
@@ -49,12 +49,12 @@ Until verification is done, installs may show warnings or be blocked on newer An
 
 1. Bump `versionCode` (and `versionName`) in `android/app/build.gradle.kts`. The in-app updater only offers a higher `versionCode`.
 2. Build: `cd android && ./gradlew :app:assembleRelease` (JAVA_HOME = Android Studio `jbr`). The build refuses to run without an `https://` `uic.apiUrl`.
-3. The APK is `android/app/build/outputs/apk/release/app-release.apk`. Rename it, e.g. `uic-recorder-0.2.0.apk`.
-4. `sha256sum uic-recorder-0.2.0.apk`
+3. The APK is `android/app/build/outputs/apk/release/app-release.apk`. Rename it, e.g. `uic-dialer-0.2.0.apk`.
+4. `sha256sum uic-dialer-0.2.0.apk`
 5. Copy it to the server storage folder `apk/` (inside the mounted storage volume, so it survives redeploys).
 6. Set the published version (server database, `settings` row 1):
    ```sql
-   UPDATE settings SET latest_app = '{"versionCode": 2, "versionName": "0.2.0", "sha256": "<sha256>", "fileName": "uic-recorder-0.2.0.apk"}' WHERE id = 1;
+   UPDATE settings SET latest_app = '{"versionCode": 2, "versionName": "0.2.0", "sha256": "<sha256>", "fileName": "uic-dialer-0.2.0.apk"}' WHERE id = 1;
    ```
 7. Phones see the update banner on next start; the APK is checked against the SHA-256 before install.
 
@@ -63,7 +63,7 @@ The first install on each phone is by hand (share the APK link or copy the file)
 ## 4. Per-phone setup (all brands)
 
 1. Install the APK. Allow "Install unknown apps" for the browser/file manager when asked.
-2. Open UIC Recorder, sign in with the company Google account.
+2. Open UIC Dialer, sign in with the company Google account.
 3. Follow the in-app **Set up this phone** checklist until every item is ticked.
 4. Make a 1-minute test call, wait a few minutes, check the call appears on the dashboard.
 5. On the dashboard **Sync health** page check the phone shows: not "Permissions missing", not "Throttled",
@@ -72,22 +72,22 @@ The first install on each phone is by hand (share the APK link or copy the file)
 ### Restricted settings (Android 13+, sideloaded apps)
 
 If "Allow" for the call log shows **Restricted setting**:
-1. In the app tap **Open App info** (or Settings > Apps > UIC Recorder).
+1. In the app tap **Open App info** (or Settings > Apps > UIC Dialer).
 2. Tap **⋮** (top right) > **Allow restricted settings**, confirm with the PIN/fingerprint.
-3. Go back to UIC Recorder and tap **Allow** again.
+3. Go back to UIC Dialer and tap **Allow** again.
 
 The ⋮ menu only shows the option after the permission was refused once.
 
 ### Google Phone dialer
 
-Google Phone stores recordings privately (and announces them), so UIC Recorder cannot read them. Use the phone
+Google Phone stores recordings privately (and announces them), so UIC Dialer cannot read them. Use the phone
 maker's own dialer as the default Phone app. The setup screen warns when Google Phone is the default.
 
 ## 5. Per brand
 
 | Brand | Auto-record | Battery | Autostart |
 |---|---|---|---|
-| **Samsung** (One UI) | Phone app > ⋮ > Settings > Record calls > Auto record calls: On, All calls | Settings > Apps > UIC Recorder > Battery: **Unrestricted**. Settings > Battery > Background usage limits: remove from Sleeping / Deep sleeping apps | No separate screen; "Never sleeping apps": add UIC Recorder |
+| **Samsung** (One UI) | Phone app > ⋮ > Settings > Record calls > Auto record calls: On, All calls | Settings > Apps > UIC Dialer > Battery: **Unrestricted**. Settings > Battery > Background usage limits: remove from Sleeping / Deep sleeping apps | No separate screen; "Never sleeping apps": add UIC Dialer |
 | **Xiaomi / Redmi / Poco** (MIUI / HyperOS) | Phone > Settings > Call recording > Record calls automatically: On, All numbers | App info > Battery saver: **No restrictions** | Security app > Permissions > **Autostart**: On (setup "Open autostart" button) |
 | **Oppo** (ColorOS) | Phone > Settings > Call recording > Auto-record all calls | App info > Battery usage: Allow background activity, Allow auto launch | Settings > Apps > Auto launch: On |
 | **Realme** (realme UI) | Same as Oppo | Same as Oppo | Same as Oppo |

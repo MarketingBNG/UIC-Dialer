@@ -12,6 +12,6 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "UIC Recorder"
+rootProject.name = "UIC Dialer"
 include(":app")
 include(":baselineprofile")

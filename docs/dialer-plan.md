@@ -1,6 +1,6 @@
 # Dialer and Activity Tracker plan
 
-Adds a dialer to UIC Recorder so reps call any number from their own phones, and the dashboard shows every call, recording and follow-up in one place.
+Adds a dialer to UIC Dialer (formerly UIC Recorder) so reps call any number from their own phones, and the dashboard shows every call, recording and follow-up in one place.
 
 ## Why
 

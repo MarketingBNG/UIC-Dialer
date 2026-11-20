@@ -1,4 +1,4 @@
-# Deploying UIC Recorder on Coolify
+# Deploying UIC Dialer on Coolify
 
 The deployment is three separate Coolify resources in one project. There's no docker-compose file and no Dockerfile; Coolify's Railpack builder builds everything (config in `railpack.json`).
 

@@ -6,6 +6,7 @@ export const ACCESS_TTL_S = 15 * 60;
 /** A rotated refresh token presented again this soon is a retry or a race, not theft. */
 export const REUSE_GRACE_MS = 60_000;
 const REFRESH_TTL_MS = 90 * 24 * 3600 * 1000;
+// Kept from the app's old name (UIC Recorder): changing it would invalidate every signed-in phone and session.
 const ISSUER = "uic-recorder";
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");

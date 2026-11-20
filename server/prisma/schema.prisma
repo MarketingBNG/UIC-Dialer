@@ -1,4 +1,4 @@
-// UIC Recorder database schema.
+// UIC Dialer database schema.
 // Postgres features Prisma can't express (pg_trgm extension, the generated
 // tsvector column and its GIN index) live in hand-edited migration SQL.
 // When creating new migrations, check the generated SQL does not drop them.

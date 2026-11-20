@@ -4,8 +4,8 @@ The dashboard and the Android app both sign in with Google. The server checks th
 **web** client ID. Do this in Google Cloud Console with the company account.
 
 ## 1. Project and consent screen
-1. console.cloud.google.com > create (or pick) a project, e.g. "UIC Recorder".
-2. APIs & Services > OAuth consent screen (Google Auth Platform > Branding): app name "UIC Recorder", support email,
+1. console.cloud.google.com > create (or pick) a project, e.g. "UIC Dialer".
+2. APIs & Services > OAuth consent screen (Google Auth Platform > Branding): app name "UIC Dialer", support email,
    authorised domain = the dashboard's domain.
 3. Audience: **Internal** (only company Workspace accounts). Scopes: `openid`, `email`, `profile` only.
 
