@@ -1,5 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext } from "react";
+import type * as React from "react";
+import { History, LogOut, PhoneCall, Settings2, Smartphone, Users, type LucideIcon } from "lucide-react";
+import { toast } from "sonner";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarInset,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarProvider,
+  SidebarTrigger,
+  useSidebar,
+} from "@/components/ui/sidebar";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router";
 import { ApiError, api, isManager, type Me, type PhoneStatus } from "./api";
 import { FirefliesBanner } from "./components/Fireflies";
@@ -73,7 +91,7 @@ function navItems(me: Me) {
 /** Pages that live under Admin (the Admin entry stays highlighted on them). */
 const ADMIN_PATHS = ["/lists", "/team", "/health", "/users", "/settings", "/audit"];
 
-/** "2m ago" style, for the phone pill. */
+/** "2m ago" style, for the phone status box. */
 function shortAgo(iso: string, now = Date.now()) {
   const m = Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60_000));
   if (m < 1) return "just now";
@@ -83,29 +101,41 @@ function shortAgo(iso: string, now = Date.now()) {
 }
 
 /** The rep's Android phone heartbeat (the app reports in at least hourly). Says nothing about Phone Link. */
-function PhoneStatusPill() {
+function PhoneStatusBox() {
   const q = useQuery({ queryKey: ["me-phone"], queryFn: () => api<PhoneStatus>("/api/me/phone"), refetchInterval: 60_000 });
-  if (!q.data) return null;
+  if (!q.data) return <Skeleton className="h-12 w-full bg-white/10" />;
   const p = q.data;
   const text = !p.lastSeenAt
     ? "No phone signed in"
     : p.online
       ? `Phone online · seen ${shortAgo(p.lastSeenAt)}`
       : `Phone offline since ${shortAgo(p.lastSeenAt)}`;
-  return (
-    <div role="status" className="rounded-xl bg-white/10 px-3 py-2 text-xs text-white/90" title={p.model ? `${p.model}${p.appVersion ? ` · app ${p.appVersion}` : ""}` : undefined}>
+  const box = (
+    <div role="status" tabIndex={p.model ? 0 : undefined} className="rounded-lg bg-white/10 px-3 py-2 text-xs text-white/90 outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
       <span className="flex items-center gap-2 font-medium">
+        <Smartphone aria-hidden className="size-4 shrink-0" />
         <span aria-hidden className={`size-2 shrink-0 rounded-full ${p.online ? "bg-green-400" : "bg-slate-400"}`} />
         {text}
       </span>
       {p.model && <span className="mt-0.5 block truncate text-white/60">{p.model} · calls use its SIM</span>}
     </div>
   );
+  if (!p.model) return box;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{box}</TooltipTrigger>
+      <TooltipContent side="right">
+        {p.model}
+        {p.appVersion ? ` · app ${p.appVersion}` : ""}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
+
+const NAV_ICON: Record<string, LucideIcon> = { "/today": PhoneCall, "/activity": Users, "/calls": History, "/admin": Settings2 };
 
 function Shell({ me }: { me: Me }) {
   const qc = useQueryClient();
-  const [menuOpen, setMenuOpen] = useState(false);
   const logout = useMutation({
     mutationFn: () => api<void>("/auth/logout", { method: "POST" }),
     // Only drop the local session once the server has cleared the cookie.
@@ -113,30 +143,14 @@ function Shell({ me }: { me: Me }) {
       qc.clear();
       qc.setQueryData(["me"], null);
     },
-    onError: (e) => alert(`Sign out failed: ${e.message}`),
+    onError: (e) => toast.error(`Sign out failed: ${e.message}`),
   });
   const items = navItems(me);
   const { pathname } = useLocation();
-  const linkCls = ({ isActive }: { isActive: boolean }) =>
-    `flex min-h-10 items-center rounded-xl px-3 text-sm font-medium ${
-      isActive ? "bg-white/15 text-white" : "text-white/75 hover:bg-white/10 hover:text-white"
-    }`;
   const role = me.role.charAt(0) + me.role.slice(1).toLowerCase();
-  const nav = (onPick?: () => void) =>
-    items.map((i) => (
-      <NavLink
-        key={i.to}
-        to={i.to}
-        end={i.end}
-        className={({ isActive }) => linkCls({ isActive: isActive || !!i.also?.some((p) => pathname === p || pathname.startsWith(`${p}/`)) })}
-        onClick={onPick}
-      >
-        {i.label}
-      </NavLink>
-    ));
   const logo = (
     <span className="flex items-center gap-2 font-semibold text-white">
-      <span aria-hidden className="grid size-8 place-items-center rounded-xl bg-brand-600 text-xs">
+      <span aria-hidden className="grid size-8 place-items-center rounded-lg bg-sidebar-primary text-xs">
         UIC
       </span>
       UIC Dialer
@@ -144,69 +158,20 @@ function Shell({ me }: { me: Me }) {
   );
 
   return (
-    <div className="min-h-dvh md:pl-60">
+    <SidebarProvider>
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-white focus:p-2">
         Skip to content
       </a>
-      {/* Desktop: navy sidebar. */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col gap-4 bg-navy p-4 md:flex">
-        {logo}
-        <PhoneStatusPill />
-        <nav aria-label="Main" className="flex flex-1 flex-col gap-1 overflow-y-auto">
-          {nav()}
-        </nav>
-        <div className="border-t border-white/15 pt-3 text-xs text-white/80">
-          <div className="truncate font-medium text-white">{me.name || me.email}</div>
-          <div>
-            {role}
-            {me.team ? ` · ${me.team}` : ""}
+      <AppSidebar me={me} role={role} items={items} pathname={pathname} logo={logo} logout={() => logout.mutate()} loggingOut={logout.isPending} />
+      <SidebarInset>
+        {/* Small screens: navy top bar; the menu opens the sidebar as a sheet. */}
+        <header className="sticky top-0 z-30 bg-sidebar pt-[env(safe-area-inset-top)] md:hidden">
+          <div className="flex h-14 items-center gap-3 px-4">
+            {logo}
+            <SidebarTrigger className="ml-auto text-white hover:bg-white/10 hover:text-white" />
           </div>
-          <button
-            type="button"
-            className="mt-2 min-h-10 w-full rounded-xl px-3 text-left text-sm font-medium text-white/80 hover:bg-white/10 hover:text-white"
-            disabled={logout.isPending}
-            onClick={() => logout.mutate()}
-          >
-            Sign out
-          </button>
-        </div>
-      </aside>
-      {/* Small screens: top bar with a menu. */}
-      <header className="sticky top-0 z-30 bg-navy pt-[env(safe-area-inset-top)] md:hidden">
-        <div className="flex h-14 items-center gap-3 px-4">
-          {logo}
-          <button
-            type="button"
-            className="ml-auto grid size-11 place-items-center rounded-xl text-white hover:bg-white/10"
-            aria-expanded={menuOpen}
-            aria-controls="mobile-nav"
-            aria-label="Menu"
-            onClick={() => setMenuOpen((o) => !o)}
-          >
-            <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-              <path d={menuOpen ? "M6 6l12 12M18 6L6 18" : "M4 7h16M4 12h16M4 17h16"} />
-            </svg>
-          </button>
-        </div>
-        {menuOpen && (
-          <nav id="mobile-nav" aria-label="Main" className="flex flex-col gap-1 border-t border-white/15 px-4 py-3">
-            <div className="px-3 pb-2 text-xs text-white/70">
-              {me.name || me.email} · {me.role.toLowerCase()}
-            </div>
-            <PhoneStatusPill />
-            {nav(() => setMenuOpen(false))}
-            <button
-              type="button"
-              className="mt-2 min-h-10 rounded-xl border border-white/30 px-3 text-sm font-medium text-white hover:bg-white/10"
-              disabled={logout.isPending}
-              onClick={() => logout.mutate()}
-            >
-              Sign out
-            </button>
-          </nav>
-        )}
-      </header>
-      <main id="main" className="mx-auto max-w-6xl px-4 py-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] md:px-8">
+        </header>
+        <div id="main" className="mx-auto w-full max-w-6xl px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] md:px-8">
         {isManager(me.role) && <FirefliesBanner />}
         <Routes>
           <Route path="/" element={<Navigate to="/today" replace />} />
@@ -229,7 +194,70 @@ function Shell({ me }: { me: Me }) {
           {me.role === "ADMIN" && <Route path="/audit" element={<AuditPage />} />}
           <Route path="*" element={<Navigate to="/today" replace />} />
         </Routes>
-      </main>
-    </div>
+        </div>
+      </SidebarInset>
+    </SidebarProvider>
+  );
+}
+
+function AppSidebar({
+  me,
+  role,
+  items,
+  pathname,
+  logo,
+  logout,
+  loggingOut,
+}: {
+  me: Me;
+  role: string;
+  items: ReturnType<typeof navItems>;
+  pathname: string;
+  logo: React.ReactNode;
+  logout: () => void;
+  loggingOut: boolean;
+}) {
+  const { setOpenMobile } = useSidebar();
+  return (
+    <Sidebar title="UIC Dialer menu">
+      <SidebarHeader>
+        {logo}
+        <PhoneStatusBox />
+      </SidebarHeader>
+      <SidebarContent>
+        <nav aria-label="Main">
+          <SidebarMenu>
+            {items.map((i) => {
+              const Icon = NAV_ICON[i.to] ?? Settings2;
+              const under = (p: string) => pathname === p || pathname.startsWith(`${p}/`);
+              const active = i.end ? pathname === i.to : under(i.to) || !!i.also?.some(under);
+              return (
+                <SidebarMenuItem key={i.to}>
+                  <SidebarMenuButton asChild isActive={active}>
+                    <NavLink to={i.to} end={i.end} aria-current={active ? "page" : undefined} onClick={() => setOpenMobile(false)}>
+                      <Icon aria-hidden />
+                      {i.label}
+                    </NavLink>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              );
+            })}
+          </SidebarMenu>
+        </nav>
+      </SidebarContent>
+      <SidebarFooter>
+        <div className="px-3 text-xs text-white/80">
+          <div className="truncate font-medium text-white">{me.name || me.email}</div>
+          <div>
+            {role}
+            {me.team ? ` · ${me.team}` : ""}
+          </div>
+        </div>
+        <SidebarMenuButton disabled={loggingOut} onClick={logout}>
+          <LogOut aria-hidden />
+          Sign out
+        </SidebarMenuButton>
+      </SidebarFooter>
+    </Sidebar>
   );
 }

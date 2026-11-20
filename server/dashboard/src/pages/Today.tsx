@@ -1,11 +1,33 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useDeferredValue, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useDeferredValue, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
 import { Link } from "react-router";
 import { ApiError, api, qs, type ContactPage, type FollowUpItem, type FollowUpsToday, type MeToday, type MyList, type NextResponse } from "../api";
 import { useMe } from "../App";
 import { CallButton, cleanNumber, isDesktopApp, useDialer } from "../dialer";
 import { formatDuration, formatShortWhen, whatsAppUrl } from "../format";
-import { Badge, ContactStatusBadge, ErrorBox, PageHeader, Spinner } from "../ui";
+import {
+  BellOff,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  ClipboardCheck,
+  ExternalLink,
+  ListChecks,
+  MessageCircle,
+  MoreHorizontal,
+  PartyPopper,
+  Phone,
+  SkipForward,
+  User,
+} from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ContactStatusBadge, Empty, ErrorBox, FormError, Hint, PageHeader, Spinner } from "../ui";
 import { progressText } from "./Lists";
 
 const timeFmt = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
@@ -36,11 +58,11 @@ const remaining = (l: MyList) => l.progress.pending + l.progress.inProgress;
 
 /** The single label a row shows. */
 function ItemLabel({ item }: { item: FollowUpItem }) {
-  if (item.kind === "MISSED_CALL") return <Badge tone="red">Missed call</Badge>;
-  if (item.kind === "NEW_LEAD") return <Badge tone="green">New lead</Badge>;
-  if (item.overdue) return <Badge tone="red">Overdue</Badge>;
+  if (item.kind === "MISSED_CALL") return <Badge variant="red">Missed call</Badge>;
+  if (item.kind === "NEW_LEAD") return <Badge variant="green">New lead</Badge>;
+  if (item.overdue) return <Badge variant="red">Overdue</Badge>;
   if (item.status) return <ContactStatusBadge status={item.status} />;
-  return <Badge tone="blue">Follow-up</Badge>;
+  return <Badge variant="blue">Follow-up</Badge>;
 }
 
 function dueText(item: FollowUpItem) {
@@ -101,12 +123,21 @@ export function TodayPage() {
           ) : fu.isError ? (
             <ErrorBox error={fu.error} onRetry={() => void fu.refetch()} />
           ) : !next ? (
-            <section className="card p-8 text-center">
-              <h2 className="text-lg font-semibold">All caught up</h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Follow-ups you set after a call, missed calls, new leads and your call lists show up here.
+            <Empty
+              icon={<PartyPopper />}
+              action={
+                <Button variant="outline" asChild>
+                  <Link to="/activity">
+                    <User /> Browse contacts
+                  </Link>
+                </Button>
+              }
+            >
+              <h2 className="text-lg font-semibold text-foreground">All caught up</h2>
+              <p className="mt-1">
+                Follow-ups you set after a call, missed calls, new leads and your call lists show up here. Dial any number on the right, or pick someone from Contacts.
               </p>
-            </section>
+            </Empty>
           ) : next.kind === "fu" ? (
             <FollowUpNext key={next.key} item={next.item} onCall={() => startCall(next.key)} onSkip={() => handle(next.key)} />
           ) : (
@@ -125,7 +156,7 @@ export function TodayPage() {
 
 function Avatar({ name, phone }: { name: string | null; phone: string }) {
   return (
-    <span aria-hidden className="grid size-14 shrink-0 place-items-center rounded-full bg-brand-50 text-lg font-semibold text-brand-700">
+    <span aria-hidden className="grid size-14 shrink-0 place-items-center rounded-full bg-secondary text-lg font-semibold text-secondary-foreground">
       {initials(name, phone)}
     </span>
   );
@@ -133,26 +164,24 @@ function Avatar({ name, phone }: { name: string | null; phone: string }) {
 
 function NextCard({ children, aside }: { children: ReactNode; aside?: ReactNode }) {
   return (
-    <section aria-labelledby="next-h" className="card p-5">
+    <Card role="region" aria-labelledby="next-h" className="border-primary/30 p-5 shadow-md ring-1 ring-primary/10 sm:p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id="next-h" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <h2 id="next-h" className="text-xs font-semibold uppercase tracking-wide text-primary">
           Next up
         </h2>
         {aside}
       </div>
       {children}
-    </section>
+    </Card>
   );
 }
 
 function BigCall({ onClick, text = "Call" }: { onClick: () => void; text?: string }) {
   return (
-    <button type="button" className="btn-call w-full py-4 text-lg" onClick={onClick}>
-      <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-        <path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2" />
-      </svg>
+    <Button variant="call" size="lg" className="min-h-14 w-full text-lg" onClick={onClick}>
+      <Phone className="size-5" aria-hidden />
       {text}
-    </button>
+    </Button>
   );
 }
 
@@ -175,7 +204,7 @@ function FollowUpNext({ item, onCall, onSkip }: { item: FollowUpItem; onCall: ()
   const onThisCall = dialer.pending?.phone === cleanNumber(item.phoneE164);
 
   return (
-    <NextCard aside={<span className={`text-sm font-medium ${item.overdue ? "text-overdue" : "text-brand-700"}`}>{dueText(item)}</span>}>
+    <NextCard aside={<span className={`text-sm font-medium ${item.overdue ? "text-overdue" : "text-primary"}`}>{dueText(item)}</span>}>
       <div className="mt-3 flex items-center gap-4">
         <Avatar name={item.name} phone={item.phoneE164} />
         <div className="min-w-0">
@@ -189,20 +218,20 @@ function FollowUpNext({ item, onCall, onSkip }: { item: FollowUpItem; onCall: ()
             )}
             <ItemLabel item={item} />
           </div>
-          <div className="truncate text-sm text-slate-500">{[item.name ? item.phoneE164 : null, item.company].filter(Boolean).join(" · ")}</div>
+          <div className="truncate text-sm text-muted-foreground">{[item.name ? item.phoneE164 : null, item.company].filter(Boolean).join(" · ")}</div>
         </div>
       </div>
       {item.lastNote && (
-        <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Last note</div>
+        <div className="mt-4 rounded-lg bg-muted p-3 text-sm">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Last note</div>
           <p className="mt-1 whitespace-pre-line">{item.lastNote}</p>
         </div>
       )}
       <div className="mt-5">
         {onThisCall ? (
-          <button type="button" className="btn-primary w-full py-4 text-lg" onClick={dialer.openOutcome}>
-            Log outcome
-          </button>
+          <Button size="lg" className="min-h-14 w-full text-lg" onClick={dialer.openOutcome}>
+            <ClipboardCheck className="size-5" /> Log outcome
+          </Button>
         ) : (
           <BigCall
             onClick={() => {
@@ -214,35 +243,28 @@ function FollowUpNext({ item, onCall, onSkip }: { item: FollowUpItem; onCall: ()
       </div>
       <div className="mt-3 flex flex-wrap justify-center gap-1">
         {wa && (
-          <a className="btn-ghost" href={wa} target="_blank" rel="noreferrer">
-            WhatsApp
-          </a>
+          <Button variant="ghost" asChild>
+            <a href={wa} target="_blank" rel="noreferrer">
+              <MessageCircle /> WhatsApp
+            </a>
+          </Button>
         )}
         {item.taskId && (
           <>
-            <button type="button" className="btn-ghost" disabled={patch.isPending} onClick={() => patch.mutate({ action: "done" })}>
-              Mark done
-            </button>
-            <button
-              type="button"
-              className="btn-ghost"
-              disabled={patch.isPending}
-              onClick={() => patch.mutate({ action: "snooze", until: new Date(Date.now() + SNOOZE_MS).toISOString() })}
-            >
-              Snooze 1 h
-            </button>
+            <Button variant="ghost" disabled={patch.isPending} onClick={() => patch.mutate({ action: "done" })}>
+              <Check /> Mark done
+            </Button>
+            <Button variant="ghost" disabled={patch.isPending} onClick={() => patch.mutate({ action: "snooze", until: new Date(Date.now() + SNOOZE_MS).toISOString() })}>
+              <BellOff /> Snooze 1 h
+            </Button>
           </>
         )}
-        <button type="button" className="btn-ghost" onClick={onSkip}>
-          Skip for now
-        </button>
+        <Button variant="ghost" onClick={onSkip}>
+          <SkipForward /> Skip for now
+        </Button>
       </div>
-      {patch.isError && (
-        <p role="alert" className="mt-2 text-sm text-red-600">
-          {patch.error.message}
-        </p>
-      )}
-      <p className="hint mt-3 text-center">After you save the outcome, the next call comes up here.</p>
+      <FormError error={patch.isError ? patch.error : null} />
+      <Hint className="mt-3 text-center">After you save the outcome, the next call comes up here.</Hint>
     </NextCard>
   );
 }
@@ -271,8 +293,8 @@ function ListNext({ list, onFinished }: { list: MyList; onFinished: () => void }
 
   const progress = next.data?.progress ?? list.progress;
   const aside = (
-    <span className="text-sm text-slate-600">
-      <Link to={`/lists/${list.id}/work`} className="font-medium text-brand-700 hover:underline">
+    <span className="text-sm text-muted-foreground">
+      <Link to={`/lists/${list.id}/work`} className="font-medium text-primary hover:underline">
         {list.name}
       </Link>{" "}
       · <span className="tabular-nums">{progressText(progress)}</span>
@@ -295,10 +317,10 @@ function ListNext({ list, onFinished }: { list: MyList; onFinished: () => void }
           : null;
     return (
       <NextCard aside={aside}>
-        {msg ? <p className="mt-3 text-sm text-slate-600">{msg}</p> : <ErrorBox error={e} onRetry={() => void next.refetch()} />}
-        <button type="button" className="btn-ghost mt-2" onClick={onFinished}>
-          Skip this list
-        </button>
+        {msg ? <p className="mt-3 text-sm text-muted-foreground">{msg}</p> : <ErrorBox error={e} onRetry={() => void next.refetch()} />}
+        <Button variant="ghost" className="mt-2" onClick={onFinished}>
+          <SkipForward /> Skip this list
+        </Button>
       </NextCard>
     );
   }
@@ -318,57 +340,55 @@ function ListNext({ list, onFinished }: { list: MyList; onFinished: () => void }
             <Link to={`/activity/contacts/${c.id}`} className="truncate text-xl font-semibold hover:underline">
               {label}
             </Link>
-            {c.dnc ? <Badge tone="red">Do not call</Badge> : <ContactStatusBadge status={c.status} />}
+            {c.dnc ? <Badge variant="red">Do not call</Badge> : <ContactStatusBadge status={c.status} />}
           </div>
-          <div className="truncate text-sm text-slate-500">
+          <div className="truncate text-sm text-muted-foreground">
             {[c.name ? c.phoneE164 : null, c.company, c.city].filter(Boolean).join(" · ")}
             {it.attempts > 0 ? ` · attempt ${it.attempts + 1}` : ""}
           </div>
         </div>
       </div>
       {it.lastOutcome && (
-        <div className="mt-4 rounded-xl bg-slate-50 p-3 text-sm">
-          <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Last outcome</span> {it.lastOutcome.label}
+        <div className="mt-4 rounded-lg bg-muted p-3 text-sm">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Last outcome</span> {it.lastOutcome.label}
         </div>
       )}
       <div className="mt-5">
         {onThisCall ? (
-          <button type="button" className="btn-primary w-full py-4 text-lg" onClick={dialer.openOutcome}>
-            Log outcome
-          </button>
+          <Button size="lg" className="min-h-14 w-full text-lg" onClick={dialer.openOutcome}>
+            <ClipboardCheck className="size-5" /> Log outcome
+          </Button>
         ) : (
           <BigCall onClick={() => void dialer.call(c.phoneE164, label, { callListItemId: it.id, listId: list.id, dncReason: c.dnc?.reason ?? null, dnc: !!c.dnc })} />
         )}
       </div>
       <div className="mt-3 flex flex-wrap justify-center gap-1">
         {whatsAppUrl(c.phoneE164) && (
-          <a className="btn-ghost" href={whatsAppUrl(c.phoneE164)!} target="_blank" rel="noreferrer">
-            WhatsApp
-          </a>
+          <Button variant="ghost" asChild>
+            <a href={whatsAppUrl(c.phoneE164)!} target="_blank" rel="noreferrer">
+              <MessageCircle /> WhatsApp
+            </a>
+          </Button>
         )}
-        <button type="button" className="btn-ghost" disabled={skip.isPending} onClick={() => skip.mutate(it.id)}>
-          {skip.isPending ? "Skipping…" : "Skip"}
-        </button>
+        <Button variant="ghost" disabled={skip.isPending} onClick={() => skip.mutate(it.id)}>
+          <SkipForward /> {skip.isPending ? "Skipping…" : "Skip"}
+        </Button>
       </div>
-      {skip.error && (
-        <p role="alert" className="mt-2 text-sm text-red-600">
-          {skip.error.message}
-        </p>
-      )}
+      <FormError error={skip.error} />
       {script && script.sections.length > 0 && (
-        <details className="mt-4 rounded-xl border border-slate-200 p-3" open>
+        <details className="mt-4 rounded-lg border p-3" open>
           <summary className="flex min-h-11 cursor-pointer items-center font-semibold">Script · {script.name}</summary>
           <div className="mt-2 space-y-3">
             {script.sections.map((s, i) => (
               <div key={i}>
-                <div className="text-xs font-bold uppercase tracking-wide text-brand-700">{s.heading}</div>
+                <div className="text-xs font-bold uppercase tracking-wide text-primary">{s.heading}</div>
                 <p className="mt-1 whitespace-pre-line text-sm">{s.text}</p>
               </div>
             ))}
           </div>
         </details>
       )}
-      <p className="hint mt-3 text-center">After you save the outcome, the next number comes up here.</p>
+      <Hint className="mt-3 text-center">After you save the outcome, the next number comes up here.</Hint>
     </NextCard>
   );
 }
@@ -378,16 +398,19 @@ function UpNext({ entries, onCall, onSkip }: { entries: Entry[]; onCall: (key: s
   const shown = all ? entries : entries.slice(0, SHORT_LIST);
   return (
     <section aria-labelledby="upnext-h">
-      <h2 id="upnext-h" className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+      <h2 id="upnext-h" className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         Up next · {entries.length}
       </h2>
-      <ul className="card divide-y divide-slate-100">
-        {shown.map((e) => (e.kind === "fu" ? <FollowUpRow key={e.key} item={e.item} onCall={() => onCall(e.key)} onSkip={() => onSkip(e.key)} /> : <ListRow key={e.key} list={e.list} />))}
-      </ul>
+      <Card className="divide-y overflow-hidden p-0">
+        <ul className="divide-y">
+          {shown.map((e) => (e.kind === "fu" ? <FollowUpRow key={e.key} item={e.item} onCall={() => onCall(e.key)} onSkip={() => onSkip(e.key)} /> : <ListRow key={e.key} list={e.list} />))}
+        </ul>
+      </Card>
       {entries.length > SHORT_LIST && (
-        <button type="button" className="btn-ghost mt-2" aria-expanded={all} onClick={() => setAll((a) => !a)}>
+        <Button variant="ghost" className="mt-2" aria-expanded={all} onClick={() => setAll((a) => !a)}>
+          {all ? <ChevronUp /> : <ChevronDown />}
           {all ? "Show fewer" : `Show all ${entries.length}`}
-        </button>
+        </Button>
       )}
     </section>
   );
@@ -399,39 +422,35 @@ function FollowUpRow({ item, onCall, onSkip }: { item: FollowUpItem; onCall: () 
   const label = item.name || item.phoneE164;
   const wa = whatsAppUrl(item.phoneE164);
   const actions: MenuAction[] = [];
-  if (wa) actions.push({ label: "WhatsApp", href: wa });
+  if (wa) actions.push({ label: "WhatsApp", icon: MessageCircle, href: wa });
   if (item.taskId) {
-    actions.push({ label: "Mark done", onSelect: () => patch.mutate({ action: "done" }) });
-    actions.push({ label: "Snooze 1 hour", onSelect: () => patch.mutate({ action: "snooze", until: new Date(Date.now() + SNOOZE_MS).toISOString() }) });
+    actions.push({ label: "Mark done", icon: Check, onSelect: () => patch.mutate({ action: "done" }) });
+    actions.push({ label: "Snooze 1 hour", icon: BellOff, onSelect: () => patch.mutate({ action: "snooze", until: new Date(Date.now() + SNOOZE_MS).toISOString() }) });
   }
-  actions.push({ label: "Skip for now", onSelect: onSkip });
-  if (item.contactId) actions.push({ label: "Open contact", to: `/activity/contacts/${item.contactId}` });
+  actions.push({ label: "Skip for now", icon: SkipForward, onSelect: onSkip });
+  if (item.contactId) actions.push({ label: "Open contact", icon: User, to: `/activity/contacts/${item.contactId}` });
 
   return (
-    <li className="flex items-center gap-3 px-3 py-2">
+    <li className="flex items-center gap-3 px-4 py-3">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate font-medium">{label}</span>
           <ItemLabel item={item} />
         </div>
-        <div className="truncate text-sm text-slate-500">{[item.company, dueText(item)].filter(Boolean).join(" · ")}</div>
-        {patch.isError && (
-          <p role="alert" className="text-sm text-red-600">
-            {patch.error.message}
-          </p>
-        )}
+        <div className="truncate text-sm text-muted-foreground">{[item.company, dueText(item)].filter(Boolean).join(" · ")}</div>
+        <FormError error={patch.isError ? patch.error : null} />
       </div>
-      <button
-        type="button"
-        className="btn-call"
+      <Button
+        variant="outline"
+        className="min-h-11"
         aria-label={`Call ${label}`}
         onClick={() => {
           onCall();
           void dialer.call(item.phoneE164, label);
         }}
       >
-        Call
-      </button>
+        <Phone className="text-success" /> Call
+      </Button>
       <MoreMenu label={`More for ${label}`} actions={actions} disabled={patch.isPending} />
     </li>
   );
@@ -439,82 +458,58 @@ function FollowUpRow({ item, onCall, onSkip }: { item: FollowUpItem; onCall: () 
 
 function ListRow({ list }: { list: MyList }) {
   return (
-    <li className="flex items-center gap-3 px-3 py-2">
+    <li className="flex items-center gap-3 px-4 py-3">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate font-medium">{list.name}</span>
-          <Badge tone="blue">Call list</Badge>
+          <Badge variant="blue">Call list</Badge>
         </div>
-        <div className="text-sm tabular-nums text-slate-500">{progressText(list.progress)} done</div>
+        <div className="text-sm tabular-nums text-muted-foreground">{progressText(list.progress)} done</div>
       </div>
-      <MoreMenu label={`More for ${list.name}`} actions={[{ label: "Open this list now", to: `/lists/${list.id}/work` }]} />
+      <MoreMenu label={`More for ${list.name}`} actions={[{ label: "Open this list now", icon: ListChecks, to: `/lists/${list.id}/work` }]} />
     </li>
   );
 }
 
-type MenuAction = { label: string; onSelect?: () => void; href?: string; to?: string };
+type MenuAction = { label: string; icon: LucideIcon; onSelect?: () => void; href?: string; to?: string };
 
-/** A small "⋯" menu: Escape or a click outside closes it, focus moves into it on open. */
+/** The "⋯" menu on a queue row (shadcn DropdownMenu). */
 function MoreMenu({ label, actions, disabled }: { label: string; actions: MenuAction[]; disabled?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
-  const btn = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    root.current?.querySelector<HTMLElement>("[role=menuitem]")?.focus();
-    const down = (e: MouseEvent) => {
-      if (!root.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const key = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setOpen(false);
-        btn.current?.focus();
-      }
-    };
-    document.addEventListener("mousedown", down);
-    document.addEventListener("keydown", key);
-    return () => {
-      document.removeEventListener("mousedown", down);
-      document.removeEventListener("keydown", key);
-    };
-  }, [open]);
-  const cls = "flex min-h-11 w-full items-center px-4 text-left text-sm hover:bg-slate-100 focus:bg-slate-100 focus:outline-none";
   return (
-    <div ref={root} className="relative">
-      <button ref={btn} type="button" className="btn-ghost min-w-11 px-2" aria-label={label} aria-haspopup="menu" aria-expanded={open} disabled={disabled} onClick={() => setOpen((o) => !o)}>
-        <span aria-hidden className="text-lg leading-none">
-          ⋯
-        </span>
-      </button>
-      {open && (
-        <div role="menu" aria-label={label} className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-lg">
-          {actions.map((a) =>
-            a.href ? (
-              <a key={a.label} role="menuitem" className={cls} href={a.href} target="_blank" rel="noreferrer" onClick={() => setOpen(false)}>
-                {a.label}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="size-11" aria-label={label} disabled={disabled}>
+          <MoreHorizontal className="size-5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent aria-label={label}>
+        {actions.map((a, i) => {
+          const Icon = a.icon;
+          const sep = a.to && i > 0 ? <DropdownMenuSeparator /> : null;
+          return a.href ? (
+            <DropdownMenuItem key={a.label} asChild>
+              <a href={a.href} target="_blank" rel="noreferrer">
+                <Icon /> {a.label}
+                <ExternalLink className="ml-auto" />
               </a>
-            ) : a.to ? (
-              <Link key={a.label} role="menuitem" className={cls} to={a.to}>
-                {a.label}
-              </Link>
-            ) : (
-              <button
-                key={a.label}
-                role="menuitem"
-                type="button"
-                className={cls}
-                onClick={() => {
-                  setOpen(false);
-                  a.onSelect?.();
-                }}
-              >
-                {a.label}
-              </button>
-            ),
-          )}
-        </div>
-      )}
-    </div>
+            </DropdownMenuItem>
+          ) : a.to ? (
+            <Fragment key={a.label}>
+              {sep}
+              <DropdownMenuItem asChild>
+                <Link to={a.to}>
+                  <Icon /> {a.label}
+                </Link>
+              </DropdownMenuItem>
+            </Fragment>
+          ) : (
+            <DropdownMenuItem key={a.label} onSelect={() => a.onSelect?.()}>
+              <Icon /> {a.label}
+            </DropdownMenuItem>
+          );
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -534,17 +529,20 @@ function DialBox() {
   };
   const matches = q.length >= 3 ? (search.data?.items ?? []) : [];
   return (
-    <section aria-labelledby="dial-h" className="card p-4">
-      <h2 id="dial-h" className="mb-2 font-semibold">
-        Dial a number
-      </h2>
+    <Card role="region" aria-labelledby="dial-h">
+      <CardHeader className="pb-0">
+        <CardTitle id="dial-h" className="flex items-center gap-2 text-base">
+          <Phone aria-hidden className="size-4 text-muted-foreground" /> Dial a number
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="pt-3">
       <form onSubmit={submit} className="flex gap-2">
-        <label htmlFor="dial-num" className="sr-only">
+        <Label htmlFor="dial-num" className="sr-only">
           Number or name
-        </label>
-        <input
+        </Label>
+        <Input
           id="dial-num"
-          className="input min-w-0 flex-1"
+          className="min-w-0 flex-1"
           inputMode="tel"
           autoComplete="off"
           maxLength={40}
@@ -552,25 +550,26 @@ function DialBox() {
           value={number}
           onChange={(e) => setNumber(e.target.value)}
         />
-        <button type="submit" className="btn-call" disabled={!cleanNumber(number)}>
-          Call
-        </button>
+        <Button type="submit" variant="outline" disabled={!cleanNumber(number)}>
+          <Phone className="text-success" /> Call
+        </Button>
       </form>
       {matches.length > 0 && (
-        <ul className="mt-2 divide-y divide-slate-100" aria-label="Matching contacts">
+        <ul className="mt-2 divide-y" aria-label="Matching contacts">
           {matches.map((c) => (
             <li key={c.id} className="flex items-center gap-2 py-1">
               <Link to={`/activity/contacts/${c.id}`} className="min-w-0 flex-1 truncate text-sm hover:underline">
                 <span className="font-medium">{c.name || c.phoneE164}</span>
-                {c.name && <span className="text-slate-500"> · {c.phoneE164}</span>}
+                {c.name && <span className="text-muted-foreground"> · {c.phoneE164}</span>}
               </Link>
-              <CallButton phone={c.phoneE164} label={c.name || c.phoneE164} className="btn-ghost" dncReason={c.dnc?.reason} dnc={!!c.dnc} />
+              <CallButton phone={c.phoneE164} label={c.name || c.phoneE164} variant="ghost" dncReason={c.dnc?.reason} dnc={!!c.dnc} />
             </li>
           ))}
         </ul>
       )}
-      {!isDesktopApp() && <p className="hint mt-2">In a browser, calls need Windows Phone Link set as the app for phone links.</p>}
-    </section>
+      {!isDesktopApp() && <Hint className="mt-2">In a browser, calls need Windows Phone Link set as the app for phone links.</Hint>}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -578,14 +577,14 @@ function TargetBar({ label, value, target, pct }: { label: string; value: string
   return (
     <div>
       <div className="flex items-baseline justify-between text-sm">
-        <span className="text-slate-600">{label}</span>
+        <span className="text-muted-foreground">{label}</span>
         <span className="font-semibold tabular-nums">
           {value}
-          {target != null && <span className="font-normal text-slate-500"> / {target}</span>}
+          {target != null && <span className="font-normal text-muted-foreground"> / {target}</span>}
         </span>
       </div>
       {pct != null && (
-        <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-200" role="progressbar" aria-label={label} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+        <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={label} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
           <div className={`h-full rounded-full ${pct >= 100 ? "bg-call" : "bg-brand-600"}`} style={{ width: `${Math.min(100, pct)}%` }} />
         </div>
       )}
@@ -599,15 +598,15 @@ function TargetsCard() {
   if (!q.data) return null;
   const d = q.data;
   return (
-    <section aria-labelledby="targets-h" className="card space-y-3 p-4">
+    <Card role="region" aria-labelledby="targets-h" className="space-y-3 p-5">
       <h2 id="targets-h" className="font-semibold">
         My day
       </h2>
       <TargetBar label="Calls" value={String(d.calls)} target={d.target.callsPerDay} pct={d.progress.callsPct} />
       <TargetBar label="Talk time (min)" value={String(Math.floor(d.talkTimeS / 60))} target={d.target.talkMinPerDay} pct={d.progress.talkPct} />
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted-foreground">
         {d.connected} connected · {formatDuration(d.talkTimeS)} talk · {d.messages} messages
       </p>
-    </section>
+    </Card>
   );
 }

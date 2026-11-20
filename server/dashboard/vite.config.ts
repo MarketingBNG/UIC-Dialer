@@ -5,6 +5,8 @@ import { defineConfig } from "vite";
 // Built into server/dist/public, which the API serves from the same origin.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  // "@/x" -> src/x (shadcn/ui convention; mirrored in tsconfig paths).
+  resolve: { alias: [{ find: /^@\//, replacement: "/src/" }] },
   build: { outDir: "../dist/public", emptyOutDir: true, sourcemap: false },
   server: {
     port: 5173,

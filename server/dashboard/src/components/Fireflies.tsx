@@ -1,20 +1,35 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import { api, type FirefliesSettingsPatch, type FirefliesUsage } from "../api";
+import { CircleAlert, Info, Save, ShieldOff, TriangleAlert } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useMe } from "../App";
 import { formatWhen } from "../format";
-import { Badge, ConfirmDialog, ErrorBox, Spinner, Toggle } from "../ui";
+import { ErrorBox, FormError, Spinner, SwitchRow, ConfirmDialog } from "../ui";
 
 const KEY = ["fireflies"];
 const useUsage = () => useQuery({ queryKey: KEY, queryFn: () => api<FirefliesUsage>("/api/fireflies/usage"), refetchInterval: 60_000 });
 
 type Level = "info" | "warning" | "error";
-const LEVEL_CLS: Record<Level, string> = {
-  info: "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-200",
-  warning: "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200",
-  error: "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-200",
-};
+const LEVEL_VARIANT: Record<Level, "info" | "warning" | "destructive"> = { info: "info", warning: "warning", error: "destructive" };
+const LEVEL_ICON: Record<Level, typeof Info> = { info: Info, warning: TriangleAlert, error: CircleAlert };
 
 export function firefliesAlerts(u: FirefliesUsage): { level: Level; text: string }[] {
   const out: { level: Level; text: string }[] = [];
@@ -45,14 +60,20 @@ export function FirefliesBanner() {
   if (alerts.length === 0) return null;
   return (
     <div className="mb-4 space-y-2">
-      {alerts.map((a) => (
-        <div key={a.text} role={a.level === "info" ? "status" : "alert"} className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3 text-sm ${LEVEL_CLS[a.level]}`}>
-          <span className="min-w-0 break-words">{a.text}</span>
-          <Link to="/health#fireflies" className="font-medium underline">
-            {me.role === "ADMIN" ? "Manage" : "Details"}
-          </Link>
-        </div>
-      ))}
+      {alerts.map((a) => {
+        const Icon = LEVEL_ICON[a.level];
+        return (
+          <Alert key={a.text} variant={LEVEL_VARIANT[a.level]} role={a.level === "info" ? "status" : "alert"}>
+            <Icon />
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+              <span className="min-w-0 break-words">{a.text}</span>
+              <Link to="/health#fireflies" className="inline-flex min-h-11 items-center font-medium underline sm:min-h-0">
+                {me.role === "ADMIN" ? "Manage" : "Details"}
+              </Link>
+            </AlertDescription>
+          </Alert>
+        );
+      })}
     </div>
   );
 }
@@ -63,7 +84,7 @@ export function FirefliesPanel() {
   const usage = useUsage();
   const [saved, setSaved] = useState(false);
   return (
-    <section id="fireflies" className="card mb-4 scroll-mt-20 p-4 sm:p-6">
+    <Card id="fireflies" className="mb-4 scroll-mt-20 p-4 sm:p-6">
       {usage.isPending ? (
         <Spinner label="Loading Fireflies usage" />
       ) : usage.isError ? (
@@ -74,7 +95,7 @@ export function FirefliesPanel() {
           {me.role === "ADMIN" && <AdminForm key={formKey(usage.data)} u={usage.data} saved={saved} setSaved={setSaved} />}
         </>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -90,9 +111,9 @@ function Usage({ u }: { u: FirefliesUsage }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-semibold">Fireflies transcription · {u.month}</h2>
         <div className="flex flex-wrap gap-1">
-          {u.enabled ? <Badge tone="green">Enabled</Badge> : <Badge>Disabled</Badge>}
-          {u.blocked && <Badge tone="red">Blocked</Badge>}
-          {u.waitingBudgetJobs > 0 && <Badge tone="amber">{u.waitingBudgetJobs} waiting for budget</Badge>}
+          {u.enabled ? <Badge variant="green">Enabled</Badge> : <Badge variant="gray">Disabled</Badge>}
+          {u.blocked && <Badge variant="red">Blocked</Badge>}
+          {u.waitingBudgetJobs > 0 && <Badge variant="amber">{u.waitingBudgetJobs} waiting for budget</Badge>}
         </div>
       </div>
       <div className="mt-3 flex items-baseline justify-between text-sm">
@@ -102,7 +123,7 @@ function Usage({ u }: { u: FirefliesUsage }) {
         <span className="font-medium tabular-nums">{u.pct}% used</span>
       </div>
       <div
-        className="relative mt-2 h-3 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"
+        className="relative mt-2 h-3 overflow-hidden rounded-full bg-slate-200"
         role="progressbar"
         aria-label="Fireflies minutes used"
         aria-valuemin={0}
@@ -113,27 +134,27 @@ function Usage({ u }: { u: FirefliesUsage }) {
         <div className={`absolute inset-y-0 left-0 ${barTone}`} style={{ width: `${usedBar}%` }} />
       </div>
       <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
-        <dt className="text-slate-500">Used</dt>
+        <dt className="text-muted-foreground">Used</dt>
         <dd className="tabular-nums">{u.usedMinutes} min</dd>
-        <dt className="text-slate-500">Reserved</dt>
+        <dt className="text-muted-foreground">Reserved</dt>
         <dd className="tabular-nums">{u.reservedMinutes} min</dd>
-        <dt className="text-slate-500">Live reserve</dt>
+        <dt className="text-muted-foreground">Live reserve</dt>
         <dd className="tabular-nums">{u.liveReservePct}%</dd>
-        <dt className="text-slate-500">Backlog sent</dt>
-        <dd className={`tabular-nums ${u.backlogSent >= u.approvedBacklogCount ? "font-medium text-amber-700 dark:text-amber-300" : ""}`}>
+        <dt className="text-muted-foreground">Backlog sent</dt>
+        <dd className={`tabular-nums ${u.backlogSent >= u.approvedBacklogCount ? "font-medium text-amber-700" : ""}`}>
           {u.backlogSent} of {u.approvedBacklogCount} approved
         </dd>
-        <dt className="text-slate-500">Delete after fetch</dt>
+        <dt className="text-muted-foreground">Delete after fetch</dt>
         <dd>{u.deleteAfterFetch ? "Yes" : "No"}</dd>
         {u.blocked && (
           <>
-            <dt className="text-slate-500">Blocked until</dt>
+            <dt className="text-muted-foreground">Blocked until</dt>
             <dd>{formatWhen(u.blockedUntil)}</dd>
           </>
         )}
       </dl>
       {u.lastError && (
-        <p className="mt-3 break-words text-sm text-slate-600 dark:text-slate-400">
+        <p className="mt-3 break-words text-sm text-slate-600">
           Last error{u.lastErrorAt ? ` (${formatWhen(u.lastErrorAt)})` : ""}: {u.lastError}
         </p>
       )}
@@ -192,7 +213,7 @@ function AdminForm({ u, saved, setSaved }: { u: FirefliesUsage; saved: boolean; 
 
   return (
     <form
-      className="mt-5 space-y-4 border-t border-slate-200 pt-4 dark:border-slate-800"
+      className="mt-5 space-y-4 border-t border-slate-200 pt-4"
       onSubmit={(e) => {
         e.preventDefault();
         if (valid && dirty) save.mutate(patch);
@@ -201,46 +222,44 @@ function AdminForm({ u, saved, setSaved }: { u: FirefliesUsage; saved: boolean; 
       <h3 className="font-semibold">Fireflies settings</h3>
       <div className="grid gap-4 sm:grid-cols-3">
         <div>
-          <label className="label" htmlFor="ff-budget">
+          <Label htmlFor="ff-budget">
             Monthly budget (minutes)
-          </label>
-          <input id="ff-budget" inputMode="numeric" className="input" value={form.budget} onChange={(e) => set("budget", e.target.value)} aria-invalid={!budgetOk} aria-describedby="ff-budget-hint" />
-          <p id="ff-budget-hint" className={`hint ${budgetOk ? "" : "text-red-600 dark:text-red-400"}`}>
+          </Label>
+          <Input id="ff-budget" inputMode="numeric"  value={form.budget} onChange={(e) => set("budget", e.target.value)} aria-invalid={!budgetOk} aria-describedby="ff-budget-hint" />
+          <p id="ff-budget-hint" className={`mt-1 text-xs text-muted-foreground ${budgetOk ? "" : "text-destructive"}`}>
             Whole number, 0 to 1,000,000.
           </p>
         </div>
         <div>
-          <label className="label" htmlFor="ff-reserve">
+          <Label htmlFor="ff-reserve">
             Live reserve (%)
-          </label>
-          <input id="ff-reserve" inputMode="decimal" className="input" value={form.reserve} onChange={(e) => set("reserve", e.target.value)} aria-invalid={!reserveOk} aria-describedby="ff-reserve-hint" />
-          <p id="ff-reserve-hint" className={`hint ${reserveOk ? "" : "text-red-600 dark:text-red-400"}`}>
+          </Label>
+          <Input id="ff-reserve" inputMode="decimal"  value={form.reserve} onChange={(e) => set("reserve", e.target.value)} aria-invalid={!reserveOk} aria-describedby="ff-reserve-hint" />
+          <p id="ff-reserve-hint" className={`mt-1 text-xs text-muted-foreground ${reserveOk ? "" : "text-destructive"}`}>
             0 to 100. Only live calls may use this share.
           </p>
         </div>
         <div>
-          <label className="label" htmlFor="ff-approved">
+          <Label htmlFor="ff-approved">
             Approved backlog calls
-          </label>
+          </Label>
           <div className="flex gap-2">
-            <input id="ff-approved" inputMode="numeric" className="input" value={form.approved} onChange={(e) => set("approved", e.target.value)} aria-invalid={!approvedOk} aria-describedby="ff-approved-hint" />
-            <button
-              type="button"
-              className="btn-outline shrink-0"
+            <Input id="ff-approved" inputMode="numeric"  value={form.approved} onChange={(e) => set("approved", e.target.value)} aria-invalid={!approvedOk} aria-describedby="ff-approved-hint" />
+            <Button variant="outline" className="min-h-11 shrink-0"
               disabled={!approvedOk}
               onClick={() => set("approved", String(Math.min(10_000_000, Number(form.approved) + 20)))}
             >
               +20
-            </button>
+            </Button>
           </div>
-          <p id="ff-approved-hint" className={`hint ${approvedOk ? "" : "text-red-600 dark:text-red-400"}`}>
+          <p id="ff-approved-hint" className={`mt-1 text-xs text-muted-foreground ${approvedOk ? "" : "text-destructive"}`}>
             Total imported calls allowed. {u.backlogSent} sent so far.
           </p>
         </div>
       </div>
-      <div className="divide-y divide-slate-200 dark:divide-slate-800">
-        <Toggle checked={form.enabled} onChange={(v) => set("enabled", v)} label="Send calls to Fireflies" hint="When off, no new calls are sent." />
-        <Toggle
+      <div className="divide-y divide-slate-200">
+        <SwitchRow checked={form.enabled} onChange={(v) => set("enabled", v)} label="Send calls to Fireflies" hint="When off, no new calls are sent." />
+        <SwitchRow
           checked={form.deleteAfterFetch}
           onChange={(v) => set("deleteAfterFetch", v)}
           label="Delete from Fireflies after fetching"
@@ -248,13 +267,11 @@ function AdminForm({ u, saved, setSaved }: { u: FirefliesUsage; saved: boolean; 
         />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
-        <button type="submit" className="btn-primary" disabled={!dirty || !valid || save.isPending}>
-          {save.isPending ? "Saving…" : "Save"}
-        </button>
-        <button
-          type="button"
-          className="btn-ghost"
+      <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-4">
+        <Button type="submit" className="min-h-11" disabled={!dirty || !valid || save.isPending}>
+          <Save /> {save.isPending ? "Saving…" : "Save changes"}
+        </Button>
+        <Button variant="ghost" className="min-h-11"
           disabled={(!dirty && valid) || save.isPending}
           onClick={() => {
             save.reset();
@@ -262,15 +279,15 @@ function AdminForm({ u, saved, setSaved }: { u: FirefliesUsage; saved: boolean; 
           }}
         >
           Discard changes
-        </button>
+        </Button>
         {u.blocked && (
-          <button type="button" className="btn-outline text-red-700 dark:text-red-300" onClick={() => setConfirmClear(true)}>
-            Clear block
-          </button>
+          <Button variant="outline" className="min-h-11 text-destructive hover:text-destructive" onClick={() => setConfirmClear(true)}>
+            <ShieldOff /> Clear block
+          </Button>
         )}
         <span aria-live="polite" className="text-sm">
-          {saved && !dirty && <span className="text-emerald-700 dark:text-emerald-400">Saved.</span>}
-          {save.error && <span className="text-red-600 dark:text-red-400">{save.error.message}</span>}
+          {saved && !dirty && <span className="text-emerald-700">Saved.</span>}
+          {save.error && <span className="text-destructive">{save.error.message}</span>}
         </span>
       </div>
 
@@ -280,7 +297,7 @@ function AdminForm({ u, saved, setSaved }: { u: FirefliesUsage; saved: boolean; 
         body={
           <>
             Calls will be sent to Fireflies again right away. Only do this after fixing the cause in Fireflies (billing, plan or quota).
-            {u.lastError && <span className="mt-2 block text-slate-500">Last error: {u.lastError}</span>}
+            {u.lastError && <span className="mt-2 block text-muted-foreground">Last error: {u.lastError}</span>}
           </>
         }
         confirmLabel="Clear block"
@@ -295,3 +312,7 @@ function AdminForm({ u, saved, setSaved }: { u: FirefliesUsage; saved: boolean; 
     </form>
   );
 }
+
+/** A labelled shadcn Switch with helper text. */
+
+/** Destructive confirmation on shadcn AlertDialog. */

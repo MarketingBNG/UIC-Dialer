@@ -1,10 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import type * as React from "react";
 import { useNavigate } from "react-router";
 import { ApiError, api, isManager, type ListSummary, type NewLeadResult } from "../api";
 import { useMe } from "../App";
 import { personName } from "../format";
-import { Modal } from "../ui";
+import { Check, FileUp, ListPlus, UserPlus } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Textarea } from "@/components/ui/textarea";
+import { FormError } from "../ui";
 import { CsvImportView, importCount, useCsvImport } from "./CsvImport";
 import { useAssignableUsers } from "./UserPicker";
 
@@ -30,81 +39,80 @@ export function ImportDialog({ onClose, onList }: { onClose: () => void; onList:
       },
     );
   return (
-    <Modal
-      open
-      title="Import contacts from CSV"
-      onClose={() => !csv.run.isPending && onClose()}
-      footer={
-        done ? (
-          <>
-            <button type="button" className="btn-ghost" onClick={onClose}>
-              Close
-            </button>
-            {!listId && done.contactIds.length > 0 && (
-              <button type="button" className="btn-primary" onClick={() => onList(done.contactIds)}>
-                Create list from these
-              </button>
-            )}
-          </>
+    <Dialog open onOpenChange={(o) => !o && !csv.run.isPending && onClose()}>
+      <DialogContent className="w-[min(40rem,calc(100vw-2rem))]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <FileUp aria-hidden className="size-5 text-primary" /> Import contacts from CSV
+          </DialogTitle>
+          <DialogDescription>Choose a CSV file. Columns are matched automatically; check the preview before importing.</DialogDescription>
+        </DialogHeader>
+        {done ? (
+          <Alert variant="success">
+            <Check />
+            <AlertDescription>
+              Done: {done.created} created, {done.updated} updated, {done.skipped} skipped
+              {done.ownedElsewhere ? `, ${done.ownedElsewhere} left alone (another team's contacts)` : ""}
+              {done.dncSkippedFromList ? `, ${done.dncSkippedFromList} do-not-call numbers left off the list` : ""}.
+            </AlertDescription>
+          </Alert>
         ) : (
-          <>
-            <button type="button" className="btn-ghost" disabled={csv.run.isPending} onClick={onClose}>
-              Cancel
-            </button>
-            <button type="button" className="btn-primary" disabled={!n || csv.preview.isPending || csv.run.isPending} onClick={go}>
-              {csv.run.isPending ? "Importing…" : `Import ${n} contacts`}
-            </button>
-          </>
-        )
-      }
-    >
-      {done ? (
-        <p className="text-emerald-700 dark:text-emerald-400">
-          Done: {done.created} created, {done.updated} updated, {done.skipped} skipped
-          {done.ownedElsewhere ? `, ${done.ownedElsewhere} left alone (another team's contacts)` : ""}
-          {done.dncSkippedFromList ? `, ${done.dncSkippedFromList} do-not-call numbers left off the list` : ""}.
-        </p>
-      ) : (
-        <div className="space-y-3">
-          <CsvImportView state={csv} />
-          {csv.preview.data && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div>
-                <label className="label" htmlFor="imp-owner">
-                  Owner of new contacts
-                </label>
-                <select id="imp-owner" className="input" value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
-                  <option value="">No owner</option>
-                  {users.items.map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {personName(u)}
-                    </option>
-                  ))}
-                </select>
+          <div className="space-y-3">
+            <CsvImportView state={csv} />
+            {csv.preview.data && (
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div>
+                  <Label htmlFor="imp-owner">Owner of new contacts</Label>
+                  <NativeSelect id="imp-owner" value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
+                    <option value="">No owner</option>
+                    {users.items.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {personName(u)}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </div>
+                <div>
+                  <Label htmlFor="imp-list">Add to list (optional)</Label>
+                  <NativeSelect id="imp-list" value={listId} onChange={(e) => setListId(e.target.value)}>
+                    <option value="">Don&apos;t add</option>
+                    {lists.data?.items.map((l) => (
+                      <option key={l.id} value={l.id}>
+                        {l.name}
+                      </option>
+                    ))}
+                  </NativeSelect>
+                </div>
               </div>
-              <div>
-                <label className="label" htmlFor="imp-list">
-                  Add to list (optional)
-                </label>
-                <select id="imp-list" className="input" value={listId} onChange={(e) => setListId(e.target.value)}>
-                  <option value="">Don't add</option>
-                  {lists.data?.items.map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
+            )}
+            <FormError error={csv.run.error} />
+          </div>
+        )}
+        <DialogFooter>
+          {done ? (
+            <>
+              <Button variant="outline" onClick={onClose}>
+                Close
+              </Button>
+              {!listId && done.contactIds.length > 0 && (
+                <Button onClick={() => onList(done.contactIds)}>
+                  <ListPlus /> Create list from these
+                </Button>
+              )}
+            </>
+          ) : (
+            <>
+              <Button variant="outline" disabled={csv.run.isPending} onClick={onClose}>
+                Cancel
+              </Button>
+              <Button disabled={!n || csv.preview.isPending || csv.run.isPending} onClick={go}>
+                <FileUp /> {csv.run.isPending ? "Importing…" : `Import ${n} contacts`}
+              </Button>
+            </>
           )}
-          {csv.run.error && (
-            <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-              {csv.run.error.message}
-            </p>
-          )}
-        </div>
-      )}
-    </Modal>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -132,77 +140,64 @@ export function NewLeadDialog({ onClose }: { onClose: () => void }) {
     },
   });
   const exists = save.error instanceof ApiError && save.error.code === "EXISTS";
+  const field = (k: keyof typeof f, label: string, extra: React.ComponentProps<typeof Input> = {}) => (
+    <div>
+      <Label htmlFor={`nlead-${k}`}>{label}</Label>
+      <Input id={`nlead-${k}`} maxLength={200} value={f[k]} onChange={(e) => set(k, e.target.value)} {...extra} />
+    </div>
+  );
   return (
-    <Modal
-      open
-      title="New lead"
-      onClose={() => !save.isPending && onClose()}
-      footer={
-        <>
-          <button type="button" className="btn-ghost" disabled={save.isPending} onClick={onClose}>
-            Cancel
-          </button>
-          <button type="button" className="btn-primary" disabled={!f.phone.trim() || save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? "Saving…" : "Add lead"}
-          </button>
-        </>
-      }
-    >
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div>
-          <label className="label" htmlFor="nlead-phone">
-            Phone
-          </label>
-          <input id="nlead-phone" className="input" inputMode="tel" maxLength={40} required value={f.phone} onChange={(e) => set("phone", e.target.value)} />
-        </div>
-        <div>
-          <label className="label" htmlFor="nlead-name">
-            Name
-          </label>
-          <input id="nlead-name" className="input" maxLength={200} value={f.name} onChange={(e) => set("name", e.target.value)} />
-        </div>
-        <div>
-          <label className="label" htmlFor="nlead-company">
-            Company
-          </label>
-          <input id="nlead-company" className="input" maxLength={200} value={f.company} onChange={(e) => set("company", e.target.value)} />
-        </div>
-        <div>
-          <label className="label" htmlFor="nlead-city">
-            City
-          </label>
-          <input id="nlead-city" className="input" maxLength={200} value={f.city} onChange={(e) => set("city", e.target.value)} />
-        </div>
-        <div className="sm:col-span-2">
-          <label className="label" htmlFor="nlead-note">
-            Note
-          </label>
-          <textarea id="nlead-note" className="input py-2" rows={2} maxLength={2000} value={f.note} onChange={(e) => set("note", e.target.value)} />
-        </div>
-        {manager && (
+    <Dialog open onOpenChange={(o) => !o && !save.isPending && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <UserPlus aria-hidden className="size-5 text-primary" /> New lead
+          </DialogTitle>
+          <DialogDescription>Only the phone number is required.</DialogDescription>
+        </DialogHeader>
+        <form
+          id="nlead-form"
+          className="grid gap-3 sm:grid-cols-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (f.phone.trim() && !save.isPending) save.mutate();
+          }}
+        >
+          {field("phone", "Phone", { inputMode: "tel", maxLength: 40, required: true, autoFocus: true })}
+          {field("name", "Name")}
+          {field("company", "Company")}
+          {field("city", "City")}
           <div className="sm:col-span-2">
-            <label className="label" htmlFor="nlead-assign">
-              Assign
-            </label>
-            <select id="nlead-assign" className="input" value={assignTo} onChange={(e) => setAssignTo(e.target.value)}>
-              <option value="auto">Auto (next rep in turn)</option>
-              <option value={me.id}>Me</option>
-              {users.items
-                .filter((u) => u.id !== me.id)
-                .map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {personName(u)}
-                  </option>
-                ))}
-            </select>
+            <Label htmlFor="nlead-note">Note</Label>
+            <Textarea id="nlead-note" rows={2} maxLength={2000} value={f.note} onChange={(e) => set("note", e.target.value)} />
           </div>
-        )}
-      </div>
-      {save.error && (
-        <p role="alert" className="mt-3 text-sm text-red-600 dark:text-red-400">
-          {exists ? "This number is already a contact of another rep." : save.error.message}
-        </p>
-      )}
-    </Modal>
+          {manager && (
+            <div className="sm:col-span-2">
+              <Label htmlFor="nlead-assign">Assign to</Label>
+              <NativeSelect id="nlead-assign" value={assignTo} onChange={(e) => setAssignTo(e.target.value)}>
+                <option value="auto">Auto (next rep in turn)</option>
+                <option value={me.id}>Me</option>
+                {users.items
+                  .filter((u) => u.id !== me.id)
+                  .map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {personName(u)}
+                    </option>
+                  ))}
+              </NativeSelect>
+            </div>
+          )}
+        </form>
+        <FormError error={save.error ? (exists ? "This number is already a contact of another rep." : save.error) : null} />
+        <DialogFooter>
+          <Button variant="outline" disabled={save.isPending} onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" form="nlead-form" disabled={!f.phone.trim() || save.isPending}>
+            <UserPlus /> {save.isPending ? "Saving…" : "Add lead"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

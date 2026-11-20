@@ -5,7 +5,12 @@ import { useMe } from "../App";
 import { STATUS_LABEL, ago, jobStatusLabel, formatBytes, formatWhen, personName } from "../format";
 import { FirefliesPanel } from "../components/Fireflies";
 import { TranslationPanel } from "../components/Translation";
-import { Badge, ConfirmDialog, Empty, ErrorBox, PageHeader, Spinner } from "../ui";
+import { Empty, ErrorBox, FormError, PageHeader, Spinner } from "../ui";
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { RefreshCw, Send, Smartphone } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 
 const STALE_MS = 24 * 3600_000;
 const GOOGLE_DIALER = "com.google.android.dialer";
@@ -48,22 +53,21 @@ export function HealthPage() {
         title="Sync health"
         subtitle="Phones that upload recordings. A phone not seen for 24 hours is flagged."
         actions={
-          <button
-            type="button"
-            className="btn-outline"
+          <Button variant="outline"
             disabled={devices.isFetching}
             onClick={() => {
               void devices.refetch();
               void stats.refetch();
             }}
           >
+            <RefreshCw className={devices.isFetching ? "animate-spin" : undefined} />
             {devices.isFetching ? "Refreshing…" : "Refresh"}
-          </button>
+          </Button>
         }
       />
 
       {stats.data && <StatsHeader s={stats.data} />}
-      {stats.isError && <p className="mb-4 text-sm text-amber-700 dark:text-amber-300">Server stats unavailable: {stats.error.message}</p>}
+      {stats.isError && <p className="mb-4 text-sm text-amber-700">Server stats unavailable: {stats.error.message}</p>}
 
       <FirefliesPanel />
       <TranslationPanel />
@@ -78,61 +82,62 @@ export function HealthPage() {
       ) : devices.isError ? (
         <ErrorBox error={devices.error} onRetry={() => void devices.refetch()} />
       ) : sorted.length === 0 ? (
-        <Empty>No devices have signed in yet.</Empty>
+        <Empty icon={<Smartphone />}>No phones have signed in yet. Install the UIC Dialer app on a rep's Android phone and sign in with their company account.</Empty>
       ) : (
         <ul className="grid gap-3 md:grid-cols-2">
           {sorted.map((d) => {
             const stale = !d.revokedAt && (!d.lastSeenAt || now - new Date(d.lastSeenAt).getTime() > STALE_MS);
             return (
-              <li key={d.id} className={`card p-4 ${d.revokedAt ? "opacity-60" : ""} ${stale ? "border-amber-300 dark:border-amber-800" : ""}`}>
+              <li key={d.id}>
+                <Card className={`h-full p-4 ${d.revokedAt ? "opacity-60" : ""} ${stale ? "border-amber-300" : ""}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="truncate font-medium">{personName(d.user)}</div>
-                    <div className="truncate text-sm text-slate-500">
+                    <div className="truncate text-sm text-muted-foreground">
                       {d.model ?? "Unknown phone"}
                       {d.androidVersion ? ` · Android ${d.androidVersion}` : ""}
                       {d.appVersion ? ` · app ${d.appVersion}` : ""}
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                    {d.revokedAt ? <Badge tone="red">Revoked</Badge> : stale ? <Badge tone="amber">Not seen 24h+</Badge> : <Badge tone="green">OK</Badge>}
-                    {!d.revokedAt && !d.permissionsOk && <Badge tone="red">Permissions missing</Badge>}
-                    {!d.revokedAt && d.throttled && <Badge tone="amber">Throttled ({d.standbyBucketName})</Badge>}
-                    {!d.revokedAt && d.callsWithoutRecordings && <Badge tone="red">Calls but no recordings</Badge>}
+                    {d.revokedAt ? <Badge variant="red">Revoked</Badge> : stale ? <Badge variant="amber">Not seen 24h+</Badge> : <Badge variant="green">OK</Badge>}
+                    {!d.revokedAt && !d.permissionsOk && <Badge variant="red">Permissions missing</Badge>}
+                    {!d.revokedAt && d.throttled && <Badge variant="amber">Throttled ({d.standbyBucketName})</Badge>}
+                    {!d.revokedAt && d.callsWithoutRecordings && <Badge variant="red">Calls but no recordings</Badge>}
                   </div>
                 </div>
                 <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-                  <dt className="text-slate-500">Last seen</dt>
+                  <dt className="text-muted-foreground">Last seen</dt>
                   <dd title={formatWhen(d.lastSeenAt)}>{ago(d.lastSeenAt, now)}</dd>
-                  <dt className="text-slate-500">Last sync</dt>
+                  <dt className="text-muted-foreground">Last sync</dt>
                   <dd title={formatWhen(d.lastSyncAt)}>{ago(d.lastSyncAt, now)}</dd>
-                  <dt className="text-slate-500">Waiting to upload</dt>
-                  <dd className={d.pendingCount > 0 ? "font-medium text-amber-700 dark:text-amber-300" : ""}>{d.pendingCount}</dd>
-                  <dt className="text-slate-500">Free space</dt>
+                  <dt className="text-muted-foreground">Waiting to upload</dt>
+                  <dd className={d.pendingCount > 0 ? "font-medium text-amber-700" : ""}>{d.pendingCount}</dd>
+                  <dt className="text-muted-foreground">Free space</dt>
                   <dd>{formatBytes(d.freeBytes)}</dd>
                   {d.calls7d != null && (
                     <>
-                      <dt className="text-slate-500">Calls / recordings (7 d)</dt>
-                      <dd className={d.callsWithoutRecordings ? "font-medium text-red-700 dark:text-red-300" : ""}>
+                      <dt className="text-muted-foreground">Calls / recordings (7 d)</dt>
+                      <dd className={d.callsWithoutRecordings ? "font-medium text-destructive" : ""}>
                         {d.calls7d} / {d.recordings7d ?? "–"}
                       </dd>
                     </>
                   )}
                   {d.standbyBucketName && (
                     <>
-                      <dt className="text-slate-500">Standby bucket</dt>
-                      <dd className={d.throttled ? "font-medium text-amber-700 dark:text-amber-300" : ""}>{d.standbyBucketName}</dd>
+                      <dt className="text-muted-foreground">Standby bucket</dt>
+                      <dd className={d.throttled ? "font-medium text-amber-700" : ""}>{d.standbyBucketName}</dd>
                     </>
                   )}
                   {d.lastStopReason != null && (
                     <>
-                      <dt className="text-slate-500">Last job stop</dt>
+                      <dt className="text-muted-foreground">Last job stop</dt>
                       <dd>{stopReasonLabel(d.lastStopReason)}</dd>
                     </>
                   )}
                   {d.defaultDialer && (
                     <>
-                      <dt className="text-slate-500">Dialer</dt>
+                      <dt className="text-muted-foreground">Dialer</dt>
                       <dd className="truncate" title={d.defaultDialer}>
                         {d.defaultDialer === GOOGLE_DIALER ? "Google Phone (recordings not readable)" : d.defaultDialer}
                       </dd>
@@ -140,57 +145,68 @@ export function HealthPage() {
                   )}
                   {d.autostartIntent && (
                     <>
-                      <dt className="text-slate-500">Autostart screen</dt>
+                      <dt className="text-muted-foreground">Autostart screen</dt>
                       <dd className="truncate" title={d.autostartIntent}>{d.autostartIntent.split("/")[0]}</dd>
                     </>
                   )}
                   {d.revokedAt && (
                     <>
-                      <dt className="text-slate-500">Revoked</dt>
+                      <dt className="text-muted-foreground">Revoked</dt>
                       <dd>{formatWhen(d.revokedAt)}</dd>
                     </>
                   )}
                 </dl>
                 {isAdmin && !d.revokedAt && (
-                  <button type="button" className="btn-ghost mt-3 -ml-3 px-3 text-red-700 dark:text-red-300" onClick={() => setConfirm(d)}>
+                  <Button variant="ghost" className="mt-3 -ml-3 px-3 text-destructive hover:text-destructive" onClick={() => setConfirm(d)}>
                     Revoke device
-                  </button>
+                  </Button>
                 )}
+                </Card>
               </li>
             );
           })}
         </ul>
       )}
 
-      <ConfirmDialog
+      <AlertDialog
         open={!!confirm}
-        title="Revoke device?"
-        body={
-          confirm && (
-            <>
-              {confirm.model ?? "This device"} ({personName(confirm.user)}) will be signed out and stop uploading until the user signs in again.
-            </>
-          )
-        }
-        confirmLabel="Revoke"
-        busy={revoke.isPending}
-        error={revoke.error}
-        onConfirm={() => confirm && revoke.mutate(confirm)}
-        onClose={() => {
-          setConfirm(null);
-          revoke.reset();
+        onOpenChange={(o) => {
+          if (!o && !revoke.isPending) {
+            setConfirm(null);
+            revoke.reset();
+          }
         }}
-      />
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sign out this phone?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirm && (
+                <>
+                  {confirm.model ?? "This device"} ({personName(confirm.user)}) will be signed out and stop uploading until the user signs in again.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <FormError error={revoke.error} />
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={revoke.isPending}>Cancel</AlertDialogCancel>
+            <Button variant="destructive" disabled={revoke.isPending} onClick={() => confirm && revoke.mutate(confirm)}>
+              {revoke.isPending ? "Working…" : "Revoke"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
 
 function StatsHeader({ s }: { s: Stats }) {
   const tile = (label: string, value: string | number, warn = false) => (
-    <div className="card p-3">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className={`mt-1 text-xl font-semibold tabular-nums ${warn ? "text-amber-700 dark:text-amber-300" : ""}`}>{value}</div>
-    </div>
+    <Card className="p-3">
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className={`mt-1 text-xl font-semibold tabular-nums ${warn ? "text-amber-700" : ""}`}>{value}</div>
+    </Card>
   );
   const jobsWaiting = (s.jobs["QUEUED"] ?? 0) + (s.jobs["RUNNING"] ?? 0) + (s.jobs["WAITING_BUDGET"] ?? 0);
   return (
@@ -202,11 +218,12 @@ function StatsHeader({ s }: { s: Stats }) {
         {tile("Server disk used", `${s.disk.usedPct}%`, s.disk.usedPct > 80)}
       </div>
       {s.throughput && <ThroughputTiles t={s.throughput} tile={tile} />}
-      <details className="card p-3 text-sm">
-        <summary className="cursor-pointer font-medium">Details</summary>
+      <Card className="p-3 text-sm">
+      <details>
+        <summary className="flex min-h-10 cursor-pointer items-center font-medium">Details</summary>
         <div className="mt-2 grid gap-4 sm:grid-cols-3">
           <div>
-            <div className="mb-1 text-xs font-semibold uppercase text-slate-500">Calls by status</div>
+            <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Calls by status</div>
             {(Object.keys(STATUS_LABEL) as CallStatus[]).map((k) => (
               <div key={k} className="flex justify-between">
                 <span>{STATUS_LABEL[k]}</span>
@@ -215,8 +232,8 @@ function StatsHeader({ s }: { s: Stats }) {
             ))}
           </div>
           <div>
-            <div className="mb-1 text-xs font-semibold uppercase text-slate-500">Jobs</div>
-            {Object.keys(s.jobs).length === 0 && <div className="text-slate-500">None</div>}
+            <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Jobs</div>
+            {Object.keys(s.jobs).length === 0 && <div className="text-muted-foreground">None</div>}
             {Object.entries(s.jobs).map(([k, v]) => (
               <div key={k} className="flex justify-between">
                 <span>{jobStatusLabel(k)}</span>
@@ -225,7 +242,7 @@ function StatsHeader({ s }: { s: Stats }) {
             ))}
           </div>
           <div>
-            <div className="mb-1 text-xs font-semibold uppercase text-slate-500">Disk</div>
+            <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Disk</div>
             <div className="flex justify-between">
               <span>Free</span>
               <span>{formatBytes(s.disk.freeBytes)}</span>
@@ -246,6 +263,7 @@ function StatsHeader({ s }: { s: Stats }) {
           </div>
         </div>
       </details>
+      </Card>
     </div>
   );
 }
@@ -268,7 +286,7 @@ function ThroughputTiles({ t, tile }: { t: Throughput; tile: (label: string, val
         {tile("Avg seconds per job", t.avgJobSeconds ?? "–")}
         {tile("Backlog", `${t.backlogCalls} calls · ${t.backlogMinutes} min`)}
       </div>
-      <p className="text-sm text-slate-500">Backlog ETA: {etaText(t)}</p>
+      <p className="text-sm text-muted-foreground">Backlog ETA: {etaText(t)}</p>
     </>
   );
 }
@@ -277,27 +295,28 @@ function ThroughputTiles({ t, tile }: { t: Throughput; tile: (label: string, val
 function TestAlert({ enabled }: { enabled: boolean | undefined }) {
   const run = useMutation({ mutationFn: () => api<{ sent: boolean }>("/api/admin/test-alert", { method: "POST", body: {} }) });
   return (
-    <section aria-labelledby="alerts-h" className="card mb-4 p-4">
+    <Card role="region" aria-labelledby="alerts-h" className="mb-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 id="alerts-h" className="font-semibold">
             Alerts
           </h2>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-muted-foreground">
             {enabled === false
               ? "Off: set CLIQ_WEBHOOK_URL on the server to get Zoho Cliq alerts."
               : "Zoho Cliq gets a message when the worker stops, Fireflies blocks us, the disk passes 80%, jobs fail or a phone stops syncing."}
           </p>
         </div>
-        <button type="button" className="btn-outline" disabled={run.isPending || enabled === false} onClick={() => run.mutate()}>
+        <Button variant="outline" disabled={run.isPending || enabled === false} onClick={() => run.mutate()}>
+          <Send />
           {run.isPending ? "Sending…" : "Send test alert"}
-        </button>
+        </Button>
       </div>
       <p className="mt-2 text-sm" role="status" aria-live="polite">
         {run.isSuccess && "Test alert sent. Check the Cliq channel."}
       </p>
-      {run.isError && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{run.error.message}</p>}
-    </section>
+      {run.isError && <p className="mt-1 text-sm text-destructive">{run.error.message}</p>}
+    </Card>
   );
 }
 
@@ -307,23 +326,23 @@ function TranslateBackfill() {
     mutationFn: () => api<TranslateBackfillResult>("/api/admin/translate-backfill", { method: "POST", body: {} }),
   });
   return (
-    <section aria-labelledby="translate-h" className="card mb-4 p-4">
+    <Card role="region" aria-labelledby="translate-h" className="mb-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 id="translate-h" className="font-semibold">
             English translations
           </h2>
-          <p className="text-sm text-slate-500">New transcripts are translated automatically. Queue older ones here (batch rate, may take hours).</p>
+          <p className="text-sm text-muted-foreground">New transcripts are translated automatically. Queue older ones here (batch rate, may take hours).</p>
         </div>
-        <button type="button" className="btn-outline" disabled={run.isPending} onClick={() => run.mutate()}>
+        <Button variant="outline" disabled={run.isPending} onClick={() => run.mutate()}>
           {run.isPending ? "Queuing…" : "Translate existing transcripts"}
-        </button>
+        </Button>
       </div>
       <p className="mt-2 text-sm" role="status" aria-live="polite">
         {run.isSuccess && (run.data.queued ? `Queued ${run.data.queued} transcript${run.data.queued === 1 ? "" : "s"} for translation.` : "Nothing to queue: every transcript is translated or already queued.")}
       </p>
-      {run.isError && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{run.error.message}</p>}
-    </section>
+      {run.isError && <p className="mt-1 text-sm text-destructive">{run.error.message}</p>}
+    </Card>
   );
 }
 
@@ -333,25 +352,25 @@ function SummarizeBackfill() {
     mutationFn: () => api<TranslateBackfillResult>("/api/admin/summarize-backfill", { method: "POST", body: {} }),
   });
   return (
-    <section aria-labelledby="summarize-h" className="card mb-4 p-4">
+    <Card role="region" aria-labelledby="summarize-h" className="mb-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 id="summarize-h" className="font-semibold">
             AI call summaries
           </h2>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-muted-foreground">
             Summary, action items, sentiment, tags and Agent / Customer labels. Queue older calls here (batch rate; uses the Claude monthly cap).
           </p>
         </div>
-        <button type="button" className="btn-outline" disabled={run.isPending} onClick={() => run.mutate()}>
+        <Button variant="outline" disabled={run.isPending} onClick={() => run.mutate()}>
           {run.isPending ? "Queuing…" : "Summarize existing calls"}
-        </button>
+        </Button>
       </div>
       <p className="mt-2 text-sm" role="status" aria-live="polite">
         {run.isSuccess && (run.data.queued ? `Queued ${run.data.queued} call${run.data.queued === 1 ? "" : "s"} for a summary.` : "Nothing to queue: every call is summarized or already queued.")}
       </p>
-      {run.isError && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{run.error.message}</p>}
-    </section>
+      {run.isError && <p className="mt-1 text-sm text-destructive">{run.error.message}</p>}
+    </Card>
   );
 }
 
@@ -364,31 +383,31 @@ function CompressBackfill({ c }: { c: CompressionStats }) {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["stats"] }),
   });
   return (
-    <section aria-labelledby="compress-h" className="card mb-4 p-4">
+    <Card role="region" aria-labelledby="compress-h" className="mb-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 id="compress-h" className="font-semibold">
             Compress old recordings
           </h2>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-muted-foreground">
             Saved {formatBytes(c.bytesSaved)} on {c.compressedCalls} calls. {c.eligibleCalls} large transcribed recordings left
             {c.queuedJobs ? `, ${c.queuedJobs} queued` : ""}. The original is kept if anything fails.
           </p>
         </div>
         <div className="flex gap-2">
-          <button type="button" className="btn-outline" disabled={run.isPending} onClick={() => run.mutate(5)}>
+          <Button variant="outline" disabled={run.isPending} onClick={() => run.mutate(5)}>
             Try 5 calls
-          </button>
-          <button type="button" className="btn-outline" disabled={run.isPending} onClick={() => run.mutate(undefined)}>
+          </Button>
+          <Button variant="outline" disabled={run.isPending} onClick={() => run.mutate(undefined)}>
             {run.isPending ? "Queuing…" : "Compress all"}
-          </button>
+          </Button>
         </div>
       </div>
       <p className="mt-2 text-sm" role="status" aria-live="polite">
         {run.isSuccess && (run.data.queued ? `Queued ${run.data.queued} recording${run.data.queued === 1 ? "" : "s"} for compression.` : "Nothing to queue.")}
       </p>
-      {run.isError && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{run.error.message}</p>}
-    </section>
+      {run.isError && <p className="mt-1 text-sm text-destructive">{run.error.message}</p>}
+    </Card>
   );
 }
 
@@ -403,32 +422,32 @@ function CrmPanel({ isAdmin }: { isAdmin: boolean }) {
   const d = crm.data;
   if (!d) return null;
   return (
-    <section aria-labelledby="crm-h" className="card mb-4 p-4">
+    <Card role="region" aria-labelledby="crm-h" className="mb-4 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 id="crm-h" className="font-semibold">
             Zoho CRM sync
           </h2>
-          <p className="text-sm text-slate-500">
+          <p className="text-sm text-muted-foreground">
             {d.enabled
               ? `${d.synced} synced · ${d.noMatch} no match · ${d.errors} errors${d.queued ? ` · ${d.queued} queued` : ""}`
               : "Off: set ZOHO_REFRESH_TOKEN (and client ID / secret) on the server. See docs/zoho-crm-setup.md."}
           </p>
           {d.enabled && d.failing && (
-            <p className="text-sm text-red-600 dark:text-red-400">Paused: {d.globalError ?? "Zoho is not responding"}. Retrying automatically.</p>
+            <p className="text-sm text-destructive">Paused: {d.globalError ?? "Zoho is not responding"}. Retrying automatically.</p>
           )}
-          {d.enabled && d.errors > 0 && d.lastError && <p className="text-sm text-red-600 dark:text-red-400">Last error: {d.lastError}</p>}
+          {d.enabled && d.errors > 0 && d.lastError && <p className="text-sm text-destructive">Last error: {d.lastError}</p>}
         </div>
         {isAdmin && (
-          <button type="button" className="btn-outline" disabled={run.isPending || !d.enabled} onClick={() => run.mutate()}>
+          <Button variant="outline" disabled={run.isPending || !d.enabled} onClick={() => run.mutate()}>
             {run.isPending ? "Queuing…" : "Sync last 30 days"}
-          </button>
+          </Button>
         )}
       </div>
       <p className="mt-2 text-sm" role="status" aria-live="polite">
         {run.isSuccess && (run.data.queued ? `Queued ${run.data.queued} call${run.data.queued === 1 ? "" : "s"}; they sync over the next minutes.` : "Nothing to queue.")}
       </p>
-      {run.isError && <p className="mt-1 text-sm text-red-600 dark:text-red-400">{run.error.message}</p>}
-    </section>
+      {run.isError && <p className="mt-1 text-sm text-destructive">{run.error.message}</p>}
+    </Card>
   );
 }

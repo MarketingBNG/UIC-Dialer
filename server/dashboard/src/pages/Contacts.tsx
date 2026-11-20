@@ -6,7 +6,18 @@ import { useMe } from "../App";
 import { CONTACT_STATUS_LABEL, formatShortWhen, isOverdue, personName } from "../format";
 import { CallButton } from "../dialer";
 import { ImportDialog, NewLeadDialog } from "../components/ContactDialogs";
-import { Badge, ContactStatusBadge, Empty, ErrorBox, PageHeader, Spinner } from "../ui";
+import { FileUp, ListPlus, Search, UserPlus, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { tabLinkClass, tabsListClass } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { ContactStatusBadge, Empty, ErrorBox, PageHeader, Spinner } from "../ui";
 import type { NewListState } from "./Lists";
 
 function useDebounced<T>(value: T, ms: number) {
@@ -24,12 +35,9 @@ export function TrackerTabs() {
   const [params] = useSearchParams();
   const due = params.get("due");
   const path = useLocation().pathname;
-  const cls = (active: boolean) =>
-    `rounded-lg px-3 py-1.5 text-sm font-medium ${
-      active ? "bg-brand-600 text-white" : "border border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-    }`;
+  const cls = (active: boolean) => tabLinkClass({ isActive: active });
   return (
-    <nav aria-label="Activity tracker" className="mb-4 flex flex-wrap gap-2">
+    <nav aria-label="Activity tracker" className={`${tabsListClass} mb-4`}>
       <Link to="/activity" className={cls(path === "/activity" && !due)}>
         All contacts
       </Link>
@@ -128,7 +136,7 @@ export function ContactsPage() {
   };
 
   const followUp = (iso: string | null) =>
-    iso ? <span className={isOverdue(iso, now) ? "font-medium text-red-600 dark:text-red-400" : ""}>{formatShortWhen(iso)}{isOverdue(iso, now) ? " · overdue" : ""}</span> : "—";
+    iso ? <span className={isOverdue(iso, now) ? "font-medium text-destructive" : ""}>{formatShortWhen(iso)}{isOverdue(iso, now) ? " · overdue" : ""}</span> : "—";
 
   return (
     <>
@@ -137,24 +145,28 @@ export function ContactsPage() {
         subtitle={filters.due === "overdue" ? "Follow-ups that are past due" : filters.due === "today" ? "Follow-ups due today (IST)" : "Every number your team has called, messaged or noted"}
         actions={
           <>
-            <button type="button" className="btn-outline" onClick={() => setNewLead(true)}>
-              New lead
-            </button>
+            <Button onClick={() => setNewLead(true)}>
+              <UserPlus /> New lead
+            </Button>
             {manager && (
-              <button type="button" className="btn-outline" onClick={() => setImporting(true)}>
-                Import CSV
-              </button>
+              <Button variant="outline" onClick={() => setImporting(true)}>
+                <FileUp /> Import CSV
+              </Button>
             )}
             {manager && (
-              <button
-                type="button"
-                className="btn-outline"
-                disabled={!!filters.due}
-                title={filters.due ? "Clear the follow-up filter first: lists can't be built from due dates" : "Make a call list of everyone matching these filters"}
-                onClick={() => toList({ filter: listFilter() })}
-              >
-                List from filter
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {/* span keeps the tooltip working while the button is disabled */}
+                  <span tabIndex={filters.due ? 0 : undefined}>
+                    <Button variant="outline" disabled={!!filters.due} onClick={() => toList({ filter: listFilter() })}>
+                      <ListPlus /> Call list from filters
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {filters.due ? "Clear the follow-up filter first: lists can't be built from due dates" : "Make a call list of everyone matching these filters"}
+                </TooltipContent>
+              </Tooltip>
             )}
           </>
         }
@@ -162,75 +174,67 @@ export function ContactsPage() {
       <TrackerTabs />
       <div role="group" aria-label="Quick filters" className="mb-3 flex flex-wrap gap-2">
         {[...CHIPS, ...(manager ? ([["dnc", "Do-not-call"]] as [ContactFilterKey, string][]) : [])].map(([v, l]) => (
-          <button
+          <Button
             key={v || "all"}
-            type="button"
+            size="sm"
+            variant={filters.filter === v ? "default" : "outline"}
             aria-pressed={filters.filter === v}
-            className={`min-h-9 rounded-full px-3 text-sm font-medium ${
-              filters.filter === v
-                ? "bg-navy text-white"
-                : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
-            }`}
+            className="rounded-full"
             onClick={() => set("filter", v)}
           >
             {l}
-          </button>
+          </Button>
         ))}
       </div>
 
-      <div className="card mb-4 p-3 sm:p-4">
+      <Card className="mb-4 p-3 sm:p-4">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <div className="sm:col-span-2 lg:col-span-1">
-            <label className="label" htmlFor="c-q">
-              Search
-            </label>
-            <input id="c-q" type="search" className="input" placeholder="Search name, number, company, notes" value={q} onChange={(e) => setQ(e.target.value)} />
+            <Label htmlFor="c-q">Search</Label>
+            <div className="relative">
+              <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+              <Input id="c-q" type="search" className="pl-9" placeholder="Name, number, company, notes" value={q} onChange={(e) => setQ(e.target.value)} />
+            </div>
           </div>
           {manager && (
             <div>
-              <label className="label" htmlFor="c-owner">
-                Owner
-              </label>
-              <select id="c-owner" className="input" value={get("ownerId")} onChange={(e) => set("ownerId", e.target.value)}>
+              <Label htmlFor="c-owner">Owner</Label>
+              <NativeSelect id="c-owner" value={get("ownerId")} onChange={(e) => set("ownerId", e.target.value)}>
                 <option value="">Everyone</option>
                 {users.data?.map((u) => (
                   <option key={u.id} value={u.id}>
                     {personName(u)}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
           )}
           <div>
-            <label className="label" htmlFor="c-status">
-              Status
-            </label>
-            <select id="c-status" className="input" value={get("status")} onChange={(e) => set("status", e.target.value)}>
+            <Label htmlFor="c-status">Status</Label>
+            <NativeSelect id="c-status" value={get("status")} onChange={(e) => set("status", e.target.value)}>
               <option value="">Any status</option>
               {(Object.keys(CONTACT_STATUS_LABEL) as ContactStatus[]).map((s) => (
                 <option key={s} value={s}>
                   {CONTACT_STATUS_LABEL[s]}
                 </option>
               ))}
-            </select>
+            </NativeSelect>
           </div>
           <div>
-            <label className="label" htmlFor="c-due">
-              Follow-up
-            </label>
-            <select id="c-due" className="input" value={get("due")} onChange={(e) => set("due", e.target.value)}>
+            <Label htmlFor="c-due">Follow-up</Label>
+            <NativeSelect id="c-due" value={get("due")} onChange={(e) => set("due", e.target.value)}>
               <option value="">Any time</option>
               <option value="today">Due today</option>
               <option value="overdue">Overdue</option>
-            </select>
+            </NativeSelect>
           </div>
         </div>
         {(activeCount > 0 || filters.q) && (
-          <button type="button" className="btn-ghost mt-2" onClick={clear}>
-            Clear all
-          </button>
+          <Button variant="ghost" className="mt-2" onClick={clear}>
+            <X /> Clear all filters
+          </Button>
         )}
-      </div>
+      </Card>
 
       {contacts.isPending ? (
         <Spinner label="Loading contacts" />
@@ -241,23 +245,23 @@ export function ContactsPage() {
           {filters.due === "overdue"
             ? "No overdue follow-ups."
             : activeCount || filters.q
-              ? "No contacts match these filters."
-              : "No contacts yet. A number appears here the first time a rep calls, messages or notes it in the app."}
+              ? "No contacts match these filters. Try clearing them."
+              : "No contacts yet. Add a lead, import a CSV, or call a number from the phone app: it appears here automatically."}
         </Empty>
       ) : (
         <>
           <ul className="space-y-2 md:hidden">
             {items.map((c) => (
               <li key={c.id}>
-                <Link to={`/activity/contacts/${c.id}`} className="card block p-3 active:bg-slate-50 dark:active:bg-slate-800">
+                <Link to={`/activity/contacts/${c.id}`} className="block rounded-xl border bg-card p-3 shadow-sm active:bg-muted">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="truncate font-medium">{c.name || c.phoneE164}</div>
-                      <div className="truncate text-sm text-slate-500">{[c.name ? c.phoneE164 : null, c.company, c.city].filter(Boolean).join(" · ")}</div>
+                      <div className="truncate text-sm text-muted-foreground">{[c.name ? c.phoneE164 : null, c.company, c.city].filter(Boolean).join(" · ")}</div>
                     </div>
                     <RowLabel c={c} />
                   </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-600 dark:text-slate-400">
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                     {c.nextFollowUpAt && <span>Follow up {followUp(c.nextFollowUpAt)}</span>}
                     {c.lastActivityAt && <span>Last {formatShortWhen(c.lastActivityAt)}</span>}
                     {c.owner && <span className="truncate">{personName(c.owner)}</span>}
@@ -267,66 +271,64 @@ export function ContactsPage() {
             ))}
           </ul>
 
-          <div className="card hidden overflow-x-auto md:block">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800">
-                <tr>
+          <Card className="hidden overflow-hidden md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
                   {manager && (
-                    <th scope="col" className="w-8 px-3 py-3">
-                      <input
-                        type="checkbox"
+                    <TableHead scope="col" className="w-10">
+                      <Checkbox
                         aria-label="Select all shown"
-                        className="size-4 accent-brand-600"
                         checked={items.length > 0 && items.every((c) => selected.has(c.id))}
-                        onChange={(e) => setSelected(e.target.checked ? new Set(items.map((c) => c.id)) : new Set())}
+                        onCheckedChange={(v) => setSelected(v === true ? new Set(items.map((c) => c.id)) : new Set())}
                       />
-                    </th>
+                    </TableHead>
                   )}
                   {["Phone", "Name", "Company", "City", "Owner", "Status", "Last activity", "Next follow-up", ""].map((h, i) => (
-                    <th key={i} scope="col" className="px-4 py-3 font-medium">
+                    <TableHead key={i} scope="col">
                       {h || <span className="sr-only">Call</span>}
-                    </th>
+                    </TableHead>
                   ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {items.map((c) => (
-                  <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <TableRow key={c.id}>
                     {manager && (
-                      <td className="px-3 py-3">
-                        <input type="checkbox" aria-label={`Select ${c.name || c.phoneE164}`} className="size-4 accent-brand-600" checked={selected.has(c.id)} onChange={(e) => toggle(c.id, e.target.checked)} />
-                      </td>
+                      <TableCell>
+                        <Checkbox aria-label={`Select ${c.name || c.phoneE164}`} checked={selected.has(c.id)} onCheckedChange={(v) => toggle(c.id, v === true)} />
+                      </TableCell>
                     )}
-                    <td className="whitespace-nowrap px-4 py-3">
-                      <Link to={`/activity/contacts/${c.id}`} className="font-medium text-brand-700 hover:underline dark:text-brand-100">
+                    <TableCell className="whitespace-nowrap">
+                      <Link to={`/activity/contacts/${c.id}`} className="font-medium text-primary hover:underline">
                         {c.phoneE164}
                       </Link>
-                    </td>
-                    <td className="max-w-48 truncate px-4 py-3">{c.name || "—"}</td>
-                    <td className="max-w-48 truncate px-4 py-3">{c.company || "—"}</td>
-                    <td className="max-w-32 truncate px-4 py-3">{c.city || "—"}</td>
-                    <td className="max-w-40 truncate px-4 py-3">{c.owner ? personName(c.owner) : "—"}</td>
-                    <td className="px-4 py-3">
+                    </TableCell>
+                    <TableCell className="max-w-48 truncate">{c.name || "—"}</TableCell>
+                    <TableCell className="max-w-48 truncate">{c.company || "—"}</TableCell>
+                    <TableCell className="max-w-32 truncate">{c.city || "—"}</TableCell>
+                    <TableCell className="max-w-40 truncate">{c.owner ? personName(c.owner) : "—"}</TableCell>
+                    <TableCell>
                       <RowLabel c={c} />
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3">{c.lastActivityAt ? formatShortWhen(c.lastActivityAt) : "—"}</td>
-                    <td className="whitespace-nowrap px-4 py-3">{followUp(c.nextFollowUpAt)}</td>
-                    <td className="px-4 py-2 text-right">
-                      <CallButton phone={c.phoneE164} label={c.name || c.phoneE164} className="btn-ghost" dncReason={c.dnc?.reason} dnc={!!c.dnc} />
-                    </td>
-                  </tr>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">{c.lastActivityAt ? formatShortWhen(c.lastActivityAt) : "—"}</TableCell>
+                    <TableCell className="whitespace-nowrap">{followUp(c.nextFollowUpAt)}</TableCell>
+                    <TableCell className="py-1.5 text-right">
+                      <CallButton phone={c.phoneE164} label={c.name || c.phoneE164} dncReason={c.dnc?.reason} dnc={!!c.dnc} />
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
+          </Card>
 
           <div className="mt-4 flex justify-center">
             {contacts.hasNextPage ? (
-              <button type="button" className="btn-outline" disabled={contacts.isFetchingNextPage} onClick={loadMore}>
+              <Button variant="outline" disabled={contacts.isFetchingNextPage} onClick={loadMore}>
                 {contacts.isFetchingNextPage ? "Loading…" : "Load more"}
-              </button>
+              </Button>
             ) : (
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-muted-foreground">
                 {items.length} contact{items.length === 1 ? "" : "s"}
               </p>
             )}
@@ -337,12 +339,12 @@ export function ContactsPage() {
       {manager && selected.size > 0 && (
         <div role="region" aria-label="Selection" className="sticky bottom-3 z-20 mx-auto mt-4 flex max-w-xl flex-wrap items-center gap-2 rounded-2xl bg-navy p-3 text-sm text-white shadow-lg">
           <span className="mr-auto">{selected.size} selected</span>
-          <button type="button" className="btn bg-white text-navy hover:bg-slate-100" onClick={() => toList({ contactIds: [...selected] })}>
-            Create call list from selected
-          </button>
-          <button type="button" className="btn text-white hover:bg-white/10" onClick={() => setSelected(new Set())}>
+          <Button className="bg-white text-navy hover:bg-slate-100" onClick={() => toList({ contactIds: [...selected] })}>
+            <ListPlus /> Create call list from selected
+          </Button>
+          <Button variant="ghost" className="text-white hover:bg-white/10 hover:text-white" onClick={() => setSelected(new Set())}>
             Clear
-          </button>
+          </Button>
         </div>
       )}
       {importing && <ImportDialog onClose={() => setImporting(false)} onList={(ids) => toList({ contactIds: ids })} />}
@@ -355,9 +357,9 @@ export function ContactsPage() {
 function RowLabel({ c }: { c: ContactListItem }) {
   if (c.dnc)
     return (
-      <span title={c.dnc.reason ?? "Do not call"}>
-        <Badge tone="red">Do not call</Badge>
-      </span>
+      <Badge variant="red" title={c.dnc.reason ?? "Do not call"}>
+        Do not call
+      </Badge>
     );
   return <ContactStatusBadge status={c.status} />;
 }

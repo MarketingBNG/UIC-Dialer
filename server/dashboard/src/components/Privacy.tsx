@@ -1,14 +1,31 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { api, type ClientImportResult, type ClientNumber, type PrivacySettings } from "../api";
+import { Plus, Save, Upload } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { formatWhen } from "../format";
-import { ConfirmDialog, Empty, ErrorBox, Spinner, Toggle } from "../ui";
+import { Empty, ErrorBox, FormError, Spinner, SwitchRow, ConfirmDialog } from "../ui";
 
 /** Recording retention (off = keep forever, by days) and PII masking. Admin only. */
 export function PrivacyPanel() {
   const settings = useQuery({ queryKey: ["privacy"], queryFn: () => api<PrivacySettings>("/api/settings/privacy") });
   return (
-    <section className="card p-4 sm:p-6">
+    <Card className="p-4 sm:p-6">
       <h2 className="font-semibold">Recording retention and privacy</h2>
       {settings.isPending ? (
         <Spinner label="Loading privacy settings" />
@@ -17,7 +34,7 @@ export function PrivacyPanel() {
       ) : (
         <PrivacyForm key={JSON.stringify(settings.data)} initial={settings.data} />
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -75,8 +92,8 @@ function PrivacyForm({ initial }: { initial: PrivacySettings }) {
         if (dirty && daysOk) submit();
       }}
     >
-      <div className="divide-y divide-slate-100 dark:divide-slate-800">
-        <Toggle
+      <div className="divide-y divide-slate-100">
+        <SwitchRow
           label="Delete old recordings"
           hint="Off by default: recordings are kept forever. When on, audio of calls older than the days below is deleted once a day."
           checked={on}
@@ -88,11 +105,13 @@ function PrivacyForm({ initial }: { initial: PrivacySettings }) {
         {on && (
           <div className="space-y-2 py-2">
             <div className="flex flex-wrap items-center gap-2 text-sm">
-              <label htmlFor="p-days">Delete recordings after</label>
-              <input
+              <Label htmlFor="p-days" className="mb-0">
+                Delete recordings after
+              </Label>
+              <Input
                 id="p-days"
                 inputMode="numeric"
-                className="input w-24"
+                className="w-24"
                 value={days}
                 aria-invalid={!daysOk}
                 onChange={(e) => {
@@ -102,25 +121,26 @@ function PrivacyForm({ initial }: { initial: PrivacySettings }) {
               />
               <span>days</span>
             </div>
-            <p className={`hint ${daysOk ? "" : "text-red-600"}`}>1 to 3650. Deleted audio can't be recovered.</p>
+            <p className={`mt-1 text-xs text-muted-foreground ${daysOk ? "" : "text-destructive"}`}>1 to 3650. Deleted audio can't be recovered.</p>
             {initial.retentionMonths != null && initial.retentionDays == null && (
-              <p className="hint">Currently set as {initial.retentionMonths} months by an older version; saving switches it to days.</p>
+              <p className="mt-1 text-xs text-muted-foreground">Currently set as {initial.retentionMonths} months by an older version; saving switches it to days.</p>
             )}
-            <label className="flex cursor-pointer items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="mt-0.5 size-4 accent-brand-600"
+            <div className="flex items-start gap-2 text-sm">
+              <Checkbox
+                id="p-del-transcript"
                 checked={deleteTranscript}
-                onChange={(e) => {
+                onCheckedChange={(v) => {
                   touchRetention();
-                  setDeleteTranscript(e.target.checked);
+                  setDeleteTranscript(v === true);
                 }}
               />
-              Also delete transcript text (summary and score are kept)
-            </label>
+              <Label htmlFor="p-del-transcript" className="mb-0 cursor-pointer font-normal">
+                Also delete transcript text (summary and score are kept)
+              </Label>
+            </div>
           </div>
         )}
-        <Toggle
+        <SwitchRow
           label="Mask Aadhaar and card numbers in new transcripts"
           hint="Replaces them with the last 4 digits before the transcript is stored. Existing transcripts are not changed. PAN and GST numbers are kept."
           checked={maskPii}
@@ -131,12 +151,12 @@ function PrivacyForm({ initial }: { initial: PrivacySettings }) {
         />
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <button type="submit" className="btn-primary" disabled={!dirty || !daysOk || save.isPending}>
-          {save.isPending ? "Saving…" : "Save"}
-        </button>
+        <Button type="submit" className="min-h-11" disabled={!dirty || !daysOk || save.isPending}>
+          <Save /> {save.isPending ? "Saving…" : "Save changes"}
+        </Button>
         <span aria-live="polite" className="text-sm">
-          {saved && !dirty && <span className="text-emerald-700 dark:text-emerald-400">Saved.</span>}
-          {save.error && <span className="text-red-600 dark:text-red-400">{save.error.message}</span>}
+          {saved && !dirty && <span className="text-emerald-700">Saved.</span>}
+          {save.error && <span className="text-destructive">{save.error.message}</span>}
         </span>
       </div>
       <ConfirmDialog
@@ -165,6 +185,7 @@ export function ClientListPanel() {
   const [label, setLabel] = useState("");
   const [filter, setFilter] = useState("");
   const [imported, setImported] = useState<ClientImportResult | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const refresh = () => void qc.invalidateQueries({ queryKey: ["client-numbers"] });
 
   const add = useMutation({
@@ -193,9 +214,9 @@ export function ClientListPanel() {
   });
 
   return (
-    <section className="card mt-4 p-4 sm:p-6">
+    <Card className="mt-4 p-4 sm:p-6">
       <h2 className="font-semibold">Client list</h2>
-      <p className="hint">
+      <p className="mt-1 text-xs text-muted-foreground">
         With "Business calls only" on, phones skip calls with numbers saved as personal contacts, unless the number is on this list. Phones get the list
         as hashes, which hides it from casual view only.
       </p>
@@ -207,41 +228,44 @@ export function ClientListPanel() {
         }}
       >
         <div>
-          <label className="label" htmlFor="cn-number">
+          <Label htmlFor="cn-number">
             Phone number
-          </label>
-          <input id="cn-number" className="input" inputMode="tel" value={number} onChange={(e) => setNumber(e.target.value)} />
+          </Label>
+          <Input id="cn-number"  inputMode="tel" value={number} onChange={(e) => setNumber(e.target.value)} />
         </div>
         <div>
-          <label className="label" htmlFor="cn-label">
+          <Label htmlFor="cn-label">
             Label (optional)
-          </label>
-          <input id="cn-label" className="input" value={label} onChange={(e) => setLabel(e.target.value)} />
+          </Label>
+          <Input id="cn-label"  value={label} onChange={(e) => setLabel(e.target.value)} />
         </div>
-        <button type="submit" className="btn-primary" disabled={!number.trim() || add.isPending}>
-          Add
-        </button>
-        <label className="btn-outline cursor-pointer">
-          {importCsv.isPending ? "Importing…" : "Import CSV"}
-          <input
-            type="file"
-            accept=".csv,.txt,text/csv,text/plain"
-            className="sr-only"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) importCsv.mutate(f);
-              e.target.value = "";
-            }}
-          />
-        </label>
+        <Button type="submit" className="min-h-11" disabled={!number.trim() || add.isPending}>
+          <Plus /> Add number
+        </Button>
+        <Button variant="outline" className="min-h-11" disabled={importCsv.isPending} onClick={() => fileRef.current?.click()}>
+          <Upload /> {importCsv.isPending ? "Importing…" : "Import CSV"}
+        </Button>
+        <Input
+          ref={fileRef}
+          type="file"
+          accept=".csv,.txt,text/csv,text/plain"
+          className="sr-only"
+          tabIndex={-1}
+          aria-label="CSV file of client numbers"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) importCsv.mutate(f);
+            e.target.value = "";
+          }}
+        />
       </form>
-      <p className="hint">CSV: one number per line, optional label after a comma. A header row is skipped.</p>
+      <p className="mt-1 text-xs text-muted-foreground">CSV: one number per line, optional label after a comma. A header row is skipped.</p>
       <div aria-live="polite" className="text-sm">
-        {add.error && <p className="text-red-600 dark:text-red-400">{add.error.message}</p>}
-        {importCsv.error && <p className="text-red-600 dark:text-red-400">{importCsv.error.message}</p>}
-        {remove.error && <p className="text-red-600 dark:text-red-400">{remove.error.message}</p>}
+        {add.error && <p className="text-destructive">{add.error.message}</p>}
+        {importCsv.error && <p className="text-destructive">{importCsv.error.message}</p>}
+        {remove.error && <p className="text-destructive">{remove.error.message}</p>}
         {imported && (
-          <p className="text-emerald-700 dark:text-emerald-400">
+          <p className="text-emerald-700">
             Imported: {imported.added} added, {imported.updated} labels updated, {imported.rejected} lines skipped
             {imported.rejectedSample.length > 0 && ` (e.g. ${imported.rejectedSample.slice(0, 3).join("; ")})`}.
           </p>
@@ -254,32 +278,36 @@ export function ClientListPanel() {
         <ErrorBox error={list.error} onRetry={() => void list.refetch()} />
       ) : list.data.count === 0 ? (
         <div className="mt-3">
-          <Empty>No client numbers yet.</Empty>
+          <Empty>No client numbers yet. Add a number above, or import a CSV with one number per line.</Empty>
         </div>
       ) : (
         <>
           <div className="mt-4 flex flex-wrap items-center gap-2">
-            <label htmlFor="cn-filter" className="sr-only">
+            <Label htmlFor="cn-filter" className="sr-only">
               Filter client numbers
-            </label>
-            <input id="cn-filter" type="search" className="input sm:max-w-xs" placeholder="Filter" value={filter} onChange={(e) => setFilter(e.target.value)} />
-            <span className="text-sm text-slate-500">{list.data.count} numbers</span>
+            </Label>
+            <Input id="cn-filter" type="search" className="sm:max-w-xs" placeholder="Filter" value={filter} onChange={(e) => setFilter(e.target.value)} />
+            <span className="text-sm text-muted-foreground">{list.data.count} numbers</span>
           </div>
-          <ul className="mt-2 max-h-96 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
+          <ul className="mt-2 max-h-96 divide-y divide-slate-100 overflow-y-auto">
             {items.slice(0, 500).map((i) => (
               <li key={i.id} className="flex items-center gap-3 py-2 text-sm">
                 <span className="font-mono">{i.raw}</span>
-                <span className="min-w-0 flex-1 truncate text-slate-500">{i.label}</span>
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">{i.label}</span>
                 <span className="hidden text-xs text-slate-400 sm:inline">{formatWhen(i.createdAt)}</span>
-                <button type="button" className="btn-ghost text-red-700 dark:text-red-300" disabled={remove.isPending} onClick={() => remove.mutate(i.id)} aria-label={`Remove ${i.raw}`}>
+                <Button variant="ghost" className="min-h-11 text-destructive hover:text-destructive" disabled={remove.isPending} onClick={() => remove.mutate(i.id)} aria-label={`Remove ${i.raw}`}>
                   Remove
-                </button>
+                </Button>
               </li>
             ))}
           </ul>
-          {items.length > 500 && <p className="hint">Showing 500 of {items.length}. Use the filter to find a number.</p>}
+          {items.length > 500 && <p className="mt-1 text-xs text-muted-foreground">Showing 500 of {items.length}. Use the filter to find a number.</p>}
         </>
       )}
-    </section>
+    </Card>
   );
 }
+
+/** A labelled shadcn Switch with helper text. */
+
+/** Destructive confirmation on shadcn AlertDialog. */

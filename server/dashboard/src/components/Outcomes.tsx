@@ -1,5 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import type { CSSProperties } from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { api, type OutcomeDto, type OutcomeRule } from "../api";
 
 /** The four seeded outcomes (fixed ids from the migration); used when /api/outcomes can't be loaded. */
@@ -64,9 +66,9 @@ function textOn(hex: string) {
 export function OutcomeChip({ label, color }: { label: string; color: string | null | undefined }) {
   const c = color || "#64748B";
   return (
-    <span className="inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium" style={{ backgroundColor: c, color: textOn(c) }}>
+    <Badge className="border-transparent" style={{ backgroundColor: c, color: textOn(c) }}>
       {label}
-    </span>
+    </Badge>
   );
 }
 
@@ -78,10 +80,10 @@ export function OutcomeButtons({ items, value, onPick }: { items: OutcomeDto[]; 
         const on = o.id === value;
         const style: CSSProperties = on ? { backgroundColor: o.color, borderColor: o.color, color: textOn(o.color) } : { borderColor: o.color };
         return (
-          <button key={o.id} type="button" aria-pressed={on} className="btn border-2 text-slate-800 dark:text-slate-100" style={style} onClick={() => onPick(o)}>
+          <Button key={o.id} variant="outline" aria-pressed={on} className="min-h-11 border-2 text-foreground hover:opacity-90" style={style} onClick={() => onPick(o)}>
             {!on && <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: o.color }} />}
             {o.label}
-          </button>
+          </Button>
         );
       })}
     </div>

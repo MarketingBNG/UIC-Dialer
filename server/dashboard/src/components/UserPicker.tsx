@@ -1,3 +1,5 @@
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
 import { useQuery } from "@tanstack/react-query";
 import { api, isManager, type Me, type User } from "../api";
 import { personName } from "../format";
@@ -15,22 +17,23 @@ export function UserMultiSelect({ users, value, onChange, label }: { users: User
   const set = new Set(value);
   return (
     <fieldset>
-      <legend className="label">{label}</legend>
-      <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-slate-200 p-2 dark:border-slate-700">
+      <legend className="mb-1.5 text-sm font-medium text-slate-700">{label}</legend>
+      <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg border p-2">
         {users.length === 0 ? (
-          <p className="hint">No users.</p>
+          <p className="text-xs text-muted-foreground">No active users to pick from.</p>
         ) : (
           users.map((u) => (
-            <label key={u.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-1 text-sm hover:bg-slate-50 dark:hover:bg-slate-800">
-              <input
-                type="checkbox"
-                className="size-4 accent-brand-600"
+            <div key={u.id} className="flex min-h-10 items-center gap-2 rounded-md px-1 hover:bg-muted">
+              <Checkbox
+                id={`user-pick-${u.id}`}
                 checked={set.has(u.id)}
-                onChange={(e) => onChange(e.target.checked ? [...value, u.id] : value.filter((id) => id !== u.id))}
+                onCheckedChange={(c) => onChange(c === true ? [...value, u.id] : value.filter((id) => id !== u.id))}
               />
-              <span className="truncate">{personName(u)}</span>
-              {u.team && <span className="text-xs text-slate-500">{u.team}</span>}
-            </label>
+              <Label htmlFor={`user-pick-${u.id}`} className="mb-0 flex min-w-0 flex-1 cursor-pointer items-center gap-2 font-normal">
+                <span className="truncate">{personName(u)}</span>
+                {u.team && <span className="text-xs text-muted-foreground">{u.team}</span>}
+              </Label>
+            </div>
           ))
         )}
       </div>

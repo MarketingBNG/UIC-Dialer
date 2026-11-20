@@ -3,7 +3,26 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { ApiError, api, type OutcomeDto } from "./api";
 import { fromLocalInput } from "./format";
 import { OutcomeButtons, datePrompt, useOutcomes } from "./components/Outcomes";
-import { Modal } from "./ui";
+import { AlertTriangle, Check, ClipboardCheck, Phone, PhoneCall, ShieldAlert } from "lucide-react";
+import type * as React from "react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
+import { FormError } from "./ui";
 
 /**
  * Desktop click-to-call. Opening a tel: link hands the number to Windows Phone Link, which dials on the rep's
@@ -167,17 +186,20 @@ export function DialerProvider({ children }: { children: ReactNode }) {
     <DialerContext.Provider value={{ call, pending, openOutcome: () => setAsking(true) }}>
       {children}
       {pending && !asking && (
-        <div role="status" className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur dark:border-slate-800 dark:bg-slate-900/95">
+        <div role="status" className="fixed inset-x-0 bottom-0 z-40 border-t bg-card/95 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-lg backdrop-blur md:left-(--sidebar-width)">
           <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 text-sm">
-            <span className="mr-auto">
-              Call to <strong>{pending.label}</strong> started on your phone.
+            <span className="mr-auto flex items-center gap-2">
+              <PhoneCall aria-hidden className="size-4 text-success" />
+              <span>
+                Call to <strong>{pending.label}</strong> started on your phone.
+              </span>
             </span>
-            <button type="button" className="btn-primary" onClick={() => setAsking(true)}>
-              Log outcome
-            </button>
-            <button type="button" className="btn-ghost" onClick={() => update(null)}>
+            <Button onClick={() => setAsking(true)}>
+              <ClipboardCheck /> Log outcome
+            </Button>
+            <Button variant="ghost" onClick={() => update(null)}>
               Dismiss
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -193,18 +215,29 @@ export function DialerProvider({ children }: { children: ReactNode }) {
           }}
         />
       )}
-      <Modal
-        open={!!dnc}
-        title={dnc?.unverified ? "Couldn't check the do-not-call list" : "Do not call"}
-        onClose={() => setDnc(null)}
-        footer={
-          <>
-            <button type="button" className="btn-ghost" onClick={() => setDnc(null)}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn-danger"
+      <AlertDialog open={!!dnc} onOpenChange={(o) => !o && setDnc(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <ShieldAlert aria-hidden className="size-5 text-destructive" />
+              {dnc?.unverified ? "Couldn't check the do-not-call list" : "Do not call"}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              {dnc?.unverified ? (
+                <p>
+                  The server didn&apos;t answer in time, so this number wasn&apos;t checked against the do-not-call list. Call{" "}
+                  <strong>{dnc.call.label}</strong> anyway?
+                </p>
+              ) : (
+                <p>
+                  On do-not-call list{dnc?.reason ? `: ${dnc.reason}` : ""}. Call <strong>{dnc?.call.label}</strong> anyway?
+                </p>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
               onClick={() => {
                 if (!dnc) return;
                 const p = dnc.call;
@@ -214,22 +247,11 @@ export function DialerProvider({ children }: { children: ReactNode }) {
                 api("/api/dial-intents", { method: "POST", body: { clientId: p.clientId, phone: p.phone, override: true } }).catch(() => {});
               }}
             >
-              {dnc?.unverified ? "Call" : "Call anyway"}
-            </button>
-          </>
-        }
-      >
-        {dnc?.unverified ? (
-          <p>
-            The server didn&apos;t answer in time, so this number wasn&apos;t checked against the do-not-call list. Call{" "}
-            <strong>{dnc.call.label}</strong> anyway?
-          </p>
-        ) : (
-          <p>
-            On do-not-call list{dnc?.reason ? `: ${dnc.reason}` : ""}. Call <strong>{dnc?.call.label}</strong> anyway?
-          </p>
-        )}
-      </Modal>
+              <Phone /> {dnc?.unverified ? "Call" : "Call anyway"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DialerContext.Provider>
   );
 }
@@ -277,74 +299,78 @@ function OutcomeDialog({ open, call, onClose, onDone }: { open: boolean; call: P
   const needsDate = !!prompt && !followUp;
 
   return (
-    <Modal
-      open={open}
-      title={`How did the call to ${call.label} go?`}
-      onClose={() => !save.isPending && onClose()}
-      footer={
-        <>
-          <button type="button" className="btn-ghost mr-auto" disabled={save.isPending} onClick={onDone}>
-            Don't log
-          </button>
-          <button type="button" className="btn-ghost" disabled={save.isPending} onClick={onClose}>
-            Later
-          </button>
-          <button type="button" className="btn-primary" disabled={!picked || needsDate || save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? "Saving…" : picked?.rule === "REMOVE_FROM_LISTS" ? "Confirm & save" : "Save"}
-          </button>
-        </>
-      }
-    >
-      <fieldset>
-        <legend className="label">Outcome</legend>
-        {outcomes.isPending ? (
-          <p className="hint">Loading outcomes…</p>
-        ) : (
-          <OutcomeButtons
-            items={outcomes.items}
-            value={picked?.id ?? null}
-            onPick={(o) => {
-              setPicked(o);
-              save.reset();
-            }}
-          />
+    <Dialog open={open} onOpenChange={(o) => !o && !save.isPending && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>How did the call to {call.label} go?</DialogTitle>
+          <DialogDescription>Pick what happened. The recording is linked automatically once the phone uploads it.</DialogDescription>
+        </DialogHeader>
+        <fieldset>
+          <legend className="mb-2 text-sm font-medium text-slate-700">Outcome</legend>
+          {outcomes.isPending ? (
+            <div role="status" className="grid grid-cols-2 gap-2">
+              <span className="sr-only">Loading outcomes…</span>
+              {[0, 1, 2, 3].map((i) => (
+                <Skeleton key={i} className="h-11" />
+              ))}
+            </div>
+          ) : (
+            <OutcomeButtons
+              items={outcomes.items}
+              value={picked?.id ?? null}
+              onPick={(o) => {
+                setPicked(o);
+                save.reset();
+              }}
+            />
+          )}
+        </fieldset>
+        {prompt && (
+          <div>
+            <Label htmlFor="oc-fu">{prompt}</Label>
+            <Input id="oc-fu" type="datetime-local" value={followUp} onChange={(e) => setFollowUp(e.target.value)} />
+          </div>
         )}
-      </fieldset>
-      {prompt && (
-        <div className="mt-3">
-          <label className="label" htmlFor="oc-fu">
-            {prompt}
-          </label>
-          <input id="oc-fu" type="datetime-local" className="input" value={followUp} onChange={(e) => setFollowUp(e.target.value)} />
+        {picked?.rule === "RETRY" && <p className="text-sm text-muted-foreground">Will retry in {picked.retryHours ?? "?"} h.</p>}
+        {picked?.rule === "CLOSE_LEAD" && <p className="text-sm text-muted-foreground">Closes the lead and takes it off other call lists.</p>}
+        {picked?.rule === "REMOVE_FROM_LISTS" && (
+          <Alert variant="warning">
+            <AlertTriangle />
+            <AlertDescription>
+              This removes the contact from all call lists{picked.addToDnc ? " and marks the number do-not-call" : ""}. Press Confirm &amp; save to go ahead.
+            </AlertDescription>
+          </Alert>
+        )}
+        <div>
+          <Label htmlFor="oc-note">Note (optional)</Label>
+          <Textarea id="oc-note" rows={3} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
         </div>
-      )}
-      {picked?.rule === "RETRY" && <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">Will retry in {picked.retryHours ?? "?"} h.</p>}
-      {picked?.rule === "CLOSE_LEAD" && <p className="mt-3 text-sm text-slate-600 dark:text-slate-400">Closes the lead and takes it off other call lists.</p>}
-      {picked?.rule === "REMOVE_FROM_LISTS" && (
-        <p className="mt-3 rounded-lg bg-amber-50 p-2 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-100">
-          This removes the contact from all call lists{picked.addToDnc ? " and marks the number do-not-call" : ""}. Press Confirm & save to go ahead.
-        </p>
-      )}
-      <div className="mt-3">
-        <label className="label" htmlFor="oc-note">
-          Note (optional)
-        </label>
-        <textarea id="oc-note" className="input" rows={3} maxLength={2000} value={note} onChange={(e) => setNote(e.target.value)} />
-      </div>
-      <p className="hint mt-2">The recording is linked automatically once the phone uploads it.</p>
-      {save.isError && (
-        <p role="alert" className="mt-2 text-red-600 dark:text-red-400">
-          {save.error.message}
-        </p>
-      )}
-    </Modal>
+        <FormError error={save.isError ? save.error : null} />
+        <DialogFooter>
+          <Button variant="ghost" className="sm:mr-auto" disabled={save.isPending} onClick={onDone}>
+            Don&apos;t log
+          </Button>
+          <Button variant="outline" disabled={save.isPending} onClick={onClose}>
+            Later
+          </Button>
+          <Button disabled={!picked || needsDate || save.isPending} onClick={() => save.mutate()}>
+            <Check /> {save.isPending ? "Saving…" : picked?.rule === "REMOVE_FROM_LISTS" ? "Confirm & save" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
+
+type BtnVariant = NonNullable<React.ComponentProps<typeof Button>["variant"]>;
+type BtnSize = NonNullable<React.ComponentProps<typeof Button>["size"]>;
 
 export function CallButton({
   phone,
   label,
-  className = "btn-outline",
+  className,
+  variant,
+  size,
   dncReason,
   dnc,
   text = "Call",
@@ -352,6 +378,8 @@ export function CallButton({
   phone: string | null | undefined;
   label?: string;
   className?: string;
+  variant?: BtnVariant;
+  size?: BtnSize;
   dncReason?: string | null;
   dnc?: boolean;
   text?: string;
@@ -359,8 +387,9 @@ export function CallButton({
   const { call } = useDialer();
   if (!phone) return null;
   return (
-    <button
-      type="button"
+    <Button
+      variant={variant ?? "outline"}
+      size={size}
       className={className}
       title={`Call ${phone} on your phone`}
       onClick={(e) => {
@@ -369,10 +398,8 @@ export function CallButton({
         void call(phone, label, { dncReason, dnc });
       }}
     >
-      <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
-        <path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2" />
-      </svg>
+      <Phone aria-hidden />
       <span>{text}</span>
-    </button>
+    </Button>
   );
 }

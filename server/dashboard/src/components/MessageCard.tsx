@@ -4,6 +4,14 @@ import { api, renderTemplate, repName, type Contact, type MessageChannel, type T
 import { useMe } from "../App";
 import { whatsAppUrl } from "../format";
 import { isDesktopApp } from "../dialer";
+import { MessageSquare, Send } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { FormError, Hint } from "../ui";
 
 /**
  * "Send WhatsApp / SMS" from a template. Nothing is sent silently: the link opens WhatsApp (wa.me) or the SMS app
@@ -64,60 +72,47 @@ export function MessageCard({ contact }: { contact: Contact }) {
   };
 
   return (
-    <section className="card space-y-3 p-4" aria-labelledby="msg-h">
-      <h2 id="msg-h" className="font-semibold">
-        Send WhatsApp / SMS
-      </h2>
-      <div role="group" aria-label="Channel" className="inline-flex rounded-lg border border-slate-300 p-0.5 dark:border-slate-700">
-        {(
-          [
-            ["WHATSAPP", "WhatsApp"],
-            ["SMS", "SMS"],
-          ] as const
-        ).map(([v, l]) => (
-          <button
-            key={v}
-            type="button"
-            aria-pressed={channel === v}
-            className={`min-h-9 rounded-md px-3 text-sm font-medium ${channel === v ? "bg-brand-600 text-white" : "text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"}`}
-            onClick={() => {
-              setChannel(v);
-              setTemplateId("");
-            }}
-          >
-            {l}
-          </button>
-        ))}
-      </div>
-      <div>
-        <label className="label" htmlFor="msg-tpl">
-          Template
-        </label>
-        <select id="msg-tpl" className="input" value={templateId} onChange={(e) => pick(e.target.value)}>
-          <option value="">Write my own</option>
-          {usable.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.name}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div>
-        <label className="label" htmlFor="msg-text">
-          Message
-        </label>
-        <textarea id="msg-text" className="input py-2" rows={4} maxLength={2000} value={text} onChange={(e) => setText(e.target.value)} />
-        <p className="hint">You can edit it before sending. It opens in {channel === "WHATSAPP" ? "WhatsApp" : "your SMS app"}; press send there.</p>
-      </div>
-      <button type="button" className="btn-call w-full" disabled={!text.trim() || (channel === "WHATSAPP" && !wa) || log.isPending} onClick={send}>
-        {channel === "WHATSAPP" ? "Open in WhatsApp" : "Open in SMS app"}
-      </button>
-      {log.isSuccess && <p className="text-sm text-emerald-700 dark:text-emerald-400">Logged on the timeline.</p>}
-      {log.error && (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-          Opened, but not logged: {log.error.message}
-        </p>
-      )}
-    </section>
+    <Card role="region" aria-labelledby="msg-h">
+      <CardHeader>
+        <CardTitle id="msg-h" className="flex items-center gap-2">
+          <MessageSquare aria-hidden className="size-4 text-muted-foreground" /> Send WhatsApp / SMS
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <Tabs
+          value={channel}
+          onValueChange={(v) => {
+            setChannel(v as MessageChannel);
+            setTemplateId("");
+          }}
+        >
+          <TabsList aria-label="Channel">
+            <TabsTrigger value="WHATSAPP">WhatsApp</TabsTrigger>
+            <TabsTrigger value="SMS">SMS</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <div>
+          <Label htmlFor="msg-tpl">Template</Label>
+          <NativeSelect id="msg-tpl" value={templateId} onChange={(e) => pick(e.target.value)}>
+            <option value="">Write my own</option>
+            {usable.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </NativeSelect>
+        </div>
+        <div>
+          <Label htmlFor="msg-text">Message</Label>
+          <Textarea id="msg-text" rows={4} maxLength={2000} value={text} onChange={(e) => setText(e.target.value)} />
+          <Hint>You can edit it before sending. It opens in {channel === "WHATSAPP" ? "WhatsApp" : "your SMS app"}; press send there.</Hint>
+        </div>
+        <Button variant="call" className="w-full" disabled={!text.trim() || (channel === "WHATSAPP" && !wa) || log.isPending} onClick={send}>
+          <Send /> {channel === "WHATSAPP" ? "Open in WhatsApp" : "Open in SMS app"}
+        </Button>
+        {log.isSuccess && <p className="text-sm text-emerald-700">Logged on the timeline.</p>}
+        <FormError error={log.error ? `Opened, but not logged: ${log.error.message}` : null} />
+      </CardContent>
+    </Card>
   );
 }

@@ -25,7 +25,28 @@ import { OutcomeChip } from "../components/Outcomes";
 import { UserMultiSelect, useAssignableUsers } from "../components/UserPicker";
 import { useDialer } from "../dialer";
 import { CONTACT_STATUS_LABEL, formatShortWhen, personName } from "../format";
-import { Badge, ConfirmDialog, Empty, ErrorBox, Modal, PageHeader, Spinner } from "../ui";
+import { ArrowLeft, ListChecks, MoreHorizontal, Pause, Pencil, Phone, PhoneCall, Play, Plus, RotateCcw, SkipForward, Trash2, Archive, UserRound } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Empty, ErrorBox, FormError, Hint, PageHeader, Spinner } from "../ui";
 
 /** Router state the Contacts page passes to open "New call list" pre-filled. */
 export interface NewListState {
@@ -44,16 +65,16 @@ export function ProgressBar({ p }: { p: ListProgress }) {
   const w = p.total ? Math.round((100 * p.done) / p.total) : 0;
   return (
     <div className="min-w-32">
-      <div className="mb-1 text-xs tabular-nums text-slate-600 dark:text-slate-400">{progressText(p)}</div>
-      <div className="h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700" role="progressbar" aria-valuenow={w} aria-valuemin={0} aria-valuemax={100} aria-label={`${progressText(p)} done`}>
-        <div className="h-full rounded-full bg-brand-600" style={{ width: `${w}%` }} />
+      <div className="mb-1 text-xs tabular-nums text-muted-foreground">{progressText(p)}</div>
+      <div className="h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuenow={w} aria-valuemin={0} aria-valuemax={100} aria-label={`${progressText(p)} done`}>
+        <div className="h-full rounded-full bg-primary" style={{ width: `${w}%` }} />
       </div>
     </div>
   );
 }
 
 export function ResultChips({ results }: { results: ListResult[] }) {
-  if (!results.length) return <span className="text-xs text-slate-400">No outcomes yet</span>;
+  if (!results.length) return <span className="text-xs text-muted-foreground">No outcomes yet</span>;
   return (
     <div className="flex flex-wrap gap-1">
       {results.map((r) => (
@@ -83,9 +104,9 @@ export function ListsPage() {
         subtitle={manager ? "Build a list of numbers, assign reps, and watch it get worked." : "Lists your manager gave you. Start one to call through it."}
         actions={
           manager && (
-            <button type="button" className="btn-primary" onClick={() => setCreating({})}>
-              New call list
-            </button>
+            <Button onClick={() => setCreating({})}>
+              <Plus /> New call list
+            </Button>
           )
         }
       />
@@ -109,38 +130,40 @@ function MyLists({ alwaysShow }: { alwaysShow: boolean }) {
   const q = useQuery({ queryKey: ["my-lists"], queryFn: () => api<{ items: MyList[] }>("/api/my/call-lists") });
   if (q.isPending) return alwaysShow ? <Spinner label="Loading your lists" /> : null;
   if (q.isError) return alwaysShow ? <ErrorBox error={q.error} onRetry={() => void q.refetch()} /> : null;
-  if (q.data.items.length === 0) return alwaysShow ? <Empty>No call lists assigned to you right now.</Empty> : null;
+  if (q.data.items.length === 0) return alwaysShow ? <Empty icon={<ListChecks />}>No call lists assigned to you right now. When your manager gives you one, it shows up here.</Empty> : null;
   return (
     <section aria-labelledby="my-lists-h" className="mb-6">
-      <h2 id="my-lists-h" className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">
+      <h2 id="my-lists-h" className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
         My lists · {q.data.items.length}
       </h2>
-      <ul className="grid gap-3 md:grid-cols-2">
+      <div role="list" className="grid gap-3 md:grid-cols-2">
         {q.data.items.map((l) => (
-          <li key={l.id} className="card flex flex-col gap-3 p-4">
+          <Card key={l.id} className="flex flex-col gap-3 p-4" role="listitem">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="truncate font-semibold">{l.name}</div>
-                <div className="text-xs text-slate-500">
+                <div className="text-xs text-muted-foreground">
                   {l.createdBy ? `Assigned by ${personName(l.createdBy)}` : "Call list"}
                   {l.script ? ` · script: ${l.script.name}` : ""}
                 </div>
               </div>
-              {l.state !== "ACTIVE" && <Badge tone={STATE_TONE[l.state]}>{STATE_LABEL[l.state]}</Badge>}
+              {l.state !== "ACTIVE" && <Badge variant={STATE_TONE[l.state]}>{STATE_LABEL[l.state]}</Badge>}
             </div>
             <ProgressBar p={l.progress} />
             <ResultChips results={l.results} />
             <div className="flex gap-2">
-              <Link to={`/lists/${l.id}/work`} className={`btn-call ${l.state !== "ACTIVE" ? "pointer-events-none opacity-50" : ""}`} aria-disabled={l.state !== "ACTIVE"}>
-                {l.progress.inProgress ? "Continue" : "Start calling"}
-              </Link>
-              <Link to={`/lists/${l.id}`} className="btn-ghost">
-                See numbers
-              </Link>
+              <Button asChild variant="call" className={l.state !== "ACTIVE" ? "pointer-events-none opacity-50" : ""}>
+                <Link to={`/lists/${l.id}/work`} aria-disabled={l.state !== "ACTIVE"}>
+                  <PhoneCall /> {l.progress.inProgress ? "Continue" : "Start calling"}
+                </Link>
+              </Button>
+              <Button asChild variant="ghost">
+                <Link to={`/lists/${l.id}`}>See numbers</Link>
+              </Button>
             </div>
-          </li>
+          </Card>
         ))}
-      </ul>
+      </div>
     </section>
   );
 }
@@ -154,19 +177,19 @@ function ManagedLists() {
   return (
     <section aria-labelledby="all-lists-h">
       <div className="mb-2 flex flex-wrap items-end justify-between gap-2">
-        <h2 id="all-lists-h" className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <h2 id="all-lists-h" className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           All lists
         </h2>
         <div>
-          <label className="sr-only" htmlFor="lists-state">
+          <Label className="sr-only" htmlFor="lists-state">
             Show
-          </label>
-          <select id="lists-state" className="input" value={state} onChange={(e) => setState(e.target.value as CallListState | "")}>
+          </Label>
+          <NativeSelect id="lists-state" value={state} onChange={(e) => setState(e.target.value as CallListState | "")}>
             <option value="">Active and paused</option>
             <option value="ACTIVE">Active</option>
             <option value="PAUSED">Paused</option>
             <option value="ARCHIVED">Archived</option>
-          </select>
+          </NativeSelect>
         </div>
       </div>
       {q.isPending ? (
@@ -174,44 +197,44 @@ function ManagedLists() {
       ) : q.isError ? (
         <ErrorBox error={q.error} onRetry={() => void q.refetch()} />
       ) : q.data.items.length === 0 ? (
-        <Empty>No call lists yet. Pick contacts on the Contacts page, or press New call list.</Empty>
+        <Empty icon={<ListChecks />}>No call lists yet. Press New call list, or pick contacts on the Contacts page and choose Create call list.</Empty>
       ) : (
-        <div className="card overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800">
-              <tr>
+        <Card className="overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
                 {["Name", "Assigned to", "Script", "Progress", "Results"].map((h) => (
-                  <th key={h} scope="col" className="whitespace-nowrap px-4 py-3 font-medium">
+                  <TableHead key={h} scope="col">
                     {h}
-                  </th>
+                  </TableHead>
                 ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {q.data.items.map((l) => (
-                <tr key={l.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                  <td className="px-4 py-3">
-                    <Link to={`/lists/${l.id}`} className="font-medium text-brand-700 hover:underline dark:text-brand-100">
+                <TableRow key={l.id}>
+                  <TableCell>
+                    <Link to={`/lists/${l.id}`} className="font-medium text-primary hover:underline">
                       {l.name}
                     </Link>
-                    <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
-                      {l.state !== "ACTIVE" && <Badge tone={STATE_TONE[l.state]}>{STATE_LABEL[l.state]}</Badge>}
+                    <div className="mt-0.5 flex items-center gap-2 text-xs text-muted-foreground">
+                      {l.state !== "ACTIVE" && <Badge variant={STATE_TONE[l.state]}>{STATE_LABEL[l.state]}</Badge>}
                       {formatShortWhen(l.createdAt)}
                     </div>
-                  </td>
-                  <td className="max-w-48 px-4 py-3">{l.assignees.map(personName).join(", ") || "—"}</td>
-                  <td className="max-w-40 truncate px-4 py-3">{l.script?.name ?? "—"}</td>
-                  <td className="px-4 py-3">
+                  </TableCell>
+                  <TableCell className="max-w-48">{l.assignees.map(personName).join(", ") || "—"}</TableCell>
+                  <TableCell className="max-w-40 truncate">{l.script?.name ?? "—"}</TableCell>
+                  <TableCell>
                     <ProgressBar p={l.progress} />
-                  </td>
-                  <td className="px-4 py-3">
+                  </TableCell>
+                  <TableCell>
                     <ResultChips results={l.results} />
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </Card>
       )}
     </section>
   );
@@ -265,53 +288,49 @@ export function NewListDialog({ initial, onClose, onCreated }: { initial: NewLis
   const ok = !!name.trim() && assignees.length > 0 && sourceOk && !csv.preview.isPending;
 
   const radio = (v: Source, label: string, disabled = false) => (
-    <label className={`flex items-start gap-2 rounded-lg border border-slate-300 p-2 text-sm has-[:checked]:border-brand-600 has-[:checked]:bg-brand-50 dark:border-slate-700 dark:has-[:checked]:bg-slate-800 ${disabled ? "opacity-50" : "cursor-pointer"}`}>
-      <input type="radio" name="list-source" className="mt-0.5 accent-brand-600" disabled={disabled} checked={source === v} onChange={() => setSource(v)} />
-      <span>{label}</span>
-    </label>
+    <div
+      className={`flex min-h-11 items-center gap-3 rounded-lg border p-2 text-sm has-[[data-state=checked]]:border-primary has-[[data-state=checked]]:bg-secondary ${disabled ? "opacity-50" : ""}`}
+    >
+      <RadioGroupItem id={`ls-${v}`} value={v} disabled={disabled} />
+      <Label htmlFor={`ls-${v}`} className={`mb-0 flex-1 font-normal ${disabled ? "" : "cursor-pointer"}`}>
+        {label}
+      </Label>
+    </div>
   );
 
   return (
-    <Modal
-      open
-      title="New call list"
-      onClose={() => !create.isPending && onClose()}
-      footer={
-        <>
-          <button type="button" className="btn-ghost" disabled={create.isPending} onClick={onClose}>
-            Cancel
-          </button>
-          <button type="button" className="btn-primary" disabled={!ok || create.isPending} onClick={() => create.mutate()}>
-            {create.isPending ? "Creating…" : "Create list"}
-          </button>
-        </>
-      }
-    >
+    <Dialog open onOpenChange={(o) => !o && !create.isPending && onClose()}>
+      <DialogContent className="w-[min(36rem,calc(100vw-2rem))]">
+      <DialogHeader>
+        <DialogTitle>New call list</DialogTitle>
+      </DialogHeader>
       <div className="space-y-4">
         <div>
-          <label className="label" htmlFor="nl-name">
+          <Label htmlFor="nl-name">
             Name
-          </label>
-          <input id="nl-name" className="input" maxLength={120} placeholder="Pune dealers, November" value={name} onChange={(e) => setName(e.target.value)} />
+          </Label>
+          <Input id="nl-name" maxLength={120} placeholder="Pune dealers, November" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         <fieldset className="space-y-2">
-          <legend className="label">Numbers</legend>
+          <legend className="mb-1.5 text-sm font-medium text-slate-700">Numbers</legend>
+          <RadioGroup value={source} onValueChange={(v) => setSource(v as Source)} aria-label="Where the numbers come from">
           {/* Only offered when the Contacts page passed its filter: an empty filter would list everyone in scope. */}
           {initial.filter && radio("filter", `Contacts filter: ${filterText(filter)}`)}
           {radio("ids", initial.contactIds?.length ? `${initial.contactIds.length} selected contacts` : "Selected contacts (pick them on the Contacts page)", !initial.contactIds?.length)}
           {radio("csv", "Upload a CSV")}
+          </RadioGroup>
         </fieldset>
         {source === "csv" && <CsvImportView state={csv} />}
         {source === "csv" && csv.preview.data && listableCount(csv.preview.data) === 0 && (
-          <p className="text-sm text-amber-700 dark:text-amber-400">No number in this file can go on a list (do-not-call, another team&apos;s, or bad).</p>
+          <p className="text-sm text-amber-700">No number in this file can go on a list (do-not-call, another team&apos;s, or bad).</p>
         )}
-        <p className="hint">Do-not-call numbers are left out automatically.</p>
+        <Hint>Do-not-call numbers are left out automatically.</Hint>
         <UserMultiSelect label="Assign to" users={users.items} value={assignees} onChange={setAssignees} />
         <div>
-          <label className="label" htmlFor="nl-script">
+          <Label htmlFor="nl-script">
             Script (optional)
-          </label>
-          <select id="nl-script" className="input" value={scriptId} onChange={(e) => setScriptId(e.target.value)}>
+          </Label>
+          <NativeSelect id="nl-script" value={scriptId} onChange={(e) => setScriptId(e.target.value)}>
             <option value="">No script</option>
             {scripts.data?.items
               .filter((s) => s.active)
@@ -320,15 +339,20 @@ export function NewListDialog({ initial, onClose, onCreated }: { initial: NewLis
                   {s.name}
                 </option>
               ))}
-          </select>
+          </NativeSelect>
         </div>
-        {(create.error || csv.run.error) && (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-            {(create.error ?? csv.run.error)?.message}
-          </p>
-        )}
+        <FormError error={create.error ?? csv.run.error} />
       </div>
-    </Modal>
+      <DialogFooter>
+        <Button variant="outline" disabled={create.isPending} onClick={onClose}>
+          Cancel
+        </Button>
+        <Button disabled={!ok || create.isPending} onClick={() => create.mutate()}>
+          {create.isPending ? "Creating…" : "Create list"}
+        </Button>
+      </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -376,14 +400,16 @@ export function ListDetailPage() {
 
   return (
     <>
-      <Link to="/lists" className="mb-3 inline-block text-sm text-brand-700 hover:underline dark:text-brand-100">
-        ← Call lists
-      </Link>
+      <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2 text-muted-foreground">
+        <Link to="/lists">
+          <ArrowLeft /> Call lists
+        </Link>
+      </Button>
       <PageHeader
         title={list.name}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
-            <Badge tone={STATE_TONE[list.state]}>{STATE_LABEL[list.state]}</Badge>
+            <Badge variant={STATE_TONE[list.state]}>{STATE_LABEL[list.state]}</Badge>
             <span>Assigned to {list.assignees.map(personName).join(", ") || "nobody"}</span>
             {list.script && <span>· script: {list.script.name}</span>}
           </span>
@@ -391,29 +417,31 @@ export function ListDetailPage() {
         actions={
           <>
             {assigned && list.state === "ACTIVE" && (
-              <Link to={`/lists/${id}/work`} className="btn-call">
-                Start calling
-              </Link>
+              <Button asChild variant="call">
+                <Link to={`/lists/${id}/work`}>
+                  <PhoneCall /> Start calling
+                </Link>
+              </Button>
             )}
             {manager && (
               <>
-                <button type="button" className="btn-outline" onClick={() => setEditing(true)}>
-                  Edit
-                </button>
+                <Button variant="outline" onClick={() => setEditing(true)}>
+                  <Pencil /> Edit
+                </Button>
                 {list.state === "ACTIVE" && (
-                  <button type="button" className="btn-outline" disabled={patch.isPending} onClick={() => patch.mutate({ state: "PAUSED" })}>
-                    Pause
-                  </button>
+                  <Button variant="outline" disabled={patch.isPending} onClick={() => patch.mutate({ state: "PAUSED" })}>
+                    <Pause /> Pause
+                  </Button>
                 )}
                 {list.state !== "ACTIVE" && (
-                  <button type="button" className="btn-outline" disabled={patch.isPending} onClick={() => patch.mutate({ state: "ACTIVE" })}>
-                    {list.state === "ARCHIVED" ? "Restore" : "Resume"}
-                  </button>
+                  <Button variant="outline" disabled={patch.isPending} onClick={() => patch.mutate({ state: "ACTIVE" })}>
+                    <Play /> {list.state === "ARCHIVED" ? "Restore" : "Resume"}
+                  </Button>
                 )}
                 {list.state !== "ARCHIVED" && (
-                  <button type="button" className="btn-ghost text-red-700 dark:text-red-300" onClick={() => setConfirm({ kind: "archive" })}>
-                    Archive
-                  </button>
+                  <Button variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirm({ kind: "archive" })}>
+                    <Archive /> Archive
+                  </Button>
                 )}
               </>
             )}
@@ -421,108 +449,131 @@ export function ListDetailPage() {
         }
       />
       {patch.error && <ErrorBox error={patch.error} />}
-      <div className="card mb-4 flex flex-wrap items-center gap-4 p-4">
+      <Card className="mb-4 flex flex-row flex-wrap items-center gap-4 p-4">
         <div className="w-full max-w-sm">
           <ProgressBar p={list.progress} />
         </div>
-        <div className="text-sm text-slate-600 dark:text-slate-400">
+        <div className="text-sm text-muted-foreground">
           {list.progress.pending} waiting · {list.progress.inProgress} being called · {list.progress.skipped} skipped · {list.progress.removed} removed
         </div>
         <ResultChips results={list.results} />
-      </div>
+      </Card>
       <div className="mb-3 max-w-xs">
-        <label className="sr-only" htmlFor="ld-state">
+        <Label className="sr-only" htmlFor="ld-state">
           Show
-        </label>
-        <select id="ld-state" className="input" value={state} onChange={(e) => setState(e.target.value as CallListItemState | "")}>
+        </Label>
+        <NativeSelect id="ld-state" value={state} onChange={(e) => setState(e.target.value as CallListItemState | "")}>
           <option value="">All numbers</option>
           {(Object.keys(ITEM_LABEL) as CallListItemState[]).map((s) => (
             <option key={s} value={s}>
               {ITEM_LABEL[s]}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
       {items.length === 0 ? (
-        <Empty>No numbers here.</Empty>
+        <Empty>No numbers in this view. Pick another filter above to see the rest of the list.</Empty>
       ) : (
-        <div className="card overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800">
-              <tr>
+        <Card className="overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
                 {["#", "Contact", "State", "Last outcome", "Who", "When", ""].map((h, i) => (
-                  <th key={i} scope="col" className="whitespace-nowrap px-3 py-3 font-medium">
+                  <TableHead key={i} scope="col">
                     {h || <span className="sr-only">Actions</span>}
-                  </th>
+                  </TableHead>
                 ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {items.map((it) => {
                 const who = it.doneBy ?? it.claimedBy;
                 const label = it.contact.name || it.contact.phoneE164;
                 return (
-                  <tr key={it.id}>
-                    <td className="px-3 py-2 tabular-nums text-slate-500">{it.position + 1}</td>
-                    <td className="px-3 py-2">
+                  <TableRow key={it.id}>
+                    <TableCell className="tabular-nums text-muted-foreground">{it.position + 1}</TableCell>
+                    <TableCell>
                       <Link to={`/activity/contacts/${it.contact.id}`} className="font-medium hover:underline">
                         {label}
                       </Link>
-                      <div className="text-xs text-slate-500">
+                      <div className="text-xs text-muted-foreground">
                         {[it.contact.name ? it.contact.phoneE164 : null, it.contact.company, it.contact.city].filter(Boolean).join(" · ")}
                         {it.contact.dnc && (
                           <span className="ml-1">
-                            <Badge tone="red">DNC</Badge>
+                            <Badge variant="red">DNC</Badge>
                           </span>
                         )}
                       </div>
-                    </td>
-                    <td className="px-3 py-2">
-                      <Badge tone={ITEM_TONE[it.state]}>{ITEM_LABEL[it.state]}</Badge>
-                      {it.retryAt && it.state === "PENDING" && <div className="text-xs text-slate-500">retry {formatShortWhen(it.retryAt)}</div>}
-                      {it.attempts > 1 && <div className="text-xs text-slate-500">{it.attempts} attempts</div>}
-                    </td>
-                    <td className="px-3 py-2">{it.lastOutcome ? <OutcomeChip label={it.lastOutcome.label} color={it.lastOutcome.color} /> : "—"}</td>
-                    <td className="max-w-36 truncate px-3 py-2">{who ? personName(who) : "—"}</td>
-                    <td className="whitespace-nowrap px-3 py-2">{it.lastActivityAt ? formatShortWhen(it.lastActivityAt) : "—"}</td>
-                    <td className="whitespace-nowrap px-3 py-2 text-right">
-                      {manager && it.state !== "PENDING" && (
-                        <button type="button" className="btn-ghost" disabled={itemAction.isPending} onClick={() => itemAction.mutate({ itemId: it.id, action: "reset" })}>
-                          Reset
-                        </button>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={ITEM_TONE[it.state]}>{ITEM_LABEL[it.state]}</Badge>
+                      {it.retryAt && it.state === "PENDING" && <div className="text-xs text-muted-foreground">retry {formatShortWhen(it.retryAt)}</div>}
+                      {it.attempts > 1 && <div className="text-xs text-muted-foreground">{it.attempts} attempts</div>}
+                    </TableCell>
+                    <TableCell>{it.lastOutcome ? <OutcomeChip label={it.lastOutcome.label} color={it.lastOutcome.color} /> : "—"}</TableCell>
+                    <TableCell className="max-w-36 truncate">{who ? personName(who) : "—"}</TableCell>
+                    <TableCell className="whitespace-nowrap">{it.lastActivityAt ? formatShortWhen(it.lastActivityAt) : "—"}</TableCell>
+                    <TableCell className="whitespace-nowrap py-1 text-right">
+                      {manager && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" size="icon" aria-label={`Actions for ${label}`}>
+                              <MoreHorizontal />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent>
+                            {it.state !== "PENDING" && (
+                              <DropdownMenuItem disabled={itemAction.isPending} onSelect={() => itemAction.mutate({ itemId: it.id, action: "reset" })}>
+                                <RotateCcw /> Put back in the queue
+                              </DropdownMenuItem>
+                            )}
+                            {it.state !== "REMOVED" && (
+                              <DropdownMenuItem variant="destructive" onSelect={() => setConfirm({ kind: "remove", itemId: it.id, label })}>
+                                <Trash2 /> Remove from list
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       )}
-                      {manager && it.state !== "REMOVED" && (
-                        <button type="button" className="btn-ghost text-red-700 dark:text-red-300" onClick={() => setConfirm({ kind: "remove", itemId: it.id, label })}>
-                          Remove
-                        </button>
-                      )}
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 );
               })}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+        </Card>
       )}
       {detail.hasNextPage && (
-        <button type="button" className="btn-outline mt-4 w-full" disabled={detail.isFetchingNextPage} onClick={() => void detail.fetchNextPage()}>
+        <Button variant="outline" className="mt-4 w-full" disabled={detail.isFetchingNextPage} onClick={() => void detail.fetchNextPage()}>
           {detail.isFetchingNextPage ? "Loading…" : "Load more"}
-        </button>
+        </Button>
       )}
       {itemAction.error && !confirm && <ErrorBox error={itemAction.error} />}
-      <ConfirmDialog
-        open={!!confirm}
-        title={confirm?.kind === "archive" ? "Archive this list?" : "Remove this number?"}
-        body={confirm?.kind === "archive" ? "Reps stop seeing it. You can restore it from the archived lists." : `${confirm?.kind === "remove" ? confirm.label : ""} is taken off this list.`}
-        confirmLabel={confirm?.kind === "archive" ? "Archive" : "Remove"}
-        busy={patch.isPending || itemAction.isPending}
-        error={confirm?.kind === "archive" ? patch.error : itemAction.error}
-        onClose={() => setConfirm(null)}
-        onConfirm={() => {
-          if (confirm?.kind === "archive") patch.mutate({ state: "ARCHIVED" });
-          else if (confirm?.kind === "remove") itemAction.mutate({ itemId: confirm.itemId, action: "remove" });
-        }}
-      />
+      <AlertDialog open={!!confirm} onOpenChange={(o) => !o && !(patch.isPending || itemAction.isPending) && setConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirm?.kind === "archive" ? "Archive this list?" : "Remove this number?"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirm?.kind === "archive" ? "Reps stop seeing it. You can restore it from the archived lists." : `${confirm?.kind === "remove" ? confirm.label : ""} is taken off this list.`}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <FormError error={confirm?.kind === "archive" ? patch.error : itemAction.error} />
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={patch.isPending || itemAction.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={patch.isPending || itemAction.isPending}
+              onClick={(e) => {
+                // Keep the dialog open until the request finishes (it closes on success).
+                e.preventDefault();
+                if (confirm?.kind === "archive") patch.mutate({ state: "ARCHIVED" });
+                else if (confirm?.kind === "remove") itemAction.mutate({ itemId: confirm.itemId, action: "remove" });
+              }}
+            >
+              {patch.isPending || itemAction.isPending ? "Working…" : confirm?.kind === "archive" ? "Archive" : "Remove"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {editing && <EditListDialog list={list} onClose={() => setEditing(false)} onSaved={refresh} />}
     </>
   );
@@ -545,49 +596,44 @@ function EditListDialog({ list, onClose, onSaved }: { list: ListSummary; onClose
     },
   });
   return (
-    <Modal
-      open
-      title="Edit call list"
-      onClose={() => !save.isPending && onClose()}
-      footer={
-        <>
-          <button type="button" className="btn-ghost" disabled={save.isPending} onClick={onClose}>
-            Cancel
-          </button>
-          <button type="button" className="btn-primary" disabled={!name.trim() || !assignees.length || save.isPending} onClick={() => save.mutate()}>
-            {save.isPending ? "Saving…" : "Save"}
-          </button>
-        </>
-      }
-    >
+    <Dialog open onOpenChange={(o) => !o && !save.isPending && onClose()}>
+      <DialogContent>
+      <DialogHeader>
+        <DialogTitle>Edit call list</DialogTitle>
+      </DialogHeader>
       <div className="space-y-3">
         <div>
-          <label className="label" htmlFor="el-name">
+          <Label htmlFor="el-name">
             Name
-          </label>
-          <input id="el-name" className="input" maxLength={120} value={name} onChange={(e) => setName(e.target.value)} />
+          </Label>
+          <Input id="el-name" maxLength={120} value={name} onChange={(e) => setName(e.target.value)} />
         </div>
         <UserMultiSelect label="Assign to" users={pickable} value={assignees} onChange={setAssignees} />
         <div>
-          <label className="label" htmlFor="el-script">
+          <Label htmlFor="el-script">
             Script
-          </label>
-          <select id="el-script" className="input" value={scriptId} onChange={(e) => setScriptId(e.target.value)}>
+          </Label>
+          <NativeSelect id="el-script" value={scriptId} onChange={(e) => setScriptId(e.target.value)}>
             <option value="">No script</option>
             {scripts.data?.items.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </div>
-        {save.error && (
-          <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-            {save.error.message}
-          </p>
-        )}
+        <FormError error={save.error} />
       </div>
-    </Modal>
+      <DialogFooter>
+        <Button variant="outline" disabled={save.isPending} onClick={onClose}>
+          Cancel
+        </Button>
+        <Button disabled={!name.trim() || !assignees.length || save.isPending} onClick={() => save.mutate()}>
+          {save.isPending ? "Saving…" : "Save changes"}
+        </Button>
+      </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -633,16 +679,18 @@ export function ListSessionPage() {
 
   const header = (
     <>
-      <Link to="/lists" className="mb-3 inline-block text-sm text-brand-700 hover:underline dark:text-brand-100">
-        ← Call lists
-      </Link>
+      <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2 text-muted-foreground">
+        <Link to="/lists">
+          <ArrowLeft /> Call lists
+        </Link>
+      </Button>
       <PageHeader
         title={list?.name ?? "Call list"}
         subtitle={list?.createdBy ? `Call list · assigned by ${personName(list.createdBy)}` : "Call list"}
         actions={
-          <button type="button" className="btn-outline" disabled={pause.isPending} onClick={() => pause.mutate()}>
-            {pause.isPending ? "Pausing…" : "Pause"}
-          </button>
+          <Button variant="outline" disabled={pause.isPending} onClick={() => pause.mutate()}>
+            <Pause /> {pause.isPending ? "Pausing…" : "Pause"}
+          </Button>
         }
       />
     </>
@@ -683,69 +731,76 @@ export function ListSessionPage() {
       {header}
       <div className="grid gap-4 lg:grid-cols-[1fr_22rem]">
         <div className="space-y-4">
-          <div className="card flex flex-wrap items-center gap-4 p-4">
+          <Card className="flex flex-row flex-wrap items-center gap-4 p-4">
             <div className="w-full max-w-xs">
               <ProgressBar p={r.progress} />
             </div>
-            <div className="text-sm text-slate-600 dark:text-slate-400">
+            <div className="text-sm text-muted-foreground">
               {[interested != null ? `${interested} interested` : null, callBack != null ? `${callBack} call back` : null].filter(Boolean).join(" · ")}
             </div>
-          </div>
+          </Card>
 
           {!it ? (
-            <section className="card p-6 text-center">
+            <Card className="p-6 text-center">
+            <section>
               <h2 className="text-lg font-semibold">All done</h2>
-              <p className="mt-1 text-sm text-slate-500">Nothing left to call on this list right now. Retries come back here when they're due.</p>
+              <p className="mt-1 text-sm text-muted-foreground">Nothing left to call on this list right now. Retries come back here when they're due.</p>
               <div className="mt-3 flex justify-center">
                 <ResultChips results={results} />
               </div>
-              <Link to="/lists" className="btn-outline mt-4">
-                Back to lists
-              </Link>
+              <Button asChild variant="outline" className="mt-4">
+                <Link to="/lists">Back to lists</Link>
+              </Button>
             </section>
+            </Card>
           ) : (
-            <section aria-labelledby="next-h" className="card p-5">
-              <h2 id="next-h" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <Card className="border-primary/30 p-5 shadow-md">
+            <section aria-labelledby="next-h">
+              <h2 id="next-h" className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Next up
               </h2>
               <div className="mt-3 flex items-center gap-4">
-                <span aria-hidden className="grid size-14 shrink-0 place-items-center rounded-full bg-brand-50 text-lg font-semibold text-brand-700 dark:bg-slate-800 dark:text-brand-100">
+                <span aria-hidden className="grid size-14 shrink-0 place-items-center rounded-full bg-secondary text-lg font-semibold text-primary">
                   {initials(c!.name, c!.phoneE164)}
                 </span>
                 <div className="min-w-0">
                   <div className="truncate text-xl font-semibold">{label}</div>
-                  <div className="truncate text-sm text-slate-500">{[c!.name ? c!.phoneE164 : null, c!.company, c!.city].filter(Boolean).join(" · ")}</div>
+                  <div className="truncate text-sm text-muted-foreground">{[c!.name ? c!.phoneE164 : null, c!.company, c!.city].filter(Boolean).join(" · ")}</div>
                   <div className="mt-1 flex flex-wrap gap-1">
-                    {it.attempts > 0 && <Badge>Attempt {it.attempts + 1}</Badge>}
+                    {it.attempts > 0 && <Badge variant="gray">Attempt {it.attempts + 1}</Badge>}
                     {it.lastOutcome && <OutcomeChip label={it.lastOutcome.label} color={it.lastOutcome.color} />}
-                    {c!.dnc && <Badge tone="red">Do not call</Badge>}
+                    {c!.dnc && <Badge variant="red">Do not call</Badge>}
                   </div>
                 </div>
               </div>
               <div className="mt-5 flex flex-wrap gap-2">
                 {onThisCall ? (
-                  <button type="button" className="btn-primary flex-1 py-3" onClick={dialer.openOutcome}>
-                    Log outcome
-                  </button>
+                  <Button size="lg" className="flex-1" onClick={dialer.openOutcome}>
+                    <ListChecks /> Log outcome
+                  </Button>
                 ) : (
-                  <button
-                    type="button"
-                    className="btn-call flex-1 py-3"
+                  <Button
+                    size="lg"
+                    variant="call"
+                    className="flex-1"
                     onClick={() => void dialer.call(c!.phoneE164, label, { callListItemId: it.id, listId: id, dncReason: c!.dnc?.reason ?? null, dnc: !!c!.dnc })}
                   >
-                    Call now
-                  </button>
+                    <Phone /> Call now
+                  </Button>
                 )}
-                <button type="button" className="btn-outline" disabled={skip.isPending} onClick={() => skip.mutate(it.id)}>
-                  {skip.isPending ? "Skipping…" : "Skip"}
-                </button>
-                <Link to={`/activity/contacts/${c!.id}`} className="btn-ghost">
-                  Details
-                </Link>
+                <Button size="lg" variant="outline" disabled={skip.isPending} onClick={() => skip.mutate(it.id)}>
+                  <SkipForward /> {skip.isPending ? "Skipping…" : "Skip"}
+                </Button>
+                <Button asChild size="lg" variant="ghost">
+                  <Link to={`/activity/contacts/${c!.id}`}>
+                    <UserRound /> Details
+                  </Link>
+                </Button>
               </div>
-              {skip.error && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{skip.error.message}</p>}
-              <p className="hint mt-4">Auto-advance: after you save the outcome, the next number is ready.</p>
+              {skip.error && <FormError error={skip.error} />}
+              <Hint className="mt-4">Auto-advance: after you save the outcome, the next number is ready.</Hint>
             </section>
+            </Card>
           )}
         </div>
         <ScriptPanel script={list?.script ?? null} />
@@ -757,18 +812,20 @@ export function ListSessionPage() {
 function ScriptPanel({ script }: { script: ScriptDto | null }) {
   if (!script) return null;
   return (
-    <aside aria-labelledby="script-h" className="card h-fit p-4">
+    <Card className="h-fit p-4">
+    <aside aria-labelledby="script-h">
       <h2 id="script-h" className="mb-3 font-semibold">
         Script · {script.name}
       </h2>
       <div className="space-y-3">
         {script.sections.map((s, i) => (
           <div key={i}>
-            <div className="text-xs font-bold uppercase tracking-wide text-brand-700 dark:text-brand-100">{s.heading}</div>
+            <div className="text-xs font-bold uppercase tracking-wide text-primary">{s.heading}</div>
             <p className="mt-1 whitespace-pre-line text-sm">{s.text}</p>
           </div>
         ))}
       </div>
     </aside>
+    </Card>
   );
 }

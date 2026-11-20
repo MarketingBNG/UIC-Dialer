@@ -1,9 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Check, Save } from "lucide-react";
 import { useState } from "react";
 import { NavLink, Navigate, Route, Routes } from "react-router";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { tabLinkClass, tabsListClass } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { api, type DeviceConfig, type Settings } from "../api";
 import { ClientListPanel } from "../components/Privacy";
-import { ErrorBox, PageHeader, Spinner, Toggle } from "../ui";
+import { ErrorBox, FormError, Hint, PageHeader, Spinner } from "../ui";
 import { DncTab } from "./settings/Dnc";
 import { LeadSourcesTab } from "./settings/LeadSources";
 import { OutcomesTab } from "./settings/Outcomes";
@@ -25,16 +35,12 @@ const TABS = [
 
 /** Admin settings with sub-tabs (each tab is its own URL, so /settings/dnc deep-links). */
 export function SettingsPage() {
-  const cls = ({ isActive }: { isActive: boolean }) =>
-    `whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium ${
-      isActive ? "bg-brand-600 text-white" : "border border-slate-300 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-    }`;
   return (
     <>
-      <PageHeader title="Settings" />
-      <nav aria-label="Settings" className="mb-4 flex gap-2 overflow-x-auto pb-1">
+      <PageHeader title="Settings" subtitle="How phones sync, what reps see on calls, and who can be called." />
+      <nav aria-label="Settings" className={cn(tabsListClass, "mb-5")}>
         {TABS.map((t) => (
-          <NavLink key={t.to} to={t.to} end={t.end} className={cls}>
+          <NavLink key={t.to} to={t.to} end={t.end} className={tabLinkClass}>
             {t.label}
           </NavLink>
         ))}
@@ -58,7 +64,7 @@ function GeneralTab() {
   const settings = useQuery({ queryKey: ["settings"], queryFn: () => api<Settings>("/api/settings") });
   return (
     <>
-      <p className="mb-4 text-sm text-slate-500 dark:text-slate-400">Applied to every phone. Excluded numbers are set per user on the Users page.</p>
+      <p className="mb-4 text-sm text-muted-foreground">Applied to every phone. Excluded numbers are set per user on the Users page.</p>
       {settings.isPending ? (
         <Spinner label="Loading settings" />
       ) : settings.isError ? (
@@ -67,30 +73,40 @@ function GeneralTab() {
         <>
           <DeviceConfigForm initial={settings.data.deviceConfig} />
           <ClientListPanel />
-          <section className="card mt-4 p-4">
-            <h2 className="font-semibold">Published app</h2>
-            {settings.data.latestApp ? (
-              <p className="mt-1 break-all text-sm text-slate-600 dark:text-slate-400">
-                {settings.data.latestApp.versionName} ({settings.data.latestApp.versionCode}) · {settings.data.latestApp.fileName}
-              </p>
-            ) : (
-              <p className="mt-1 text-sm text-slate-500">No app version published yet.</p>
-            )}
-          </section>
+          <Card className="mt-4">
+            <CardHeader className="pb-5">
+              <CardTitle>Published app</CardTitle>
+              <CardDescription className="break-all">
+                {settings.data.latestApp
+                  ? `${settings.data.latestApp.versionName} (${settings.data.latestApp.versionCode}) · ${settings.data.latestApp.fileName}`
+                  : "No app version published yet."}
+              </CardDescription>
+            </CardHeader>
+          </Card>
         </>
       )}
     </>
   );
 }
 
+function SettingSwitch({ id, label, hint, checked, onChange }: { id: string; label: string; hint: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div className="flex items-start justify-between gap-4 py-3">
+      <div>
+        <Label htmlFor={id} className="mb-0 cursor-pointer">
+          {label}
+        </Label>
+        <Hint id={`${id}-hint`}>{hint}</Hint>
+      </div>
+      <Switch id={id} className="mt-0.5" checked={checked} onCheckedChange={onChange} aria-describedby={`${id}-hint`} />
+    </div>
+  );
+}
+
 function DeviceConfigForm({ initial }: { initial: DeviceConfig }) {
   const qc = useQueryClient();
   const [form, setForm] = useState({ ...initial, folders: initial.recorderFolders.join("\n"), cutoff: String(initial.backlogCutoffDays) });
-  const [saved, setSaved] = useState(false);
-  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => {
-    setSaved(false);
-    setForm((f) => ({ ...f, [k]: v }));
-  };
+  const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   const folderList = form.folders
     .split("\n")
@@ -113,96 +129,107 @@ function DeviceConfigForm({ initial }: { initial: DeviceConfig }) {
   const save = useMutation({
     mutationFn: () => api<DeviceConfig>("/api/settings/device-config", { method: "PUT", body: config }),
     onSuccess: (data) => {
-      setSaved(true);
+      toast.success("Saved. Phones pick this up on their next sync.");
       qc.setQueryData<Settings>(["settings"], (s) => (s ? { ...s, deviceConfig: data } : s));
     },
   });
 
   return (
-    <form
-      className="card space-y-5 p-4 sm:p-6"
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (foldersOk && cutoffOk && dirty) save.mutate();
-      }}
-    >
-      <h2 className="font-semibold">Device sync settings</h2>
-      <div>
-        <label className="label" htmlFor="s-folders">
-          Recorder folders, one per line
-        </label>
-        <textarea id="s-folders" rows={8} className="input py-2 font-mono" value={form.folders} onChange={(e) => set("folders", e.target.value)} aria-describedby="s-folders-hint" />
-        <p id="s-folders-hint" className={`hint ${foldersOk ? "" : "text-red-600"}`}>
-          Paths under internal storage, such as Recordings/Call. {folderList.length}/50
-        </p>
-      </div>
-
-      <fieldset>
-        <legend className="label">Live uploads network</legend>
-        <div className="flex flex-wrap gap-2">
-          {(
-            [
-              ["any", "Any network"],
-              ["wifi", "Wi-Fi only"],
-            ] as const
-          ).map(([v, l]) => (
-            <label key={v} className="flex min-h-10 cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 has-[:checked]:border-brand-600 has-[:checked]:bg-brand-50 dark:border-slate-700 dark:has-[:checked]:bg-slate-800">
-              <input type="radio" name="net" className="accent-brand-600" checked={form.liveNetwork === v} onChange={() => set("liveNetwork", v)} />
-              {l}
-            </label>
-          ))}
-        </div>
-      </fieldset>
-
-      <div className="divide-y divide-slate-100 dark:divide-slate-800">
-        <Toggle label="Upload old recordings (backlog)" hint="Recordings made before the app was installed." checked={form.backlogEnabled} onChange={(v) => set("backlogEnabled", v)} />
-        <Toggle label="Compress audio before upload" hint="Smaller files, less mobile data." checked={form.compressAudio} onChange={(v) => set("compressAudio", v)} />
-        <Toggle label="Business calls only" hint="Phones skip calls with numbers saved in their contacts, unless the number is on the client list below. Unsaved numbers still upload. Phones ask for the Contacts permission." checked={form.businessOnly} onChange={(v) => set("businessOnly", v)} />
-      </div>
-
-      <div className="max-w-xs">
-        <label className="label" htmlFor="s-cutoff">
-          Backlog cutoff (days)
-        </label>
-        <input id="s-cutoff" inputMode="numeric" className="input" value={form.cutoff} onChange={(e) => set("cutoff", e.target.value)} aria-describedby="s-cutoff-hint" aria-invalid={!cutoffOk} />
-        <p id="s-cutoff-hint" className={`hint ${cutoffOk ? "" : "text-red-600"}`}>
-          Skip recordings older than this. 0 to 3650.
-        </p>
-      </div>
-
-      <fieldset>
-        <legend className="label">Max parallel uploads</legend>
-        <div className="flex gap-2">
-          {[1, 2, 3, 4].map((n) => (
-            <label key={n} className="grid size-10 cursor-pointer place-items-center rounded-lg border border-slate-300 has-[:checked]:border-brand-600 has-[:checked]:bg-brand-600 has-[:checked]:text-white dark:border-slate-700">
-              <input type="radio" name="par" className="sr-only" checked={form.maxParallelUploads === n} onChange={() => set("maxParallelUploads", n)} />
-              {n}
-            </label>
-          ))}
-        </div>
-        <p className="hint">Low-RAM phones always upload one at a time.</p>
-      </fieldset>
-
-      <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
-        <button type="submit" className="btn-primary" disabled={!dirty || !foldersOk || !cutoffOk || save.isPending}>
-          {save.isPending ? "Saving…" : "Save"}
-        </button>
-        <button
-          type="button"
-          className="btn-ghost"
-          disabled={!dirty || save.isPending}
-          onClick={() => {
-            save.reset();
-            setForm({ ...initial, folders: initial.recorderFolders.join("\n"), cutoff: String(initial.backlogCutoffDays) });
+    <Card>
+      <CardHeader>
+        <CardTitle>Device sync settings</CardTitle>
+        <CardDescription>Where phones look for recordings and how they upload them.</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <form
+          className="space-y-6"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (foldersOk && cutoffOk && dirty) save.mutate();
           }}
         >
-          Discard changes
-        </button>
-        <span aria-live="polite" className="text-sm">
-          {saved && !dirty && <span className="text-emerald-700 dark:text-emerald-400">Saved. Phones pick this up on their next sync.</span>}
-          {save.error && <span className="text-red-600 dark:text-red-400">{save.error.message}</span>}
-        </span>
-      </div>
-    </form>
+          <div>
+            <Label htmlFor="s-folders">Recorder folders, one per line</Label>
+            <Textarea id="s-folders" rows={8} className="font-mono" value={form.folders} onChange={(e) => set("folders", e.target.value)} aria-describedby="s-folders-hint" aria-invalid={!foldersOk} />
+            <Hint id="s-folders-hint" className={foldersOk ? "" : "text-destructive"}>
+              Paths under internal storage, such as Recordings/Call. {folderList.length}/50
+            </Hint>
+          </div>
+
+          <div>
+            <p id="s-net-label" className="mb-1.5 text-sm font-medium text-slate-700">
+              Live uploads network
+            </p>
+            <div role="radiogroup" aria-labelledby="s-net-label" className="flex flex-wrap gap-2">
+              {(
+                [
+                  ["any", "Any network"],
+                  ["wifi", "Wi-Fi only"],
+                ] as const
+              ).map(([v, l]) => (
+                <Button key={v} role="radio" aria-checked={form.liveNetwork === v} variant={form.liveNetwork === v ? "secondary" : "outline"} className={cn("min-h-11", form.liveNetwork === v && "ring-2 ring-primary")} onClick={() => set("liveNetwork", v)}>
+                  {form.liveNetwork === v && <Check aria-hidden />}
+                  {l}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className="divide-y">
+            <SettingSwitch id="s-backlog" label="Upload old recordings (backlog)" hint="Recordings made before the app was installed." checked={form.backlogEnabled} onChange={(v) => set("backlogEnabled", v)} />
+            <SettingSwitch id="s-compress" label="Compress audio before upload" hint="Smaller files, less mobile data." checked={form.compressAudio} onChange={(v) => set("compressAudio", v)} />
+            <SettingSwitch
+              id="s-business"
+              label="Business calls only"
+              hint="Phones skip calls with numbers saved in their contacts, unless the number is on the client list below. Unsaved numbers still upload. Phones ask for the Contacts permission."
+              checked={form.businessOnly}
+              onChange={(v) => set("businessOnly", v)}
+            />
+          </div>
+
+          <div className="max-w-xs">
+            <Label htmlFor="s-cutoff">Backlog cutoff (days)</Label>
+            <Input id="s-cutoff" inputMode="numeric" value={form.cutoff} onChange={(e) => set("cutoff", e.target.value)} aria-describedby="s-cutoff-hint" aria-invalid={!cutoffOk} />
+            <Hint id="s-cutoff-hint" className={cutoffOk ? "" : "text-destructive"}>
+              Skip recordings older than this. 0 to 3650.
+            </Hint>
+          </div>
+
+          <div>
+            <p id="s-par-label" className="mb-1.5 text-sm font-medium text-slate-700">
+              Max parallel uploads
+            </p>
+            <div role="radiogroup" aria-labelledby="s-par-label" className="flex gap-2">
+              {[1, 2, 3, 4].map((n) => (
+                <Button key={n} role="radio" aria-checked={form.maxParallelUploads === n} variant={form.maxParallelUploads === n ? "default" : "outline"} className="size-11" onClick={() => set("maxParallelUploads", n)}>
+                  {n}
+                </Button>
+              ))}
+            </div>
+            <Hint>Low-RAM phones always upload one at a time.</Hint>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+            <Button type="submit" disabled={!dirty || !foldersOk || !cutoffOk || save.isPending}>
+              <Save aria-hidden />
+              {save.isPending ? "Saving…" : "Save changes"}
+            </Button>
+            <Button
+              variant="ghost"
+              disabled={!dirty || save.isPending}
+              onClick={() => {
+                save.reset();
+                setForm({ ...initial, folders: initial.recorderFolders.join("\n"), cutoff: String(initial.backlogCutoffDays) });
+              }}
+            >
+              Discard changes
+            </Button>
+            <span aria-live="polite">
+              <FormError error={save.error} />
+            </span>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
   );
 }

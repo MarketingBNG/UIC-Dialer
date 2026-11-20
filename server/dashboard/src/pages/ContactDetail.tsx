@@ -7,7 +7,17 @@ import { CONTACT_STATUS_LABEL, OUTCOME_LABEL, formatDuration, formatWhen, fromLo
 import { CallButton } from "../dialer";
 import { MessageCard } from "../components/MessageCard";
 import { OutcomeChip } from "../components/Outcomes";
-import { Badge, ContactStatusBadge, DirectionTag, ErrorBox, Modal, PageHeader, Spinner, StatusBadge, ViaTag } from "../ui";
+import { ArrowLeft, Ban, Save, StickyNote, Undo2 } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Textarea } from "@/components/ui/textarea";
+import { ContactStatusBadge, DirectionTag, ErrorBox, FormError, PageHeader, Spinner, StatusBadge, ViaTag } from "../ui";
 
 export function ContactDetailPage() {
   const { id = "" } = useParams();
@@ -19,9 +29,11 @@ export function ContactDetailPage() {
 
   return (
     <>
-      <Link to="/activity" className="mb-3 inline-block text-sm text-brand-700 hover:underline dark:text-brand-100">
-        ← Contacts
-      </Link>
+      <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2 text-muted-foreground">
+        <Link to="/activity">
+          <ArrowLeft /> Contacts
+        </Link>
+      </Button>
       <PageHeader
         title={contact.name || contact.phoneE164}
         subtitle={
@@ -30,21 +42,25 @@ export function ContactDetailPage() {
             {contact.company && <span>· {contact.company}</span>}
             {contact.city && <span>· {contact.city}</span>}
             <ContactStatusBadge status={contact.status} />
-            {contact.dnc && <Badge tone="red">Do not call</Badge>}
-            {contact.source && <Badge>{contact.source === "csv" ? "CSV import" : contact.source === "manual" ? "Manual lead" : contact.source}</Badge>}
+            {contact.dnc && <Badge variant="red">Do not call</Badge>}
+            {contact.source && <Badge variant="gray">{contact.source === "csv" ? "CSV import" : contact.source === "manual" ? "Manual lead" : contact.source}</Badge>}
           </span>
         }
         actions={
           <>
-            <CallButton phone={contact.phoneE164} label={contact.name || contact.phoneE164} className="btn-primary" dncReason={contact.dnc?.reason} dnc={!!contact.dnc} />
+            <CallButton variant="call" phone={contact.phoneE164} label={contact.name || contact.phoneE164} dncReason={contact.dnc?.reason} dnc={!!contact.dnc} />
             <DncAction contact={contact} />
           </>
         }
       />
       {contact.dnc && (
-        <p role="alert" className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-800 dark:bg-red-950 dark:text-red-200">
-          <strong>Do not call.</strong> This number is on the do-not-call list{contact.dnc.reason ? `: ${contact.dnc.reason}` : ""} (since {formatWhen(contact.dnc.createdAt)}).
-        </p>
+        <Alert variant="destructive" className="mb-4">
+          <Ban />
+          <AlertTitle>Do not call</AlertTitle>
+          <AlertDescription>
+            This number is on the do-not-call list{contact.dnc.reason ? `: ${contact.dnc.reason}` : ""} (since {formatWhen(contact.dnc.createdAt)}).
+          </AlertDescription>
+        </Alert>
       )}
       <div className="grid gap-4 lg:grid-cols-[22rem_1fr]">
         <div className="space-y-4">
@@ -95,58 +111,59 @@ function EditCard({ detail }: { detail: ContactDetail }) {
   };
 
   return (
-    <form onSubmit={submit} className="card space-y-3 p-4" aria-labelledby="edit-h">
+    <Card className="p-4">
+    <form onSubmit={submit} className="space-y-3" aria-labelledby="edit-h">
       <h2 id="edit-h" className="font-semibold">
         Details
       </h2>
       <div>
-        <label className="label" htmlFor="ct-name">
+        <Label htmlFor="ct-name">
           Name
-        </label>
-        <input id="ct-name" className="input" maxLength={200} value={name} onChange={(e) => setName(e.target.value)} />
+        </Label>
+        <Input id="ct-name" maxLength={200} value={name} onChange={(e) => setName(e.target.value)} />
       </div>
       <div>
-        <label className="label" htmlFor="ct-company">
+        <Label htmlFor="ct-company">
           Company
-        </label>
-        <input id="ct-company" className="input" maxLength={200} value={company} onChange={(e) => setCompany(e.target.value)} />
+        </Label>
+        <Input id="ct-company" maxLength={200} value={company} onChange={(e) => setCompany(e.target.value)} />
       </div>
       <div>
-        <label className="label" htmlFor="ct-city">
+        <Label htmlFor="ct-city">
           City
-        </label>
-        <input id="ct-city" className="input" maxLength={200} value={city} onChange={(e) => setCity(e.target.value)} />
+        </Label>
+        <Input id="ct-city" maxLength={200} value={city} onChange={(e) => setCity(e.target.value)} />
       </div>
       <div>
-        <label className="label" htmlFor="ct-status">
+        <Label htmlFor="ct-status">
           Status
-        </label>
-        <select id="ct-status" className="input" value={status} onChange={(e) => setStatus(e.target.value as ContactStatus)}>
+        </Label>
+        <NativeSelect id="ct-status" value={status} onChange={(e) => setStatus(e.target.value as ContactStatus)}>
           {(Object.keys(CONTACT_STATUS_LABEL) as ContactStatus[]).map((s) => (
             <option key={s} value={s}>
               {CONTACT_STATUS_LABEL[s]}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
       <div>
-        <label className="label" htmlFor="ct-fu">
+        <Label htmlFor="ct-fu">
           Next follow-up
-        </label>
-        <input id="ct-fu" type="datetime-local" className="input" value={followUp} onChange={(e) => setFollowUp(e.target.value)} />
-        {isOverdue(c.nextFollowUpAt) && <p className="hint font-medium text-red-600 dark:text-red-400">Overdue since {formatWhen(c.nextFollowUpAt)}</p>}
+        </Label>
+        <Input id="ct-fu" type="datetime-local" value={followUp} onChange={(e) => setFollowUp(e.target.value)} />
+        {isOverdue(c.nextFollowUpAt) && <p className="mt-1 text-xs text-muted-foreground font-medium text-destructive">Overdue since {formatWhen(c.nextFollowUpAt)}</p>}
         {followUp && (
-          <button type="button" className="hint underline" onClick={() => setFollowUp("")}>
+          <Button variant="link" size="sm" className="h-auto min-h-9 px-0 text-xs" onClick={() => setFollowUp("")}>
             Clear follow-up
-          </button>
+          </Button>
         )}
       </div>
       {manager ? (
         <div>
-          <label className="label" htmlFor="ct-owner">
+          <Label htmlFor="ct-owner">
             Owner
-          </label>
-          <select id="ct-owner" className="input" value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
+          </Label>
+          <NativeSelect id="ct-owner" value={ownerId} onChange={(e) => setOwnerId(e.target.value)}>
             {!ownerId && <option value="">No owner</option>}
             {c.owner && !owners?.some((u) => u.id === c.owner?.id) && <option value={c.owner.id}>{personName(c.owner)}</option>}
             {owners?.map((u) => (
@@ -154,20 +171,17 @@ function EditCard({ detail }: { detail: ContactDetail }) {
                 {personName(u)}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </div>
       ) : (
-        <p className="text-sm text-slate-500">Owner: {c.owner ? personName(c.owner) : "—"}</p>
+        <p className="text-sm text-muted-foreground">Owner: {c.owner ? personName(c.owner) : "—"}</p>
       )}
-      {save.isError && (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-          {save.error.message}
-        </p>
-      )}
-      <button type="submit" className="btn-primary w-full" disabled={save.isPending}>
-        {save.isPending ? "Saving…" : "Save"}
-      </button>
+      <FormError error={save.error} />
+      <Button type="submit" className="w-full" disabled={save.isPending}>
+        <Save /> {save.isPending ? "Saving…" : "Save details"}
+      </Button>
     </form>
+    </Card>
   );
 }
 
@@ -190,8 +204,9 @@ function NoteCard({ contactId }: { contactId: string }) {
     },
   });
   return (
+    <Card className="p-4">
     <form
-      className="card space-y-3 p-4"
+      className="space-y-3"
       aria-labelledby="note-h"
       onSubmit={(e) => {
         e.preventDefault();
@@ -202,27 +217,24 @@ function NoteCard({ contactId }: { contactId: string }) {
         Add a note
       </h2>
       <div>
-        <label className="sr-only" htmlFor="nt-text">
+        <Label className="sr-only" htmlFor="nt-text">
           Note
-        </label>
-        <textarea id="nt-text" className="input min-h-24 py-2" maxLength={2000} required value={note} onChange={(e) => setNote(e.target.value)} />
+        </Label>
+        <Textarea id="nt-text" className="min-h-24 py-2" maxLength={2000} required value={note} onChange={(e) => setNote(e.target.value)} />
       </div>
       <div>
-        <label className="label" htmlFor="nt-fu">
+        <Label htmlFor="nt-fu">
           Follow up on (optional)
-        </label>
-        <input id="nt-fu" type="datetime-local" className="input" value={followUp} onChange={(e) => setFollowUp(e.target.value)} />
-        <p className="hint">Setting a date marks the contact as Call back.</p>
+        </Label>
+        <Input id="nt-fu" type="datetime-local" value={followUp} onChange={(e) => setFollowUp(e.target.value)} />
+        <p className="mt-1 text-xs text-muted-foreground">Setting a date marks the contact as Call back.</p>
       </div>
-      {add.isError && (
-        <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-          {add.error.message}
-        </p>
-      )}
-      <button type="submit" className="btn-outline w-full" disabled={add.isPending || !note.trim()}>
-        {add.isPending ? "Adding…" : "Add note"}
-      </button>
+      <FormError error={add.error} />
+      <Button type="submit" variant="outline" className="w-full" disabled={add.isPending || !note.trim()}>
+        <StickyNote /> {add.isPending ? "Adding…" : "Add note"}
+      </Button>
     </form>
+    </Card>
   );
 }
 
@@ -270,93 +282,90 @@ function DncAction({ contact }: { contact: Contact }) {
     if (!isManager(me.role)) return null;
     return (
       <>
-        <button type="button" className="btn-outline" disabled={unmark.isPending} onClick={() => unmark.mutate()}>
-          {unmark.isPending ? "Removing…" : "Remove from DNC"}
-        </button>
-        {unmark.error && <span className="self-center text-sm text-red-600 dark:text-red-400">{unmark.error.message}</span>}
+        <Button variant="outline" disabled={unmark.isPending} onClick={() => unmark.mutate()}>
+          <Undo2 /> {unmark.isPending ? "Removing…" : "Remove from do-not-call"}
+        </Button>
+        {unmark.error && <span className="self-center text-sm text-destructive">{unmark.error.message}</span>}
       </>
     );
   }
   return (
     <>
-      <button type="button" className="btn-ghost" onClick={() => setOpen(true)}>
-        Mark do-not-call
-      </button>
-      <Modal
-        open={open}
-        title="Mark do-not-call?"
-        onClose={() => !mark.isPending && setOpen(false)}
-        footer={
-          <>
-            <button type="button" className="btn-ghost" disabled={mark.isPending} onClick={() => setOpen(false)}>
+      <Button variant="ghost" onClick={() => setOpen(true)}>
+        <Ban /> Mark do-not-call
+      </Button>
+      <Dialog open={open} onOpenChange={(o) => !mark.isPending && setOpen(o)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Mark do-not-call?</DialogTitle>
+            <DialogDescription>{contact.phoneE164} is taken off call lists and gets a warning before anyone dials it.</DialogDescription>
+          </DialogHeader>
+          <div>
+            <Label htmlFor="dnc-why">Reason (optional)</Label>
+            <Input id="dnc-why" maxLength={200} placeholder="Asked not to be called" value={reason} onChange={(e) => setReason(e.target.value)} />
+          </div>
+          <FormError error={mark.error} />
+          <DialogFooter>
+            <Button variant="outline" disabled={mark.isPending} onClick={() => setOpen(false)}>
               Cancel
-            </button>
-            <button type="button" className="btn-danger" disabled={mark.isPending} onClick={() => mark.mutate()}>
+            </Button>
+            <Button variant="destructive" disabled={mark.isPending} onClick={() => mark.mutate()}>
               {mark.isPending ? "Saving…" : "Mark do-not-call"}
-            </button>
-          </>
-        }
-      >
-        <p>{contact.phoneE164} is taken off call lists and gets a warning before anyone dials it.</p>
-        <label className="label mt-3" htmlFor="dnc-why">
-          Reason (optional)
-        </label>
-        <input id="dnc-why" className="input" maxLength={200} placeholder="Asked not to be called" value={reason} onChange={(e) => setReason(e.target.value)} />
-        {mark.error && (
-          <p role="alert" className="mt-2 text-red-600 dark:text-red-400">
-            {mark.error.message}
-          </p>
-        )}
-      </Modal>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
 
 function Timeline({ items }: { items: TimelineItem[] }) {
   return (
-    <section aria-labelledby="tl-h" className="card p-4">
+    <Card className="p-4">
+    <section aria-labelledby="tl-h">
       <h2 id="tl-h" className="mb-3 font-semibold">
         Timeline
       </h2>
       {items.length === 0 ? (
-        <p className="text-sm text-slate-500">Nothing yet.</p>
+        <p className="text-sm text-muted-foreground">Nothing yet. Calls, messages and notes for this number will show up here.</p>
       ) : (
         <ol className="space-y-3">
           {items.map((t) => (
-            <li key={`${t.kind}-${t.id}`} className="border-l-2 border-slate-200 pl-3 dark:border-slate-700">
+            <li key={`${t.kind}-${t.id}`} className="border-l-2 pl-3">
               {t.kind === "call" ? <CallEntry item={t} /> : <ActivityEntry item={t} />}
             </li>
           ))}
         </ol>
       )}
     </section>
+    </Card>
   );
 }
 
 function Meta({ when, user }: { when: string; user: { name: string | null; email: string } }) {
   return (
-    <div className="text-xs text-slate-500">
+    <div className="text-xs text-muted-foreground">
       {formatWhen(when)} · {personName(user)}
     </div>
   );
 }
 
 function Summary({ text }: { text: string | null }) {
-  return text ? <p className="mt-1 whitespace-pre-line text-sm text-slate-700 dark:text-slate-300">{text}</p> : null;
+  return text ? <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{text}</p> : null;
 }
 
 function CallEntry({ item }: { item: Extract<TimelineItem, { kind: "call" }> }) {
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2">
-        <Link to={`/calls/${item.id}`} className="font-medium text-brand-700 hover:underline dark:text-brand-100">
+        <Link to={`/calls/${item.id}`} className="font-medium text-primary hover:underline">
           Recorded call
         </Link>
         <DirectionTag direction={item.direction} />
         <ViaTag via={item.via} />
         <span className="text-sm tabular-nums">{formatDuration(item.durationS)}</span>
         <StatusBadge status={item.status} />
-        {!item.hasAudio && <Badge>No audio</Badge>}
+        {!item.hasAudio && <Badge variant="gray">No audio</Badge>}
       </div>
       <Meta when={item.startedAt} user={item.user} />
       <Summary text={item.summary} />
@@ -369,29 +378,29 @@ function ActivityEntry({ item }: { item: Extract<TimelineItem, { kind: "activity
     <div>
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium">{typeLabel(item)}</span>
-        {item.type === "WHATSAPP" && item.channel && <Badge tone={item.channel === "SMS" ? "blue" : "green"}>{item.channel === "SMS" ? "SMS" : "WhatsApp"}</Badge>}
+        {item.type === "WHATSAPP" && item.channel && <Badge variant={item.channel === "SMS" ? "blue" : "green"}>{item.channel === "SMS" ? "SMS" : "WhatsApp"}</Badge>}
         {item.outcome && item.outcomeLabel && <OutcomeChip label={item.outcomeLabel} color={item.outcomeColor} />}
-        {item.outcome && !item.outcomeLabel && <Badge tone={item.outcome === "INTERESTED" ? "green" : item.outcome === "NOT_INTERESTED" ? "red" : item.outcome === "NO_ANSWER" ? "amber" : "blue"}>{OUTCOME_LABEL[item.outcome]}</Badge>}
+        {item.outcome && !item.outcomeLabel && <Badge variant={item.outcome === "INTERESTED" ? "green" : item.outcome === "NOT_INTERESTED" ? "red" : item.outcome === "NO_ANSWER" ? "amber" : "blue"}>{OUTCOME_LABEL[item.outcome]}</Badge>}
         {item.type === "CALL" && item.durationS != null && <span className="text-sm tabular-nums">{formatDuration(item.durationS)}</span>}
         {item.type === "CALL" && <ViaTag via={item.via} />}
         {item.call && (
           <>
-            <Link to={`/calls/${item.call.id}`} className="text-sm text-brand-700 hover:underline dark:text-brand-100">
+            <Link to={`/calls/${item.call.id}`} className="text-sm text-primary hover:underline">
               Open recording
             </Link>
             <StatusBadge status={item.call.status} />
-            {!item.call.hasAudio && <Badge>No audio</Badge>}
+            {!item.call.hasAudio && <Badge variant="gray">No audio</Badge>}
           </>
         )}
         {!item.call && item.callId && (
-          <Link to={`/calls/${item.callId}`} className="text-sm text-brand-700 hover:underline dark:text-brand-100">
+          <Link to={`/calls/${item.callId}`} className="text-sm text-primary hover:underline">
             Open recording
           </Link>
         )}
       </div>
       <Meta when={item.occurredAt} user={item.user} />
       {item.note && <p className="mt-1 whitespace-pre-line text-sm">{item.note}</p>}
-      {item.followUpAt && <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">Follow up: {formatWhen(item.followUpAt)}</p>}
+      {item.followUpAt && <p className="mt-1 text-sm text-muted-foreground">Follow up: {formatWhen(item.followUpAt)}</p>}
       {item.call && <Summary text={item.call.summary} />}
     </div>
   );

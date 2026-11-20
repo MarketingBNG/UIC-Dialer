@@ -1,24 +1,41 @@
-import { useEffect, useRef, type ReactNode } from "react";
+/**
+ * App-level building blocks composed from shadcn/ui (src/components/ui). No hand-made primitives here:
+ * only domain helpers (status badges, page header, empty/error/loading states).
+ */
+import { AlertCircle, ArrowDownLeft, ArrowUpRight, Inbox, PhoneMissed, RotateCw } from "lucide-react";
+import { useId, type ReactNode } from "react";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 import type { CallStatus, ContactStatus, DialVia, Direction } from "./api";
 import { CONTACT_STATUS_LABEL, DIRECTION_LABEL, STATUS_LABEL, VIA_LABEL } from "./format";
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: ReactNode; actions?: ReactNode }) {
   return (
-    <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+    <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
       <div className="min-w-0">
-        <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{title}</h1>
-        {subtitle && <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">{subtitle}</p>}
+        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+        {subtitle && <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>}
       </div>
       {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </div>
   );
 }
 
-export function Spinner({ label = "Loading" }: { label?: string }) {
+/** Loading placeholder: shadcn Skeleton rows (screen readers hear the label). */
+export function Spinner({ label = "Loading", rows = 3 }: { label?: string; rows?: number }) {
   return (
-    <div role="status" className="flex items-center justify-center gap-3 py-10 text-sm text-slate-500">
-      <span className="size-5 animate-spin rounded-full border-2 border-slate-300 border-t-brand-600" aria-hidden />
-      {label}…
+    <div role="status" aria-live="polite" className="flex flex-col gap-3 py-4">
+      <span className="sr-only">{label}…</span>
+      {Array.from({ length: rows }, (_, i) => (
+        <Skeleton key={i} className={cn("h-12 w-full", i === rows - 1 && "w-2/3")} />
+      ))}
     </div>
   );
 }
@@ -26,31 +43,40 @@ export function Spinner({ label = "Loading" }: { label?: string }) {
 export function ErrorBox({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const msg = error instanceof Error ? error.message : "Something went wrong";
   return (
-    <div role="alert" className="card flex flex-wrap items-center justify-between gap-3 border-red-200 p-4 text-sm text-red-700 dark:border-red-900 dark:text-red-300">
-      <span>{msg}</span>
-      {onRetry && (
-        <button type="button" className="btn-outline" onClick={onRetry}>
-          Retry
-        </button>
-      )}
-    </div>
+    <Alert variant="destructive">
+      <AlertCircle />
+      <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+        <span>{msg}</span>
+        {onRetry && (
+          <Button variant="outline" size="sm" onClick={onRetry}>
+            <RotateCw /> Try again
+          </Button>
+        )}
+      </AlertDescription>
+    </Alert>
   );
 }
 
-export function Empty({ children }: { children: ReactNode }) {
-  return <p className="card p-8 text-center text-sm text-slate-500 dark:text-slate-400">{children}</p>;
+/** Empty state: say what's missing and, where possible, what to do next (pass an action button). */
+export function Empty({ children, action, icon }: { children: ReactNode; action?: ReactNode; icon?: ReactNode }) {
+  return (
+    <Card className="flex flex-col items-center gap-3 p-8 text-center text-sm text-muted-foreground">
+      <span aria-hidden className="grid size-10 place-items-center rounded-full bg-muted text-muted-foreground [&>svg]:size-5">
+        {icon ?? <Inbox />}
+      </span>
+      <div className="max-w-md">{children}</div>
+      {action}
+    </Card>
+  );
 }
 
-type Tone = "gray" | "green" | "amber" | "red" | "blue";
-const TONES: Record<Tone, string> = {
-  gray: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
-  green: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
-  amber: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
-  red: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
-  blue: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300",
-};
-export function Badge({ tone = "gray", children }: { tone?: Tone; children: ReactNode }) {
-  return <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${TONES[tone]}`}>{children}</span>;
+export type Tone = "gray" | "green" | "amber" | "red" | "blue";
+export function ToneBadge({ tone = "gray", children, className }: { tone?: Tone; children: ReactNode; className?: string }) {
+  return (
+    <Badge variant={tone} className={className}>
+      {children}
+    </Badge>
+  );
 }
 
 const STATUS_TONE: Record<CallStatus, Tone> = {
@@ -60,15 +86,18 @@ const STATUS_TONE: Record<CallStatus, Tone> = {
   TRANSCRIBED: "green",
   FAILED: "red",
 };
-export const StatusBadge = ({ status }: { status: CallStatus }) => <Badge tone={STATUS_TONE[status]}>{STATUS_LABEL[status]}</Badge>;
+export const StatusBadge = ({ status }: { status: CallStatus }) => <Badge variant={STATUS_TONE[status]}>{STATUS_LABEL[status]}</Badge>;
 
-const DIR_ICON: Record<Direction, string> = { INCOMING: "↙", OUTGOING: "↗", MISSED: "✕", UNKNOWN: "•" };
+const DIR_ICON: Record<Direction, ReactNode> = {
+  INCOMING: <ArrowDownLeft className="size-4" />,
+  OUTGOING: <ArrowUpRight className="size-4" />,
+  MISSED: <PhoneMissed className="size-4" />,
+  UNKNOWN: null,
+};
 export function DirectionTag({ direction }: { direction: Direction }) {
   return (
-    <span className={`inline-flex items-center gap-1 whitespace-nowrap text-sm ${direction === "MISSED" ? "text-red-600 dark:text-red-400" : ""}`}>
-      <span aria-hidden className="font-mono">
-        {DIR_ICON[direction]}
-      </span>
+    <span className={cn("inline-flex items-center gap-1 whitespace-nowrap text-sm", direction === "MISSED" && "text-destructive")}>
+      <span aria-hidden>{DIR_ICON[direction]}</span>
       {DIRECTION_LABEL[direction]}
     </span>
   );
@@ -77,53 +106,66 @@ export function DirectionTag({ direction }: { direction: Direction }) {
 /** "via laptop" / "via app" / "via phone dialer"; nothing when unknown. */
 export function ViaTag({ via }: { via: DialVia | null | undefined }) {
   if (!via) return null;
-  return <Badge tone={via === "LAPTOP" ? "blue" : via === "APP" ? "green" : "gray"}>{VIA_LABEL[via]}</Badge>;
+  return <Badge variant={via === "LAPTOP" ? "blue" : via === "APP" ? "green" : "gray"}>{VIA_LABEL[via]}</Badge>;
 }
 
-/** Modal built on <dialog>: focus trap, Esc to close and backdrop come from the browser. */
-export function Modal({
-  open,
-  title,
-  onClose,
-  children,
-  footer,
-}: {
-  open: boolean;
-  title: string;
-  onClose: () => void;
-  children: ReactNode;
-  footer: ReactNode;
-}) {
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const d = ref.current;
-    if (!d) return;
-    if (open && !d.open) d.showModal();
-    if (!open && d.open) d.close();
-  }, [open]);
+/** AI call score out of 100: green 75+, amber 50+, red below. */
+export const ScorePill = ({ score }: { score: number }) => (
+  <Badge variant={score >= 75 ? "green" : score >= 50 ? "amber" : "red"}>
+    <span className="tabular-nums">{score}</span>
+    <span className="sr-only"> out of 100</span>
+  </Badge>
+);
+
+const CONTACT_TONE: Record<ContactStatus, Tone> = {
+  NEW: "gray",
+  INTERESTED: "green",
+  CALL_BACK: "blue",
+  NOT_INTERESTED: "red",
+  NO_ANSWER: "amber",
+};
+export const ContactStatusBadge = ({ status }: { status: ContactStatus }) => <Badge variant={CONTACT_TONE[status]}>{CONTACT_STATUS_LABEL[status]}</Badge>;
+
+/** Error line under a form or inside a dialog. */
+export function FormError({ error }: { error: unknown }) {
+  if (error == null) return null;
   return (
-    <dialog
-      ref={ref}
-      onCancel={(e) => {
-        e.preventDefault();
-        onClose();
-      }}
-      aria-labelledby="modal-title"
-      className="m-auto w-[min(32rem,calc(100vw-2rem))] rounded-xl border border-slate-200 bg-white p-0 text-slate-900 shadow-xl backdrop:bg-black/50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-    >
-      {open && (
-        <div className="flex max-h-[85dvh] flex-col">
-          <h2 id="modal-title" className="px-5 pt-5 text-lg font-semibold">
-            {title}
-          </h2>
-          <div className="overflow-y-auto px-5 py-4 text-sm">{children}</div>
-          <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 px-5 py-3 dark:border-slate-800">{footer}</div>
-        </div>
-      )}
-    </dialog>
+    <p role="alert" className="text-sm text-destructive">
+      {error instanceof Error ? error.message : String(error || "Failed")}
+    </p>
   );
 }
 
+/** Small helper text under a field. */
+export function Hint({ children, className, id }: { children: ReactNode; className?: string; id?: string }) {
+  return (
+    <p id={id} className={cn("mt-1 text-xs text-muted-foreground", className)}>
+      {children}
+    </p>
+  );
+}
+
+/** Switch with a label and optional hint, as one 44px row. */
+export function SwitchRow({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
+  const id = useId();
+  return (
+    <div className="flex items-start justify-between gap-4 py-3">
+      <div>
+        <Label htmlFor={id} className="mb-0 cursor-pointer">
+          {label}
+        </Label>
+        {hint && (
+          <p id={`${id}-hint`} className="mt-1 text-xs text-muted-foreground">
+            {hint}
+          </p>
+        )}
+      </div>
+      <Switch id={id} className="mt-0.5" aria-describedby={hint ? `${id}-hint` : undefined} checked={checked} onCheckedChange={onChange} />
+    </div>
+  );
+}
+
+/** Destructive confirm built on AlertDialog (stays open while busy; shows the error). */
 export function ConfirmDialog({
   open,
   title,
@@ -144,56 +186,28 @@ export function ConfirmDialog({
   onClose: () => void;
 }) {
   return (
-    <Modal
-      open={open}
-      title={title}
-      onClose={() => !busy && onClose()}
-      footer={
-        <>
-          <button type="button" className="btn-ghost" disabled={busy} onClick={onClose}>
-            Cancel
-          </button>
-          <button type="button" className="btn-danger" disabled={busy} onClick={onConfirm}>
+    <AlertDialog open={open} onOpenChange={(o) => !o && !busy && onClose()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div>{body}</div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <FormError error={error} />
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={busy}
+            onClick={(e) => {
+              e.preventDefault();
+              onConfirm();
+            }}
+          >
             {busy ? "Working…" : confirmLabel}
-          </button>
-        </>
-      }
-    >
-      <div>{body}</div>
-      {error != null && (
-        <p role="alert" className="mt-3 text-red-600 dark:text-red-400">
-          {error instanceof Error ? error.message : "Failed"}
-        </p>
-      )}
-    </Modal>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
-
-export function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: (v: boolean) => void; label: string; hint?: string }) {
-  return (
-    <label className="flex cursor-pointer items-start justify-between gap-4 py-2">
-      <span>
-        <span className="block text-sm font-medium">{label}</span>
-        {hint && <span className="hint block">{hint}</span>}
-      </span>
-      <input type="checkbox" role="switch" className="mt-1 size-5 shrink-0 accent-brand-600" checked={checked} onChange={(e) => onChange(e.target.checked)} />
-    </label>
-  );
-}
-
-/** AI call score out of 100: green 75+, amber 50+, red below. */
-export const ScorePill = ({ score }: { score: number }) => (
-  <Badge tone={score >= 75 ? "green" : score >= 50 ? "amber" : "red"}>
-    <span className="tabular-nums">{score}</span>
-    <span className="sr-only"> out of 100</span>
-  </Badge>
-);
-
-const CONTACT_TONE: Record<ContactStatus, Tone> = {
-  NEW: "gray",
-  INTERESTED: "green",
-  CALL_BACK: "blue",
-  NOT_INTERESTED: "red",
-  NO_ANSWER: "amber",
-};
-export const ContactStatusBadge = ({ status }: { status: ContactStatus }) => <Badge tone={CONTACT_TONE[status]}>{CONTACT_STATUS_LABEL[status]}</Badge>;

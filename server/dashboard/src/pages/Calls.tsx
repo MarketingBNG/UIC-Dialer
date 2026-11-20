@@ -4,6 +4,13 @@ import { Link, useSearchParams } from "react-router";
 import { api, isManager, qs, type CallPage, type CallStatus, type Direction, type User } from "../api";
 import { useMe } from "../App";
 import { DIRECTION_LABEL, STATUS_LABEL, formatDuration, formatShortWhen, personName } from "../format";
+import { Download, PhoneCall, Search, SlidersHorizontal, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DirectionTag, Empty, ErrorBox, PageHeader, ScorePill, Spinner, StatusBadge, ViaTag } from "../ui";
 
 const FILTER_KEYS = ["q", "phone", "userId", "direction", "status", "from", "to"] as const;
@@ -88,113 +95,119 @@ export function CallsPage() {
     <>
       <PageHeader title="Calls" subtitle={me.role === "ADMIN" ? "All recorded calls" : me.role === "MANAGER" && me.team ? `Calls from team ${me.team}` : "Your recorded calls"} />
 
-      <div className="card mb-4 p-3 sm:p-4">
-        <div className="flex gap-2">
-          <label className="sr-only" htmlFor="q">
+      <Card className="mb-4 p-3 sm:p-4">
+        <div className="flex flex-wrap gap-2">
+          <Label className="sr-only" htmlFor="q">
             Search transcripts or phone
-          </label>
-          <input id="q" type="search" className="input" placeholder="Search transcripts or phone" value={q} onChange={(e) => setQ(e.target.value)} />
-          <button type="button" className="btn-outline shrink-0" aria-expanded={showFilters} aria-controls="filters" onClick={() => setShowFilters((s) => !s)}>
-            Filters{activeCount ? ` (${activeCount})` : ""}
-          </button>
+          </Label>
+          <div className="relative min-w-48 flex-1">
+            <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input id="q" type="search" className="min-h-11 pl-9" placeholder="Search transcripts or phone" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <Button variant="outline" className="min-h-11 shrink-0" aria-expanded={showFilters} aria-controls="filters" onClick={() => setShowFilters((s) => !s)}>
+            <SlidersHorizontal /> Filters{activeCount ? ` (${activeCount})` : ""}
+          </Button>
           {manager && (
             // Same filters as the list; the server caps the file at 10,000 calls and audit-logs the export.
-            <a className="btn-outline shrink-0" href={`/api/calls/export${qs(filters)}`} download>
-              Export CSV
-            </a>
+            <Button asChild variant="outline" className="min-h-11 shrink-0">
+              <a href={`/api/calls/export${qs(filters)}`} download>
+                <Download /> Export CSV
+              </a>
+            </Button>
           )}
         </div>
         {showFilters && (
           <div id="filters" className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <div>
-              <label className="label" htmlFor="f-phone">
-                Phone number
-              </label>
-              <input id="f-phone" className="input" inputMode="tel" placeholder="Any part of the number" value={phone} onChange={(e) => setPhone(e.target.value)} />
+              <Label htmlFor="f-phone">Phone number</Label>
+              <Input id="f-phone" inputMode="tel" placeholder="Any part of the number" value={phone} onChange={(e) => setPhone(e.target.value)} />
             </div>
             {manager && (
               <div>
-                <label className="label" htmlFor="f-user">
-                  Person
-                </label>
-                <select id="f-user" className="input" value={get("userId")} onChange={(e) => set("userId", e.target.value)}>
+                <Label htmlFor="f-user">Person</Label>
+                <NativeSelect id="f-user" value={get("userId")} onChange={(e) => set("userId", e.target.value)}>
                   <option value="">Everyone</option>
                   {users.data?.map((u) => (
                     <option key={u.id} value={u.id}>
                       {personName(u)}
                     </option>
                   ))}
-                </select>
+                </NativeSelect>
               </div>
             )}
             <div>
-              <label className="label" htmlFor="f-dir">
-                Direction
-              </label>
-              <select id="f-dir" className="input" value={get("direction")} onChange={(e) => set("direction", e.target.value)}>
+              <Label htmlFor="f-dir">Direction</Label>
+              <NativeSelect id="f-dir" value={get("direction")} onChange={(e) => set("direction", e.target.value)}>
                 <option value="">All directions</option>
                 {(Object.keys(DIRECTION_LABEL) as Direction[]).map((d) => (
                   <option key={d} value={d}>
                     {DIRECTION_LABEL[d]}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
             <div>
-              <label className="label" htmlFor="f-status">
-                Status
-              </label>
-              <select id="f-status" className="input" value={get("status")} onChange={(e) => set("status", e.target.value)}>
+              <Label htmlFor="f-status">Status</Label>
+              <NativeSelect id="f-status" value={get("status")} onChange={(e) => set("status", e.target.value)}>
                 <option value="">Any status</option>
                 {(Object.keys(STATUS_LABEL) as CallStatus[]).map((s) => (
                   <option key={s} value={s}>
                     {STATUS_LABEL[s]}
                   </option>
                 ))}
-              </select>
+              </NativeSelect>
             </div>
             <div>
-              <label className="label" htmlFor="f-from">
-                From
-              </label>
-              <input id="f-from" type="date" className="input" value={get("from")} max={get("to") || undefined} onChange={(e) => set("from", e.target.value)} />
+              <Label htmlFor="f-from">From</Label>
+              <Input id="f-from" type="date" value={get("from")} max={get("to") || undefined} onChange={(e) => set("from", e.target.value)} />
             </div>
             <div>
-              <label className="label" htmlFor="f-to">
-                To
-              </label>
-              <input id="f-to" type="date" className="input" value={get("to")} min={get("from") || undefined} onChange={(e) => set("to", e.target.value)} />
+              <Label htmlFor="f-to">To</Label>
+              <Input id="f-to" type="date" value={get("to")} min={get("from") || undefined} onChange={(e) => set("to", e.target.value)} />
             </div>
             <div className="flex items-end">
-              <button type="button" className="btn-ghost" onClick={clear}>
-                Clear all
-              </button>
+              <Button variant="ghost" className="min-h-11" onClick={clear}>
+                <X /> Clear all
+              </Button>
             </div>
           </div>
         )}
-      </div>
+      </Card>
 
       {calls.isPending ? (
         <Spinner label="Loading calls" />
       ) : calls.isError ? (
         <ErrorBox error={calls.error} onRetry={() => void calls.refetch()} />
       ) : items.length === 0 ? (
-        <Empty>{activeCount || filters.q ? "No calls match these filters." : "No calls yet. They appear here once the phone app uploads them."}</Empty>
+        activeCount || filters.q ? (
+          <Empty
+            icon={<Search />}
+            action={
+              <Button variant="outline" className="min-h-11" onClick={clear}>
+                <X /> Clear filters
+              </Button>
+            }
+          >
+            No calls match these filters. Try a wider date range or clear the filters.
+          </Empty>
+        ) : (
+          <Empty icon={<PhoneCall />}>No calls yet. Make a call from Today; it shows up here once the phone app uploads the recording.</Empty>
+        )
       ) : (
         <>
           {/* Phones: one card per call */}
           <ul className="space-y-2 md:hidden">
             {items.map((c) => (
               <li key={c.id}>
-                <Link to={`/calls/${c.id}`} className="card block p-3 active:bg-slate-50 dark:active:bg-slate-800">
+                <Link to={`/calls/${c.id}`} className="block rounded-xl border bg-card p-3 shadow-sm active:bg-muted">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="truncate font-medium">{c.contactName || c.phoneE164 || c.phoneRaw || "Unknown number"}</div>
-                      {c.contactName && <div className="truncate text-sm text-slate-500">{c.phoneE164 || c.phoneRaw}</div>}
+                      {c.contactName && <div className="truncate text-sm text-muted-foreground">{c.phoneE164 || c.phoneRaw}</div>}
                     </div>
                     <StatusBadge status={c.status} />
                   </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-600 dark:text-slate-400">
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                     <DirectionTag direction={c.direction} />
                     <ViaTag via={c.via} />
                     <span>{formatShortWhen(c.startedAt)}</span>
@@ -208,72 +221,60 @@ export function CallsPage() {
           </ul>
 
           {/* Larger screens: table */}
-          <div className="card hidden overflow-x-auto md:block">
-            <table className="w-full text-left text-sm">
-              <thead className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500 dark:border-slate-800">
-                <tr>
-                  <th scope="col" className="px-4 py-3 font-medium">
-                    Contact
-                  </th>
-                  <th scope="col" className="px-4 py-3 font-medium">
-                    Direction
-                  </th>
-                  <th scope="col" className="px-4 py-3 font-medium">
-                    When
-                  </th>
-                  <th scope="col" className="px-4 py-3 text-right font-medium">
+          <Card className="hidden overflow-hidden md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col">Contact</TableHead>
+                  <TableHead scope="col">Direction</TableHead>
+                  <TableHead scope="col">When</TableHead>
+                  <TableHead scope="col" className="text-right">
                     Duration
-                  </th>
-                  {manager && (
-                    <th scope="col" className="px-4 py-3 font-medium">
-                      Person
-                    </th>
-                  )}
-                  <th scope="col" className="px-4 py-3 font-medium">
-                    Status
-                  </th>
+                  </TableHead>
+                  {manager && <TableHead scope="col">Person</TableHead>}
+                  <TableHead scope="col">Status</TableHead>
                   {hasScores && (
-                    <th scope="col" className="px-4 py-3 text-right font-medium">
+                    <TableHead scope="col" className="text-right">
                       Score
-                    </th>
+                    </TableHead>
                   )}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {items.map((c) => (
-                  <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
-                    <td className="px-4 py-3">
-                      <Link to={`/calls/${c.id}`} className="font-medium text-brand-700 hover:underline dark:text-brand-100">
+                  <TableRow key={c.id}>
+                    <TableCell>
+                      <Link to={`/calls/${c.id}`} className="font-medium text-primary hover:underline">
                         {c.contactName || c.phoneE164 || c.phoneRaw || "Unknown number"}
                       </Link>
-                      {c.contactName && <div className="text-xs text-slate-500">{c.phoneE164 || c.phoneRaw}</div>}
-                    </td>
-                    <td className="px-4 py-3">
+                      {c.contactName && <div className="text-xs text-muted-foreground">{c.phoneE164 || c.phoneRaw}</div>}
+                    </TableCell>
+                    <TableCell>
                       <div className="flex flex-wrap items-center gap-1.5">
                         <DirectionTag direction={c.direction} />
                         <ViaTag via={c.via} />
                       </div>
-                    </td>
-                    <td className="whitespace-nowrap px-4 py-3">{formatShortWhen(c.startedAt)}</td>
-                    <td className="px-4 py-3 text-right tabular-nums">{formatDuration(c.durationS)}</td>
-                    {manager && <td className="max-w-48 truncate px-4 py-3">{personName(c.user)}</td>}
-                    <td className="px-4 py-3">
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">{formatShortWhen(c.startedAt)}</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatDuration(c.durationS)}</TableCell>
+                    {manager && <TableCell className="max-w-48 truncate">{personName(c.user)}</TableCell>}
+                    <TableCell>
                       <StatusBadge status={c.status} />
-                    </td>
-                    {hasScores && <td className="px-4 py-3 text-right tabular-nums">{c.score != null ? <ScorePill score={c.score} /> : "—"}</td>}
-                  </tr>
+                    </TableCell>
+                    {hasScores && <TableCell className="text-right tabular-nums">{c.score != null ? <ScorePill score={c.score} /> : "—"}</TableCell>}
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
+          </Card>
 
           <div className="mt-4 flex justify-center">
             {calls.hasNextPage ? (
-              <button type="button" className="btn-outline" disabled={calls.isFetchingNextPage} onClick={loadMore}>
-                {calls.isFetchingNextPage ? "Loading…" : "Load more"}
-              </button>
+              <Button variant="outline" className="min-h-11" disabled={calls.isFetchingNextPage} onClick={loadMore}>
+                {calls.isFetchingNextPage ? "Loading…" : "Load more calls"}
+              </Button>
             ) : (
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-muted-foreground">
                 {items.length} call{items.length === 1 ? "" : "s"}
               </p>
             )}

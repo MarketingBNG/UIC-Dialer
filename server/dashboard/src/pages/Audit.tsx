@@ -3,7 +3,13 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { api, type AuditAction, type AuditEntry, type AuditPage as Page } from "../api";
 import { formatWhen } from "../format";
-import { Badge, Empty, ErrorBox, PageHeader, Spinner } from "../ui";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Empty, ErrorBox, PageHeader, Spinner } from "../ui";
 
 export const AUDIT_LABELS: Record<AuditAction, string> = {
   PLAY: "Played",
@@ -72,47 +78,61 @@ export function AuditPage() {
     <>
       <PageHeader title="Audit log" subtitle="Who played, downloaded, searched or changed what. Newest first." />
       <div className="mb-4 max-w-xs">
-        <label className="label" htmlFor="audit-action">
-          Action
-        </label>
-        <select id="audit-action" className="input" value={action} onChange={(e) => setAction(e.target.value as AuditAction | "")}>
+        <Label htmlFor="audit-action">Show</Label>
+        <NativeSelect id="audit-action" value={action} onChange={(e) => setAction(e.target.value as AuditAction | "")}>
           <option value="">All actions</option>
           {(Object.keys(AUDIT_LABELS) as AuditAction[]).map((a) => (
             <option key={a} value={a}>
               {AUDIT_LABELS[a]}
             </option>
           ))}
-        </select>
+        </NativeSelect>
       </div>
       {log.isPending ? (
         <Spinner label="Loading audit log" />
       ) : log.isError && items.length === 0 ? (
         <ErrorBox error={log.error} onRetry={() => void log.refetch()} />
       ) : items.length === 0 ? (
-        <Empty>No entries.</Empty>
+        <Empty>{action ? "Nothing of this kind yet. Choose All actions to see everything." : "Nothing has been logged yet. Entries appear here when someone plays, downloads or changes something."}</Empty>
       ) : (
         <>
-          <ul className="card divide-y divide-slate-100 dark:divide-slate-800">
-            {items.map((e) => (
-              <li key={e.id} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 p-3 text-sm">
-                <span className="w-40 shrink-0 text-slate-500 tabular-nums">{formatWhen(e.createdAt)}</span>
-                <Badge tone={e.action === "DELETE" || e.action === "RETENTION_DELETE" ? "red" : e.action === "DOWNLOAD" ? "amber" : "gray"}>
-                  {AUDIT_LABELS[e.action as AuditAction] ?? e.action}
-                </Badge>
-                <span className="font-medium">{e.user ? e.user.name || e.user.email : "System"}</span>
-                {e.callId && (
-                  <Link className="text-brand-700 underline dark:text-brand-300" to={`/calls/${e.callId}`}>
-                    Call
-                  </Link>
-                )}
-                <span className="min-w-0 flex-1 break-all text-slate-500">{auditSummary(e)}</span>
-              </li>
-            ))}
-          </ul>
+          <Card className="overflow-hidden p-0">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>When</TableHead>
+                  <TableHead>What</TableHead>
+                  <TableHead>Who</TableHead>
+                  <TableHead>Details</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {items.map((e) => (
+                  <TableRow key={e.id}>
+                    <TableCell className="whitespace-nowrap text-muted-foreground tabular-nums">{formatWhen(e.createdAt)}</TableCell>
+                    <TableCell>
+                      <Badge variant={e.action === "DELETE" || e.action === "RETENTION_DELETE" ? "red" : e.action === "DOWNLOAD" ? "amber" : "gray"}>
+                        {AUDIT_LABELS[e.action as AuditAction] ?? e.action}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="font-medium">{e.user ? e.user.name || e.user.email : "System"}</TableCell>
+                    <TableCell className="min-w-48 break-all text-muted-foreground">
+                      {e.callId && (
+                        <Link className="mr-2 text-primary underline" to={`/calls/${e.callId}`}>
+                          Open call
+                        </Link>
+                      )}
+                      {auditSummary(e)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </Card>
           {log.hasNextPage && (
-            <button type="button" className="btn-outline mt-4 w-full" disabled={log.isFetchingNextPage} onClick={() => void log.fetchNextPage()}>
+            <Button variant="outline" className="mt-4 w-full" disabled={log.isFetchingNextPage} onClick={() => void log.fetchNextPage()}>
               {log.isFetchingNextPage ? "Loading…" : "Load more"}
-            </button>
+            </Button>
           )}
           {log.isFetchNextPageError && <ErrorBox error={log.error} />}
         </>

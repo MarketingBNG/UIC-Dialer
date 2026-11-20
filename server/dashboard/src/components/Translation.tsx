@@ -1,8 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { api, type CostSettingsPatch, type TranslationUsage } from "../api";
+import { Save } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { useMe } from "../App";
-import { Badge, ErrorBox, Spinner, Toggle } from "../ui";
+import { ErrorBox, Spinner, SwitchRow } from "../ui";
 
 const KEY = ["translation"];
 const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -12,7 +19,7 @@ export function TranslationPanel() {
   const me = useMe();
   const usage = useQuery({ queryKey: KEY, queryFn: () => api<TranslationUsage>("/api/translation/usage"), refetchInterval: 60_000 });
   return (
-    <section id="translation" className="card mb-4 scroll-mt-20 p-4 sm:p-6">
+    <Card id="translation" className="mb-4 scroll-mt-20 p-4 sm:p-6">
       {usage.isPending ? (
         <Spinner label="Loading translation spend" />
       ) : usage.isError ? (
@@ -23,7 +30,7 @@ export function TranslationPanel() {
           {me.role === "ADMIN" && <AdminForm key={`${usage.data.budgetUsd}|${usage.data.sarvamOverflow}`} u={usage.data} />}
         </>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -35,8 +42,8 @@ function Usage({ u }: { u: TranslationUsage }) {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="font-semibold">Translation spend this month · {u.month}</h2>
         <div className="flex flex-wrap gap-1">
-          {u.capped && <Badge tone="red">Cap reached: translations paused</Badge>}
-          {u.queuedJobs > 0 && <Badge tone="amber">{u.queuedJobs} waiting</Badge>}
+          {u.capped && <Badge variant="red">Cap reached: translations paused</Badge>}
+          {u.queuedJobs > 0 && <Badge variant="amber">{u.queuedJobs} waiting</Badge>}
         </div>
       </div>
       <div className="mt-3 flex items-baseline justify-between text-sm">
@@ -46,7 +53,7 @@ function Usage({ u }: { u: TranslationUsage }) {
         <span className="font-medium tabular-nums">{u.pct}% used</span>
       </div>
       <div
-        className="relative mt-2 h-3 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800"
+        className="relative mt-2 h-3 overflow-hidden rounded-full bg-slate-200"
         role="progressbar"
         aria-label="Claude translation spend"
         aria-valuemin={0}
@@ -56,17 +63,17 @@ function Usage({ u }: { u: TranslationUsage }) {
         <div className={`absolute inset-y-0 left-0 ${tone}`} style={{ width: `${bar}%` }} />
       </div>
       <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-4">
-        <dt className="text-slate-500">Calls translated</dt>
+        <dt className="text-muted-foreground">Calls translated</dt>
         <dd className="tabular-nums">{u.translatedThisMonth}</dd>
         {u.summarizedThisMonth !== undefined && (
           <>
-            <dt className="text-slate-500">Calls summarized</dt>
+            <dt className="text-muted-foreground">Calls summarized</dt>
             <dd className="tabular-nums">{u.summarizedThisMonth}</dd>
           </>
         )}
-        <dt className="text-slate-500">Average per call</dt>
+        <dt className="text-muted-foreground">Average per call</dt>
         <dd className="tabular-nums">{u.avgCostUsd === null ? "-" : `$${u.avgCostUsd.toFixed(4)}`}</dd>
-        <dt className="text-slate-500">Sarvam overflow</dt>
+        <dt className="text-muted-foreground">Sarvam overflow</dt>
         <dd>{u.sarvamOverflow ? "On" : "Off"}</dd>
       </dl>
     </div>
@@ -96,7 +103,7 @@ function AdminForm({ u }: { u: TranslationUsage }) {
 
   return (
     <form
-      className="mt-5 space-y-4 border-t border-slate-200 pt-4 dark:border-slate-800"
+      className="mt-5 space-y-4 border-t border-slate-200 pt-4"
       onSubmit={(e) => {
         e.preventDefault();
         if (budgetOk && dirty) save.mutate(patch);
@@ -104,13 +111,13 @@ function AdminForm({ u }: { u: TranslationUsage }) {
     >
       <h3 className="font-semibold">Cost settings</h3>
       <div className="max-w-xs">
-        <label className="label" htmlFor="tr-budget">
+        <Label htmlFor="tr-budget">
           Claude monthly cap (USD)
-        </label>
-        <input
+        </Label>
+        <Input
           id="tr-budget"
           inputMode="decimal"
-          className="input"
+          
           value={budget}
           onChange={(e) => {
             setSaved(false);
@@ -119,11 +126,11 @@ function AdminForm({ u }: { u: TranslationUsage }) {
           aria-invalid={!budgetOk}
           aria-describedby="tr-budget-hint"
         />
-        <p id="tr-budget-hint" className={`hint ${budgetOk ? "" : "text-red-600 dark:text-red-400"}`}>
+        <p id="tr-budget-hint" className={`mt-1 text-xs text-muted-foreground ${budgetOk ? "" : "text-destructive"}`}>
           English translations wait once this month's spend reaches the cap. Jobs already started still finish, so spend can go a little over (one batch per running worker).
         </p>
       </div>
-      <Toggle
+      <SwitchRow
         checked={overflow}
         onChange={(v) => {
           setSaved(false);
@@ -132,15 +139,17 @@ function AdminForm({ u }: { u: TranslationUsage }) {
         label="Send overflow backlog to Sarvam"
         hint="When the Fireflies monthly budget is used up, a Sarvam worker (if one is running) transcribes waiting backlog calls. Paid per minute."
       />
-      <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-4 dark:border-slate-800">
-        <button type="submit" className="btn-primary" disabled={!dirty || !budgetOk || save.isPending}>
-          {save.isPending ? "Saving…" : "Save"}
-        </button>
+      <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-4">
+        <Button type="submit" className="min-h-11" disabled={!dirty || !budgetOk || save.isPending}>
+          <Save /> {save.isPending ? "Saving…" : "Save changes"}
+        </Button>
         <span aria-live="polite" className="text-sm">
-          {saved && !dirty && <span className="text-emerald-700 dark:text-emerald-400">Saved.</span>}
-          {save.error && <span className="text-red-600 dark:text-red-400">{save.error.message}</span>}
+          {saved && !dirty && <span className="text-emerald-700">Saved.</span>}
+          {save.error && <span className="text-destructive">{save.error.message}</span>}
         </span>
       </div>
     </form>
   );
 }
+
+/** A labelled shadcn Switch with helper text. */

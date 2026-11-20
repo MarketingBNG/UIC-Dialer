@@ -1,7 +1,11 @@
-import { useMutation } from "@tanstack/react-query";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { Sparkles } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { api, type Features } from "../../api";
 import { PrivacyPanel } from "../../components/Privacy";
+import { FormError } from "../../ui";
 
 /** Recording retention in days (+ optional transcript deletion) and PII masking; also the AI score backfill. */
 export function RetentionTab() {
@@ -15,21 +19,27 @@ export function RetentionTab() {
 
 function ScoreBackfill() {
   const features = useQuery({ queryKey: ["features"], queryFn: () => api<Features>("/api/features"), staleTime: 5 * 60_000 });
-  const run = useMutation({ mutationFn: () => api<{ queued: number }>("/api/admin/score-backfill", { method: "POST", body: {} }) });
+  const run = useMutation({
+    mutationFn: () => api<{ queued: number }>("/api/admin/score-backfill", { method: "POST", body: {} }),
+    onSuccess: (r) => toast.success(`${r.queued} calls queued for scoring.`),
+  });
   if (!features.data?.scoring) return null;
   return (
-    <section className="card mt-4 p-4 sm:p-6">
-      <h2 className="font-semibold">AI call scoring</h2>
-      <p className="hint">Scores are made for new summarised calls. Backfill queues a score for summarised calls that don't have one yet; it counts toward the monthly AI budget.</p>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <button type="button" className="btn-outline" disabled={run.isPending} onClick={() => run.mutate()}>
+    <Card className="mt-4">
+      <CardHeader>
+        <CardTitle>AI call scoring</CardTitle>
+        <CardDescription>Scores are made for new summarised calls. Backfill queues a score for summarised calls that don't have one yet; it counts toward the monthly AI budget.</CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-wrap items-center gap-2">
+        <Button variant="outline" disabled={run.isPending} onClick={() => run.mutate()}>
+          <Sparkles aria-hidden />
           {run.isPending ? "Queuing…" : "Score older calls"}
-        </button>
+        </Button>
         <span aria-live="polite" className="text-sm">
-          {run.data && <span className="text-emerald-700 dark:text-emerald-400">{run.data.queued} calls queued.</span>}
-          {run.error && <span className="text-red-600 dark:text-red-400">{run.error.message}</span>}
+          {run.data && <span className="text-emerald-700">{run.data.queued} calls queued.</span>}
+          <FormError error={run.error} />
         </span>
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   );
 }

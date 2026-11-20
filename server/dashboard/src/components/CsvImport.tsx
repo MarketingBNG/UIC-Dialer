@@ -1,7 +1,14 @@
 import { useMutation } from "@tanstack/react-query";
 import { useState } from "react";
 import { api, type ImportMapping, type ImportPreview, type ImportResult } from "../api";
-import { Badge } from "../ui";
+import { FileSpreadsheet } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { NativeSelect } from "@/components/ui/native-select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { FormError, Hint } from "../ui";
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const FIELDS: { key: keyof ImportMapping; label: string }[] = [
@@ -69,53 +76,52 @@ export function CsvImportView({ state }: { state: CsvImportState }) {
   return (
     <div className="space-y-3">
       <div>
-        <label className="btn-outline cursor-pointer">
-          {fileName ? "Choose another file" : "Choose CSV file"}
-          <input
-            type="file"
-            accept=".csv,.txt,text/csv,text/plain"
-            className="sr-only"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) void state.pick(f);
-              e.target.value = "";
-            }}
-          />
-        </label>
-        {fileName && <span className="ml-2 text-sm text-slate-500">{fileName}</span>}
-        <p className="hint">Columns named Name, Phone, Company and City are matched automatically. Up to 20 000 rows.</p>
+        <Label htmlFor="csv-file">{fileName ? "Choose another CSV file" : "CSV file"}</Label>
+        <Input
+          id="csv-file"
+          type="file"
+          accept=".csv,.txt,text/csv,text/plain"
+          className="cursor-pointer py-2"
+          aria-describedby="csv-file-hint"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void state.pick(f);
+            e.target.value = "";
+          }}
+        />
+        {fileName && (
+          <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+            <FileSpreadsheet className="size-4" aria-hidden /> {fileName}
+          </p>
+        )}
+        <Hint id="csv-file-hint">Columns named Name, Phone, Company and City are matched automatically. Up to 20 000 rows.</Hint>
       </div>
-      {fileError && <p className="text-sm text-red-600 dark:text-red-400">{fileError}</p>}
-      {preview.isPending && <p className="text-sm text-slate-500">Reading the file…</p>}
-      {preview.error && <p className="text-sm text-red-600 dark:text-red-400">{preview.error.message}</p>}
+      {fileError && <FormError error={new Error(fileError)} />}
+      {preview.isPending && <p className="text-sm text-muted-foreground">Reading the file…</p>}
+      {preview.error && <FormError error={preview.error} />}
       {p && (
         <>
-          <p className="rounded-lg bg-slate-50 p-2 text-sm dark:bg-slate-800/60">
+          <p className="rounded-lg bg-muted p-3 text-sm">
             {p.total} rows · {p.new} new · {p.existing - p.existingElsewhere} already exist (will be updated)
             {p.existingElsewhere ? ` · ${p.existingElsewhere} belong to another team (left alone, not added to lists)` : ""} ·{" "}
             {p.bad} bad numbers skipped
             {p.duplicateInFile ? ` · ${p.duplicateInFile} repeated in the file` : ""}
             {p.dnc ? ` · ${p.dnc} on do-not-call (not added to lists)` : ""}
           </p>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="accent-brand-600"
-              checked={p.hasHeader}
-              disabled={preview.isPending}
-              onChange={(e) => state.setHeader(e.target.checked)}
-            />
-            First row is a header (column names)
-          </label>
+          <div className="flex min-h-10 items-center gap-2">
+            <Checkbox id="csv-header" checked={p.hasHeader} disabled={preview.isPending} onCheckedChange={(c) => state.setHeader(c === true)} />
+            <Label htmlFor="csv-header" className="mb-0 cursor-pointer font-normal">
+              First row is a header (column names)
+            </Label>
+          </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {FIELDS.map((f) => (
               <div key={f.key}>
-                <label className="text-xs font-medium text-slate-600 dark:text-slate-400" htmlFor={`csv-${f.key}`}>
-                  {f.label}
-                </label>
-                <select
+                <Label className="text-xs" htmlFor={`csv-${f.key}`}>
+                  {f.label} column
+                </Label>
+                <NativeSelect
                   id={`csv-${f.key}`}
-                  className="input"
                   value={p.mapping[f.key] ?? ""}
                   disabled={preview.isPending}
                   onChange={(e) => {
@@ -130,37 +136,37 @@ export function CsvImportView({ state }: { state: CsvImportState }) {
                       {c || `Column ${i + 1}`}
                     </option>
                   ))}
-                </select>
+                </NativeSelect>
               </div>
             ))}
           </div>
-          {p.badSample.length > 0 && <p className="hint">Bad: {p.badSample.slice(0, 5).join("; ")}</p>}
+          {p.badSample.length > 0 && <Hint>Bad: {p.badSample.slice(0, 5).join("; ")}</Hint>}
           {p.sample.length > 0 && (
-            <div className="max-h-56 overflow-auto rounded-lg border border-slate-200 dark:border-slate-700">
-              <table className="w-full text-left text-xs">
-                <thead className="sticky top-0 bg-slate-50 text-slate-500 dark:bg-slate-800">
-                  <tr>
+            <div className="max-h-56 overflow-auto rounded-lg border">
+              <Table className="text-xs">
+                <TableHeader className="sticky top-0">
+                  <TableRow>
                     {["Name", "Phone", "Company", "City", ""].map((h, i) => (
-                      <th key={i} scope="col" className="px-2 py-1.5 font-medium">
+                      <TableHead key={i} scope="col" className="h-8 px-2">
                         {h || <span className="sr-only">Status</span>}
-                      </th>
+                      </TableHead>
                     ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {p.sample.map((r, i) => (
-                    <tr key={i}>
-                      <td className="max-w-32 truncate px-2 py-1">{r.name ?? "—"}</td>
-                      <td className="whitespace-nowrap px-2 py-1 font-mono">{r.phoneE164 ?? "—"}</td>
-                      <td className="max-w-32 truncate px-2 py-1">{r.company ?? "—"}</td>
-                      <td className="max-w-24 truncate px-2 py-1">{r.city ?? "—"}</td>
-                      <td className="px-2 py-1">
-                        <Badge tone={STATUS_TONE[r.status]}>{r.status === "dnc" ? "DNC" : r.status}</Badge>
-                      </td>
-                    </tr>
+                    <TableRow key={i}>
+                      <TableCell className="max-w-32 truncate px-2 py-1">{r.name ?? "—"}</TableCell>
+                      <TableCell className="whitespace-nowrap px-2 py-1 font-mono">{r.phoneE164 ?? "—"}</TableCell>
+                      <TableCell className="max-w-32 truncate px-2 py-1">{r.company ?? "—"}</TableCell>
+                      <TableCell className="max-w-24 truncate px-2 py-1">{r.city ?? "—"}</TableCell>
+                      <TableCell className="px-2 py-1">
+                        <Badge variant={STATUS_TONE[r.status]}>{r.status === "dnc" ? "DNC" : r.status}</Badge>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           )}
         </>
