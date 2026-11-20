@@ -37,6 +37,7 @@ import { SignInPage } from "./pages/SignIn";
 import { TodayPage } from "./pages/Today";
 import { UsersPage } from "./pages/Users";
 import { ErrorBox, Spinner } from "./ui";
+import { LiveUpdates } from "./components/LiveUpdates";
 
 const MeContext = createContext<Me | null>(null);
 export const useMe = () => {
@@ -70,6 +71,7 @@ export function App() {
 
   return (
     <MeContext.Provider value={me.data}>
+      <LiveUpdates />
       <DialerProvider>
         <Shell me={me.data} />
       </DialerProvider>

@@ -137,6 +137,7 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
     val context = LocalContext.current
     val call = rememberCaller()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.load() }
+    com.usaindiacfo.uicdialer.dialer.LiveRefresh("contacts", "activity", "followups", "calls") { vm.load() }
 
     var name by remember { mutableStateOf("") }
     var company by remember { mutableStateOf("") }

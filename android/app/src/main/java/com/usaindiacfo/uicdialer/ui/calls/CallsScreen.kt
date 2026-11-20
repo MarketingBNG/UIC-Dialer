@@ -83,6 +83,7 @@ fun CallsScreen(onOpenCall: (id: String) -> Unit) {
     val user by vm.user.collectAsStateWithLifecycle()
     val people by vm.people.collectAsStateWithLifecycle()
     val items = vm.calls.collectAsLazyPagingItems()
+    com.usaindiacfo.uicdialer.dialer.LiveRefresh("calls", "activity") { items.refresh() }
     val cached = vm.cached.collectAsLazyPagingItems()
     val showPerson = user?.canManage == true
     val context = LocalContext.current

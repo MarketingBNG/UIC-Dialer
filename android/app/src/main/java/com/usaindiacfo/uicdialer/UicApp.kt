@@ -12,5 +12,6 @@ class UicApp : Application() {
         // Before anything can notify (a ringing call may be what started the process).
         com.usaindiacfo.uicdialer.reminders.Notifications.createChannels(this)
         container.watchSession()
+        container.liveEvents.attach(this)
     }
 }

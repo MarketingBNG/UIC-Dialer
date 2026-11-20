@@ -105,6 +105,7 @@ fun TodayScreen(
         viewModel(key = "today-list-$id-$sessionNo", factory = viewModelFactory { initializer { ListSessionViewModel(container, id) } })
     }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { resumeTick++; vm.refresh(); listVm?.onResume() }
+    com.usaindiacfo.uicdialer.dialer.LiveRefresh("activity", "followups", "contacts", "lists", "settings") { vm.refresh() }
     val stopList: () -> Unit = {
         listVm?.pause { }
         activeListId = null

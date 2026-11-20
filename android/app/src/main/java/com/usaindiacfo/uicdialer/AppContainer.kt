@@ -38,6 +38,7 @@ class AppContainer(private val context: Context) {
     val contactCache by lazy { com.usaindiacfo.uicdialer.dialer.ContactCache(context) }
     val outcomeCatalog by lazy { com.usaindiacfo.uicdialer.dialer.OutcomeCatalog(context) { apiClient } }
     val dncCheck by lazy { com.usaindiacfo.uicdialer.dialer.DncCheck(db.dncHashes()) }
+    val liveEvents by lazy { com.usaindiacfo.uicdialer.dialer.LiveEvents(apiClient, appScope) { tokenStore.user.value != null } }
     val activityRepository by lazy { ActivityRepository(context, db.pendingActivities()) { tokenStore.user.value?.id } }
 
     /**

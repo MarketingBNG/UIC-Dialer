@@ -17,6 +17,7 @@ import { firefliesRoutes } from "./routes/fireflies.js";
 import { followupRoutes } from "./routes/followups.js";
 import { importRoutes } from "./routes/import.js";
 import { publishRoutes } from "./routes/publish.js";
+import { realtimeRoutes } from "./realtime.js";
 import { internalRoutes } from "./routes/internal.js";
 import { dncRoutes } from "./routes/dnc.js";
 import { leadRoutes } from "./routes/leads.js";
@@ -66,6 +67,8 @@ export async function buildApp(deps: Deps, opts: FastifyServerOptions = {}) {
     return { ok: true };
   });
 
+  // Root level on purpose: its onResponse hook must see every route registered below.
+  await realtimeRoutes(app, deps);
   await app.register(async (s) => authRoutes(s, deps));
   await app.register(async (s) => deviceRoutes(s, deps));
   await app.register(async (s) => callRoutes(s, deps));

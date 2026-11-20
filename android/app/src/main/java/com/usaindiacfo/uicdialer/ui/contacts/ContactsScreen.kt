@@ -144,6 +144,7 @@ fun ContactsScreen(onOpenContact: (phone: String) -> Unit) {
     val context = LocalContext.current
     val call = rememberCaller()
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { vm.refresh() }
+    com.usaindiacfo.uicdialer.dialer.LiveRefresh("contacts", "activity", "followups") { vm.refresh() }
     val listState = rememberLazyListState()
     val nearEnd by remember {
         derivedStateOf {
