@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createContext, useContext } from "react";
+import { createContext, useContext, useState } from "react";
 import type * as React from "react";
 import { History, LogOut, PhoneCall, Settings2, Smartphone, Users, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -21,6 +21,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router";
 import { ApiError, api, isManager, type Me, type PhoneStatus } from "./api";
 import { FirefliesBanner } from "./components/Fireflies";
+import { QuickSearch, QuickSearchButton, useQuickSearchShortcut } from "./components/QuickSearch";
 import { CallDetailPage } from "./pages/CallDetail";
 import { DialerProvider } from "./dialer";
 import { AdminPage } from "./pages/Admin";
@@ -148,6 +149,8 @@ function Shell({ me }: { me: Me }) {
     onError: (e) => toast.error(`Sign out failed: ${e.message}`),
   });
   const items = navItems(me);
+  const [searchOpen, setSearchOpen] = useState(false);
+  useQuickSearchShortcut(setSearchOpen);
   const { pathname } = useLocation();
   const role = me.role.charAt(0) + me.role.slice(1).toLowerCase();
   const logo = (
@@ -164,7 +167,8 @@ function Shell({ me }: { me: Me }) {
       <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-white focus:p-2">
         Skip to content
       </a>
-      <AppSidebar me={me} role={role} items={items} pathname={pathname} logo={logo} logout={() => logout.mutate()} loggingOut={logout.isPending} />
+      <AppSidebar me={me} role={role} items={items} pathname={pathname} logo={logo} logout={() => logout.mutate()} loggingOut={logout.isPending} onSearch={() => setSearchOpen(true)} />
+      <QuickSearch open={searchOpen} onOpenChange={setSearchOpen} />
       <SidebarInset>
         {/* Small screens: navy top bar; the menu opens the sidebar as a sheet. */}
         <header className="sticky top-0 z-30 bg-sidebar pt-[env(safe-area-inset-top)] md:hidden">
@@ -210,6 +214,7 @@ function AppSidebar({
   logo,
   logout,
   loggingOut,
+  onSearch,
 }: {
   me: Me;
   role: string;
@@ -218,6 +223,7 @@ function AppSidebar({
   logo: React.ReactNode;
   logout: () => void;
   loggingOut: boolean;
+  onSearch: () => void;
 }) {
   const { setOpenMobile } = useSidebar();
   return (
@@ -225,6 +231,12 @@ function AppSidebar({
       <SidebarHeader>
         {logo}
         <PhoneStatusBox />
+        <QuickSearchButton
+          onOpen={() => {
+            setOpenMobile(false);
+            onSearch();
+          }}
+        />
       </SidebarHeader>
       <SidebarContent>
         <nav aria-label="Main">

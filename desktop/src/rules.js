@@ -32,6 +32,17 @@ const sameOrigin = (url, appUrl) => {
   }
 };
 
+/** Web permissions the page may use: only desktop notifications (reminders), and only for the app's own origin. */
+function allowPermission(permission, url, appUrl) {
+  return permission === "notifications" && sameOrigin(url, appUrl);
+}
+
+/** A reminder notification was clicked: the page moves to an app URL with ?from=reminder, and we raise the window. */
+function isReminderOpen(url, appUrl) {
+  if (!sameOrigin(url, appUrl)) return false;
+  return new URL(url).searchParams.get("from") === "reminder";
+}
+
 /** Digits and one leading +; null when it isn't a plausible phone number. */
 function telNumber(url) {
   if (typeof url !== "string" || !/^tel:/i.test(url)) return null;
@@ -117,6 +128,8 @@ module.exports = {
   FLOW_TTL_MS,
   resolveAppUrl,
   sameOrigin,
+  allowPermission,
+  isReminderOpen,
   telNumber,
   routeFor,
   newFlow,

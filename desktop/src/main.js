@@ -205,6 +205,10 @@ function createWindow() {
     else if (status > 0 && status < 400) failures = 0;
     if (url.includes("/?error=")) log(`sign-in failed: ${new URL(url).searchParams.get("error")}`);
   });
+  // A clicked reminder notification opens Today with ?from=reminder: bring the window up even from the tray.
+  wc.on("did-navigate-in-page", (_e, url, isMainFrame) => {
+    if (isMainFrame && rules.isReminderOpen(url, APP_URL)) showWindow();
+  });
   wc.on("render-process-gone", (_e, details) => {
     if (quitting || details.reason === "clean-exit") return;
     scheduleRetry(`page stopped (${details.reason})`, APP_URL.href);
@@ -328,10 +332,12 @@ function main() {
   app.whenReady().then(() => {
     // Taskbar grouping and notifications under "UIC Dialer", not "electron.app.Electron".
     app.setAppUserModelId(APP_ID);
-    // The dashboard needs no camera, mic, location or notifications. Both handlers: most web APIs check
-    // first and only ask if the check says no.
-    session.defaultSession.setPermissionRequestHandler((_wc, _perm, cb) => cb(false));
-    session.defaultSession.setPermissionCheckHandler(() => false);
+    // The dashboard needs no camera, mic or location; only notifications (follow-up reminders), and only for the
+    // app's own origin (rules.allowPermission). Both handlers: most web APIs check first and only ask if the check says no.
+    session.defaultSession.setPermissionRequestHandler((wc, perm, cb, details) =>
+      cb(rules.allowPermission(perm, details?.requestingUrl || wc?.getURL() || "", APP_URL)),
+    );
+    session.defaultSession.setPermissionCheckHandler((wc, perm, origin) => rules.allowPermission(perm, origin || wc?.getURL() || "", APP_URL));
     Menu.setApplicationMenu(null);
     createWindow();
     void createTray();

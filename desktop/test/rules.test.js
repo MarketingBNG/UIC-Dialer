@@ -86,3 +86,21 @@ test("window state: sane sizes, position only when on a screen", () => {
   assert.equal(r.validWindowState("junk", screens), null);
   assert.equal(r.validWindowState(null, screens), null);
 });
+
+test("permissions: notifications for the app origin only, nothing else", () => {
+  assert.equal(r.allowPermission("notifications", "https://calls.usaindiacfo.us/today", APP), true);
+  assert.equal(r.allowPermission("notifications", "https://calls.usaindiacfo.us", APP), true);
+  assert.equal(r.allowPermission("notifications", "https://evil.example/today", APP), false);
+  assert.equal(r.allowPermission("notifications", "http://calls.usaindiacfo.us/", APP), false);
+  assert.equal(r.allowPermission("notifications", "", APP), false);
+  for (const p of ["media", "geolocation", "clipboard-read", "openExternal", "fullscreen"]) {
+    assert.equal(r.allowPermission(p, "https://calls.usaindiacfo.us/", APP), false, p);
+  }
+});
+
+test("reminder clicks raise the window only for app URLs marked from=reminder", () => {
+  assert.equal(r.isReminderOpen("https://calls.usaindiacfo.us/today?call=%2B911234&from=reminder&r=1", APP), true);
+  assert.equal(r.isReminderOpen("https://calls.usaindiacfo.us/today", APP), false);
+  assert.equal(r.isReminderOpen("https://evil.example/today?from=reminder", APP), false);
+  assert.equal(r.isReminderOpen("not a url", APP), false);
+});

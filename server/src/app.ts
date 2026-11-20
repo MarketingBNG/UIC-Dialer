@@ -39,7 +39,9 @@ export async function buildApp(deps: Deps, opts: FastifyServerOptions = {}) {
         imgSrc: ["'self'", "data:", "https://*.googleusercontent.com"],
         mediaSrc: ["'self'"],
         connectSrc: ["'self'"],
-        styleSrc: ["'self'"],
+        // shadcn/Radix position popovers and menus with inline style attributes, and Sonner injects its CSS.
+        // Inline styles can't run code; scripts stay 'self' only.
+        styleSrc: ["'self'", "'unsafe-inline'"],
         scriptSrc: ["'self'"],
         frameAncestors: ["'none'"],
         formAction: ["'self'", "https://accounts.google.com"],

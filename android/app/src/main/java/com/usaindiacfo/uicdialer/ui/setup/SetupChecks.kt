@@ -101,7 +101,46 @@ object SetupPrefs {
     }
 }
 
+/** Guided setup: finished once (so it doesn't nag) and steps the rep chose to skip. */
+object GuidePrefs {
+    private val DONE = booleanPreferencesKey("guideDone")
+    private val SKIPPED = stringSetPreferencesKey("guideSkipped")
+
+    suspend fun completed(context: Context): Boolean = context.setupStore.data.first()[DONE] == true
+    suspend fun skipped(context: Context): Set<GuideStep> =
+        context.setupStore.data.first()[SKIPPED].orEmpty().mapNotNull { n -> GuideStep.entries.firstOrNull { it.name == n } }.toSet()
+
+    suspend fun setCompleted(context: Context) { context.setupStore.edit { it[DONE] = true } }
+    suspend fun skip(context: Context, step: GuideStep) {
+        context.setupStore.edit { it[SKIPPED] = it[SKIPPED].orEmpty() + step.name }
+    }
+}
+
 object SetupChecks {
+    /** Whether a guided-setup step is already done on this phone. */
+    fun stepDone(context: Context, step: GuideStep): Boolean = when (step) {
+        GuideStep.PHONE -> granted(context, Manifest.permission.READ_CALL_LOG) && phoneStateGranted(context)
+        GuideStep.CONTACTS -> granted(context, Manifest.permission.READ_CONTACTS)
+        GuideStep.NOTIFICATIONS -> notificationsGranted(context)
+        GuideStep.RECORDINGS -> granted(context, audioPermission)
+        GuideStep.BATTERY -> ignoringBatteryOptimizations(context) && !backgroundRestricted(context)
+        GuideStep.OVERLAY -> canDrawOverlays(context)
+        GuideStep.EXACT_ALARMS -> canExactAlarms(context)
+    }
+
+    /** Runtime permissions a step asks for (empty = opens a system settings screen instead). */
+    fun stepPermissions(step: GuideStep): List<String> = when (step) {
+        GuideStep.PHONE -> listOf(Manifest.permission.READ_CALL_LOG, Manifest.permission.READ_PHONE_STATE)
+        GuideStep.CONTACTS -> listOf(Manifest.permission.READ_CONTACTS)
+        GuideStep.NOTIFICATIONS -> if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.POST_NOTIFICATIONS) else emptyList()
+        GuideStep.RECORDINGS -> listOf(audioPermission)
+        else -> emptyList()
+    }
+
+    /** A required permission (call log, recordings, contacts in business-only mode) is missing: re-show the guide. */
+    fun requiredPermissionsMissing(context: Context, businessOnly: Boolean): Boolean =
+        !requiredGranted(context) || (businessOnly && !granted(context, Manifest.permission.READ_CONTACTS))
+
     val audioPermission: String =
         if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
 

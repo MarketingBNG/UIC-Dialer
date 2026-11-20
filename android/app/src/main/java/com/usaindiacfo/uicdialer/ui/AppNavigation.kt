@@ -62,12 +62,15 @@ import com.usaindiacfo.uicdialer.ui.lists.ListSessionScreen
 import com.usaindiacfo.uicdialer.ui.lists.ListsScreen
 import com.usaindiacfo.uicdialer.ui.settings.SettingsScreen
 import com.usaindiacfo.uicdialer.ui.setup.SetupScreen
+import com.usaindiacfo.uicdialer.ui.setup.SetupGuideScreen
+import kotlinx.coroutines.flow.first
 import com.usaindiacfo.uicdialer.ui.signin.SignInScreen
 import com.usaindiacfo.uicdialer.ui.today.TodayScreen
 
 object Routes {
     const val SIGN_IN = "signIn"
     const val SETUP = "setup"
+    const val SETUP_GUIDE = "setupGuide"
     const val TODAY = "today"
     const val DIALER = "dialer"
     const val CONTACTS = "contacts"
@@ -128,6 +131,18 @@ fun AppNavigation(
         }
     }
 
+    // Guided setup until finished once, and again whenever a required permission was revoked.
+    val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
+    LaunchedEffect(user != null) {
+        if (user == null || start != Routes.TODAY) return@LaunchedEffect
+        val businessOnly = runCatching { container.deviceConfigRepository.config.first().businessOnly }.getOrDefault(false)
+        val show = com.usaindiacfo.uicdialer.ui.setup.SetupFlow.shouldShowGuide(
+            com.usaindiacfo.uicdialer.ui.setup.GuidePrefs.completed(appContext),
+            com.usaindiacfo.uicdialer.ui.setup.SetupChecks.requiredPermissionsMissing(appContext, businessOnly),
+        )
+        if (show) nav.navigate(Routes.SETUP_GUIDE) { launchSingleTop = true }
+    }
+
     // Notification deep link, once signed in and past sign-in.
     LaunchedEffect(openRequest, user != null, route != null && route != Routes.SIGN_IN) {
         val req = openRequest ?: return@LaunchedEffect
@@ -185,7 +200,7 @@ fun AppNavigation(
         ) {
             composable(Routes.SIGN_IN) {
                 SignInScreen(onSignedIn = {
-                    nav.navigate(Routes.SETUP) { popUpTo(Routes.SIGN_IN) { inclusive = true } }
+                    nav.navigate(Routes.SETUP_GUIDE) { popUpTo(Routes.SIGN_IN) { inclusive = true } }
                 })
             }
             composable(Routes.SETUP) {
@@ -194,6 +209,15 @@ fun AppNavigation(
                     if (nav.previousBackStackEntry != null) nav.popBackStack()
                     else nav.navigate(Routes.TODAY) { popUpTo(Routes.SETUP) { inclusive = true } }
                 })
+            }
+            composable(Routes.SETUP_GUIDE) {
+                SetupGuideScreen(
+                    onFinished = {
+                        if (nav.previousBackStackEntry != null) nav.popBackStack()
+                        else nav.navigate(Routes.TODAY) { popUpTo(Routes.SETUP_GUIDE) { inclusive = true } }
+                    },
+                    onOpenChecks = { nav.navigate(Routes.SETUP) },
+                )
             }
             composable(Routes.TODAY) {
                 TodayScreen(
@@ -246,6 +270,7 @@ fun AppNavigation(
             composable(Routes.SETTINGS) {
                 SettingsScreen(
                     onOpenSetup = { nav.navigate(Routes.SETUP) },
+                    onOpenGuide = { nav.navigate(Routes.SETUP_GUIDE) },
                     onOpenAdmin = { nav.navigate(Routes.ADMIN_USERS) { launchSingleTop = true } },
                     onBack = { if (nav.previousBackStackEntry != null) nav.popBackStack() else nav.navigateTab(Routes.TODAY) },
                 )

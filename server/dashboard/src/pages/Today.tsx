@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useDeferredValue, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { ApiError, api, qs, type ContactPage, type FollowUpItem, type FollowUpsToday, type MeToday, type MyList, type NextResponse } from "../api";
 import { useMe } from "../App";
 import { CallButton, cleanNumber, isDesktopApp, useDialer } from "../dialer";
@@ -155,6 +155,13 @@ export function TodayPage() {
     .filter((l) => l.state === "ACTIVE" && remaining(l) > 0)
     .map((list) => ({ kind: "list", key: `list:${list.id}`, list }));
   const queue = [...fuEntries, ...listEntries].filter((e) => !handled.has(e.key));
+  // ?call=<phone> (a clicked desktop reminder) puts that person first as Next up.
+  const [params] = useSearchParams();
+  const callFirst = params.get("call");
+  if (callFirst) {
+    const i = queue.findIndex((e) => e.kind === "fu" && e.group.item.phoneE164 === callFirst);
+    if (i > 0) queue.unshift(...queue.splice(i, 1));
+  }
   const [next, ...rest] = queue;
 
   return (

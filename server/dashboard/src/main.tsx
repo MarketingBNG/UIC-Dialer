@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 import { ApiError, setUnauthorizedHandler } from "./api";
 import { App } from "./App";
+import { Reminders } from "./components/Reminders";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./index.css";
@@ -29,6 +30,7 @@ createRoot(document.getElementById("root")!).render(
       <BrowserRouter>
         <TooltipProvider delayDuration={300}>
           <App />
+          <Reminders />
           <Toaster />
         </TooltipProvider>
       </BrowserRouter>

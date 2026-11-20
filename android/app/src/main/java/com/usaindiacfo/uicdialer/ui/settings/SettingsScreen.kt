@@ -47,7 +47,7 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onOpenSetup: () -> Unit, onOpenAdmin: () -> Unit, onBack: () -> Unit) {
+fun SettingsScreen(onOpenSetup: () -> Unit, onOpenGuide: () -> Unit, onOpenAdmin: () -> Unit, onBack: () -> Unit) {
     val container = appContainer()
     val auth = container.authRepository
     val scope = rememberCoroutineScope()
@@ -94,6 +94,7 @@ fun SettingsScreen(onOpenSetup: () -> Unit, onOpenAdmin: () -> Unit, onBack: () 
 
             Section("Sync") { SyncStatus(onOpenSetup) }
 
+            NavRow("Guided setup", "Step-by-step: permissions, recording, battery", onOpenGuide)
             NavRow("Setup checks", "Permissions and phone settings the app needs", onOpenSetup)
             if (user?.canManage == true) NavRow("Admin", "Users, devices, server settings", onOpenAdmin)
 
