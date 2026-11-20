@@ -4,11 +4,13 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -17,7 +19,6 @@ import androidx.compose.material3.PrimaryScrollableTabRow
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -97,7 +98,6 @@ private data class NavTab(val route: String, val label: String, val icon: ImageV
 
 private val TABS = listOf(
     NavTab(Routes.TODAY, "Today", Icons.Filled.Home),
-    NavTab(Routes.DIALER, "Keypad", dialpadIcon()),
     NavTab(Routes.CONTACTS, "Contacts", Icons.Filled.Person),
     NavTab(Routes.CALLS, "Calls", Icons.Filled.Call),
 )
@@ -140,10 +140,12 @@ fun AppNavigation(
         onOpenHandled()
     }
 
-    val showBottom = route in TAB_ROUTES || route == Routes.CONTACT || route == Routes.CALL_DETAIL || route == Routes.LIST_SESSION
+    val showBottom = route in TAB_ROUTES || route == Routes.CONTACT || route == Routes.CALL_DETAIL ||
+        route == Routes.LIST_SESSION || route == Routes.DIALER
     val selectedTab = when (route) {
         in TAB_ROUTES -> route
         Routes.CALL_DETAIL -> Routes.CALLS
+        Routes.DIALER -> Routes.TODAY
         Routes.CONTACT, Routes.LIST_SESSION -> lastTab
         else -> null
     }
@@ -154,7 +156,6 @@ fun AppNavigation(
             if (route in TAB_ROUTES) TopAppBar(
                 title = { Text(TABS.first { it.route == route }.label, fontWeight = FontWeight.SemiBold) },
                 actions = {
-                    if (route == Routes.CONTACTS) TextButton(onClick = { nav.navigate(Routes.LISTS) { launchSingleTop = true } }) { Text("Call lists") }
                     Avatar(user?.name ?: user?.email, onClick = { nav.navigate(Routes.SETTINGS) { launchSingleTop = true } }) },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
             )
@@ -199,9 +200,24 @@ fun AppNavigation(
                     onOpenContact = { nav.navigate(Routes.contact(it)) },
                     onOpenSetup = { nav.navigate(Routes.SETUP) },
                     onOpenLists = { nav.navigate(Routes.LISTS) { launchSingleTop = true } },
+                    onOpenKeypad = { nav.navigate(Routes.DIALER) { launchSingleTop = true } },
                 )
             }
-            composable(Routes.DIALER) { DialerScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
+            composable(Routes.DIALER) {
+                // Opened from the Dial button on Today; no longer a tab.
+                Column(Modifier.fillMaxSize()) {
+                    TopAppBar(
+                        title = { Text("Keypad", fontWeight = FontWeight.SemiBold) },
+                        navigationIcon = {
+                            IconButton(onClick = { if (!nav.popBackStack()) nav.navigateTab(Routes.TODAY) }) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                    )
+                    DialerScreen(onOpenContact = { nav.navigate(Routes.contact(it)) })
+                }
+            }
             composable(Routes.CONTACTS) { ContactsScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
             composable(Routes.CONTACT, arguments = listOf(navArgument("phone") { type = NavType.StringType })) {
                 ContactDetailScreen(phone = it.arguments?.getString("phone").orEmpty(), onBack = { nav.popBackStack() })
@@ -278,7 +294,7 @@ private fun NavHostController.navigateTab(route: String) = navigate(route) {
 }
 
 /** 3x3 + 1 dots (material-icons-core has no Dialpad). */
-private fun dialpadIcon(): ImageVector = ImageVector.Builder("Dialpad", 24.dp, 24.dp, 24f, 24f).apply {
+internal fun dialpadIcon(): ImageVector = ImageVector.Builder("Dialpad", 24.dp, 24.dp, 24f, 24f).apply {
     for (row in 0..3) for (col in 0..2) {
         if (row == 3 && col != 1) continue
         val cx = 6f + col * 6f

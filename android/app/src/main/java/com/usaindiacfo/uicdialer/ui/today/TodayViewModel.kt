@@ -53,7 +53,11 @@ data class TodayState(
     val me: MeToday? = null,
     /** My ACTIVE/PAUSED call lists. */
     val lists: List<MyCallList> = emptyList(),
-)
+    /** Keys called or snoozed from the queue this session; they move to the end. */
+    val called: Set<String> = emptySet(),
+) {
+    val queue: List<TodayRow> get() = TodayQueue.order(overdue + today, called)
+}
 
 /** Overdue first, then today; each sorted by due time then key. */
 internal fun splitToday(rows: List<TodayRow>): Pair<List<TodayRow>, List<TodayRow>> {
@@ -122,7 +126,7 @@ class TodayViewModel(private val c: AppContainer) : ViewModel() {
         // Targets and call lists are extras: older servers (404) or offline just hide them.
         val me = runCatching { c.apiClient.meToday() }.getOrNull()
         val lists = runCatching { c.apiClient.myCallLists().items }.getOrElse { _state.value.lists }
-        _state.update { TodayState(overdue = overdue, today = today, loading = false, error = error, me = me ?: it.me, lists = lists) }
+        _state.update { TodayState(overdue = overdue, today = today, loading = false, error = error, me = me ?: it.me, lists = lists, called = it.called) }
     }
 
     /** Missed-call or new-lead task: Done (PATCH /v1/followups/:id). Hidden at once; shown again if the server refuses. */
@@ -136,6 +140,22 @@ class TodayViewModel(private val c: AppContainer) : ViewModel() {
             } catch (e: IOException) {
                 _state.update { it.copy(error = friendlyError(e)) }
                 refresh()
+            }
+        }
+    }
+
+    /** A dial from the queue started: the next contact comes up once the rep is back. */
+    fun onCalled(row: TodayRow) = _state.update { it.copy(called = it.called + row.key) }
+
+    /** Snooze: a task moves 1 hour on the server; a contact follow-up just goes to the end of the queue. */
+    fun snooze(row: TodayRow) {
+        _state.update { it.copy(called = it.called + row.key) }
+        val taskId = row.taskId ?: return
+        viewModelScope.launch {
+            try {
+                c.apiClient.patchFollowUp(taskId, FollowUpPatch("snooze", until = Instant.now().plusSeconds(3600).toString()))
+            } catch (e: IOException) {
+                _state.update { it.copy(error = friendlyError(e)) }
             }
         }
     }

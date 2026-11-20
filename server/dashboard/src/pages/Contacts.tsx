@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
-import { api, isManager, qs, type ContactFilter, type ContactFilterKey, type ContactPage, type ContactStatus, type User } from "../api";
+import { api, isManager, qs, type ContactFilter, type ContactFilterKey, type ContactListItem, type ContactPage, type ContactStatus, type User } from "../api";
 import { useMe } from "../App";
 import { CONTACT_STATUS_LABEL, formatShortWhen, isOverdue, personName } from "../format";
 import { CallButton } from "../dialer";
@@ -255,8 +255,7 @@ export function ContactsPage() {
                       <div className="truncate font-medium">{c.name || c.phoneE164}</div>
                       <div className="truncate text-sm text-slate-500">{[c.name ? c.phoneE164 : null, c.company, c.city].filter(Boolean).join(" · ")}</div>
                     </div>
-                    {c.dnc && <Badge tone="red">DNC</Badge>}
-                    <ContactStatusBadge status={c.status} />
+                    <RowLabel c={c} />
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-600 dark:text-slate-400">
                     {c.nextFollowUpAt && <span>Follow up {followUp(c.nextFollowUpAt)}</span>}
@@ -302,18 +301,13 @@ export function ContactsPage() {
                       <Link to={`/activity/contacts/${c.id}`} className="font-medium text-brand-700 hover:underline dark:text-brand-100">
                         {c.phoneE164}
                       </Link>
-                      {c.dnc && (
-                        <span className="ml-2" title={c.dnc.reason ?? "Do not call"}>
-                          <Badge tone="red">DNC</Badge>
-                        </span>
-                      )}
                     </td>
                     <td className="max-w-48 truncate px-4 py-3">{c.name || "—"}</td>
                     <td className="max-w-48 truncate px-4 py-3">{c.company || "—"}</td>
                     <td className="max-w-32 truncate px-4 py-3">{c.city || "—"}</td>
                     <td className="max-w-40 truncate px-4 py-3">{c.owner ? personName(c.owner) : "—"}</td>
                     <td className="px-4 py-3">
-                      <ContactStatusBadge status={c.status} />
+                      <RowLabel c={c} />
                     </td>
                     <td className="whitespace-nowrap px-4 py-3">{c.lastActivityAt ? formatShortWhen(c.lastActivityAt) : "—"}</td>
                     <td className="whitespace-nowrap px-4 py-3">{followUp(c.nextFollowUpAt)}</td>
@@ -355,4 +349,15 @@ export function ContactsPage() {
       {newLead && <NewLeadDialog onClose={() => setNewLead(false)} />}
     </>
   );
+}
+
+/** One label per row: do-not-call wins over the status (the source is shown only on the contact page). */
+function RowLabel({ c }: { c: ContactListItem }) {
+  if (c.dnc)
+    return (
+      <span title={c.dnc.reason ?? "Do not call"}>
+        <Badge tone="red">Do not call</Badge>
+      </span>
+    );
+  return <ContactStatusBadge status={c.status} />;
 }

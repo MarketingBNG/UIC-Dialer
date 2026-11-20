@@ -1,11 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useState } from "react";
-import { NavLink, Navigate, Route, Routes } from "react-router";
+import { NavLink, Navigate, Route, Routes, useLocation } from "react-router";
 import { ApiError, api, isManager, type Me, type PhoneStatus } from "./api";
 import { FirefliesBanner } from "./components/Fireflies";
 import { CallDetailPage } from "./pages/CallDetail";
 import { DialerProvider } from "./dialer";
-import { DialerPage } from "./pages/Dialer";
+import { AdminPage } from "./pages/Admin";
 import { AuditPage } from "./pages/Audit";
 import { CallsPage } from "./pages/Calls";
 import { ContactDetailPage } from "./pages/ContactDetail";
@@ -59,26 +59,19 @@ export function App() {
   );
 }
 
+/** Reps see three pages; admins and managers get one more entry, Admin, that holds everything else. */
 function navItems(me: Me) {
-  const items = [
+  const items: { to: string; label: string; end?: boolean; also?: string[] }[] = [
     { to: "/today", label: "Today" },
-    { to: "/dialer", label: "Dialer" },
     { to: "/activity", label: "Contacts", end: true },
-    { to: "/lists", label: "Call lists" },
-    { to: "/calls", label: "Calls & recordings" },
+    { to: "/calls", label: "Calls" },
   ];
-  if (isManager(me.role)) {
-    items.push(
-      { to: "/team", label: "Team" },
-      { to: "/health", label: "Sync health" },
-      { to: "/users", label: "Users" },
-    );
-  }
-  // Managers reach the do-not-call list directly; admins find it under Settings.
-  if (me.role === "MANAGER") items.push({ to: "/settings/dnc", label: "Do-not-call" });
-  if (me.role === "ADMIN") items.push({ to: "/settings", label: "Settings" }, { to: "/audit", label: "Audit log" });
+  if (isManager(me.role)) items.push({ to: "/admin", label: "Admin", also: ADMIN_PATHS });
   return items;
 }
+
+/** Pages that live under Admin (the Admin entry stays highlighted on them). */
+const ADMIN_PATHS = ["/lists", "/team", "/health", "/users", "/settings", "/audit"];
 
 /** "2m ago" style, for the phone pill. */
 function shortAgo(iso: string, now = Date.now()) {
@@ -123,6 +116,7 @@ function Shell({ me }: { me: Me }) {
     onError: (e) => alert(`Sign out failed: ${e.message}`),
   });
   const items = navItems(me);
+  const { pathname } = useLocation();
   const linkCls = ({ isActive }: { isActive: boolean }) =>
     `flex min-h-10 items-center rounded-xl px-3 text-sm font-medium ${
       isActive ? "bg-white/15 text-white" : "text-white/75 hover:bg-white/10 hover:text-white"
@@ -130,7 +124,13 @@ function Shell({ me }: { me: Me }) {
   const role = me.role.charAt(0) + me.role.slice(1).toLowerCase();
   const nav = (onPick?: () => void) =>
     items.map((i) => (
-      <NavLink key={i.to} to={i.to} end={i.end} className={linkCls} onClick={onPick}>
+      <NavLink
+        key={i.to}
+        to={i.to}
+        end={i.end}
+        className={({ isActive }) => linkCls({ isActive: isActive || !!i.also?.some((p) => pathname === p || pathname.startsWith(`${p}/`)) })}
+        onClick={onPick}
+      >
         {i.label}
       </NavLink>
     ));
@@ -211,7 +211,7 @@ function Shell({ me }: { me: Me }) {
         <Routes>
           <Route path="/" element={<Navigate to="/today" replace />} />
           <Route path="/today" element={<TodayPage />} />
-          <Route path="/dialer" element={<DialerPage />} />
+          <Route path="/dialer" element={<Navigate to="/today" replace />} />
           <Route path="/calls" element={<CallsPage />} />
           <Route path="/calls/:id" element={<CallDetailPage />} />
           <Route path="/activity" element={<ContactsPage />} />
@@ -219,6 +219,7 @@ function Shell({ me }: { me: Me }) {
           <Route path="/lists" element={<ListsPage />} />
           <Route path="/lists/:id" element={<ListDetailPage />} />
           <Route path="/lists/:id/work" element={<ListSessionPage />} />
+          {isManager(me.role) && <Route path="/admin" element={<AdminPage />} />}
           {isManager(me.role) && <Route path="/team" element={<TeamPage />} />}
           {isManager(me.role) && <Route path="/activity/reps" element={<Navigate to="/team" replace />} />}
           {isManager(me.role) && <Route path="/health" element={<HealthPage />} />}

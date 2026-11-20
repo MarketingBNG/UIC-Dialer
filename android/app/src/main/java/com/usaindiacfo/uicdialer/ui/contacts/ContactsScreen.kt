@@ -195,8 +195,9 @@ fun ContactsScreen(onOpenContact: (phone: String) -> Unit) {
                             ).joinToString(" · ")
                             if (sub.isNotEmpty()) Text(sub, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                if (contact.dnc != null) Chip("DNC", MaterialTheme.colorScheme.errorContainer, UicColors.overdue)
-                                StatusChip(contact.status)
+                                // One label per row: Do not call wins over the status.
+                                if (contact.dnc != null) Chip("Do not call", MaterialTheme.colorScheme.errorContainer, UicColors.overdue)
+                                else StatusChip(contact.status)
                                 formatWhen(context, contact.lastActivityAt)?.let {
                                     Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
