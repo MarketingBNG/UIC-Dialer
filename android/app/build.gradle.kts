@@ -9,11 +9,11 @@ val apiUrl = providers.gradleProperty("uic.apiUrl")
 val releaseApiUrl = apiUrl.orElse(providers.gradleProperty("uic.releaseApiUrl"))
 
 android {
-    namespace = "com.usaindiacfo.uicrecorder"
+    namespace = "com.usaindiacfo.uicdialer"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.usaindiacfo.uicrecorder"
+        applicationId = "com.usaindiacfo.uicdialer"
         minSdk = 26
         targetSdk = 37
         // CI sets these for published releases (each must be higher than the last); local builds use the defaults.

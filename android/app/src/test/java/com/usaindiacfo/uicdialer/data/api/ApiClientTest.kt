@@ -1,0 +1,208 @@
+package com.usaindiacfo.uicdialer.data.api
+
+import kotlinx.coroutines.runBlocking
+import mockwebserver3.MockResponse
+import mockwebserver3.MockWebServer
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
+import org.junit.Assert.fail
+import org.junit.Before
+import org.junit.Test
+
+class ApiClientTest {
+    private val server = MockWebServer()
+
+    private class FakeTokens : TokenProvider {
+        override var accessToken: String? = "old"
+        override var refreshToken: String? = "refresh-old"
+        override val accessExpiresAtMs = Long.MAX_VALUE
+        var failed = false
+        override fun save(auth: AuthResponse) {
+            accessToken = auth.accessToken
+            refreshToken = auth.refreshToken
+        }
+        override fun onRefreshFailed() {
+            failed = true
+            accessToken = null
+            refreshToken = null
+        }
+    }
+
+    private val tokens = FakeTokens()
+    private lateinit var api: ApiClient
+
+    @Before fun setUp() {
+        server.start()
+        api = ApiClient(server.url("/").toString(), tokens)
+    }
+
+    @After fun tearDown() = server.close()
+
+    private fun json(code: Int, body: String) =
+        MockResponse.Builder().code(code).addHeader("content-type", "application/json").body(body).build()
+
+    @Test fun refreshesOnceOn401AndRetries() = runBlocking {
+        server.enqueue(json(401, """{"error":"Invalid or expired token"}"""))
+        server.enqueue(
+            json(200, """{"accessToken":"new","refreshToken":"refresh-new","expiresIn":900,
+                "user":{"id":"u","email":"a@usaindiacfo.com","name":null,"role":"AGENT"}}"""),
+        )
+        server.enqueue(json(200, """{"known":["ab"]}"""))
+
+        assertEquals(listOf("ab"), api.checkHashes(listOf("ab")))
+        assertEquals("Bearer old", server.takeRequest().headers["Authorization"])
+        val refresh = server.takeRequest()
+        assertEquals("/v1/auth/refresh", refresh.url.encodedPath)
+        assertNull(refresh.headers["Authorization"])
+        assertEquals("Bearer new", server.takeRequest().headers["Authorization"])
+        assertEquals("refresh-new", tokens.refreshToken)
+    }
+
+    @Test fun signsOutWhenRefreshRejected() = runBlocking {
+        server.enqueue(json(401, """{"error":"Invalid or expired token"}"""))
+        server.enqueue(json(401, """{"error":"Refresh token invalid"}"""))
+        try {
+            api.me()
+            fail("expected ApiException")
+        } catch (e: ApiException) {
+            assertEquals(401, e.code)
+            assertEquals("Invalid or expired token", e.message)
+        }
+        assertEquals(true, tokens.failed)
+    }
+
+    private fun html(code: Int) =
+        MockResponse.Builder().code(code).addHeader("content-type", "text/html").body("<html>proxy error</html>").build()
+
+    /** Server down / redeploying: the proxy's error page on /v1/auth/refresh must not end the session. */
+    @Test fun keepsSessionWhenProxyAnswersRefresh() = runBlocking {
+        for (code in listOf(404, 403, 400, 502, 503)) {
+            server.enqueue(json(401, """{"error":"Invalid or expired token"}"""))
+            server.enqueue(html(code))
+            try { api.me(); fail("expected ApiException") } catch (_: ApiException) {}
+            assertEquals("code $code", false, tokens.failed)
+            assertEquals("refresh-old", tokens.refreshToken)
+        }
+    }
+
+    @Test fun keepsSessionWhenRefreshIsHtml401() = runBlocking {
+        server.enqueue(json(401, """{"error":"Invalid or expired token"}"""))
+        server.enqueue(html(401))
+        try { api.me(); fail("expected ApiException") } catch (_: ApiException) {}
+        assertEquals(false, tokens.failed)
+    }
+
+    @Test fun proxyErrorsAreTransientServerErrorsAreNot() = runBlocking {
+        server.enqueue(html(404))
+        val proxy = runCatching { api.me() }.exceptionOrNull() as ApiException
+        assertEquals(false, proxy.fromServer)
+        assertEquals(true, proxy.isTransient)
+
+        server.enqueue(json(400, """{"error":"Bad phone number"}"""))
+        val bad = runCatching { api.me() }.exceptionOrNull() as ApiException
+        assertEquals(true, bad.fromServer)
+        assertEquals(false, bad.isTransient)
+
+        server.enqueue(json(503, """{"error":"Busy"}"""))
+        assertEquals(true, (runCatching { api.me() }.exceptionOrNull() as ApiException).isTransient)
+    }
+
+    @Test fun firefliesPatchSendsOnlySetFields() = runBlocking {
+        server.enqueue(
+            json(200, """{"month":"2026-11","enabled":true,"budgetMinutes":16200,"liveReservePct":10,"usedMinutes":0,
+                "reservedMinutes":0,"pct":0,"thresholds":[],"approvedBacklogCount":40,"backlogSent":20,
+                "deleteAfterFetch":true,"blocked":false,"blockedUntil":null,"lastError":null,"lastErrorAt":null,"waitingBudgetJobs":0}"""),
+        )
+        val u = api.putFireflies(FirefliesPatch(approvedBacklogCount = 40))
+        assertEquals(40, u.approvedBacklogCount)
+        val req = server.takeRequest()
+        assertEquals("PUT", req.method)
+        assertEquals("/api/settings/fireflies", req.url.encodedPath)
+        assertEquals("""{"approvedBacklogCount":40}""", req.body?.utf8())
+    }
+
+    @Test fun statsDecodesWithAndWithoutFireflies() = runBlocking {
+        val base = """"calls":{},"jobs":{"WAITING_BUDGET":2},"disk":{"totalBytes":10,"freeBytes":5,"usedPct":50},"staleDevices":0"""
+        server.enqueue(json(200, "{$base}"))
+        server.enqueue(
+            json(200, """{$base,"fireflies":{"month":"2026-11","pct":81.5,"thresholds":[50,80],"blocked":false,
+                "lastError":null,"backlogGateReached":true,"waitingBudgetJobs":2}}"""),
+        )
+        assertNull(api.stats().fireflies)
+        val f = api.stats().fireflies!!
+        assertEquals(listOf(50, 80), f.thresholds)
+        assertEquals(true, f.backlogGateReached)
+    }
+
+    @Test fun callDetailParsesEnglishTranslation() = runBlocking {
+        server.enqueue(json(200, """{"id":"c","userId":"u","direction":"INCOMING","source":"LIVE",
+            "startedAt":"2026-11-01T10:00:00Z","status":"TRANSCRIBED","createdAt":"2026-11-01T10:00:00Z",
+            "user":{"id":"u","email":"a@usaindiacfo.com","name":null},
+            "transcript":{"text":"namaste","language":"hi","provider":"fireflies","segments":[{"start":0,"text":"namaste","en":"hello"}],
+            "textEn":"hello","translationModel":"claude-opus-5-5","translationPending":false}}"""))
+        val t = api.call("c").transcript!!
+        assertEquals("hello", t.textEn)
+        assertEquals("claude-opus-5-5", t.translationModel)
+        assertEquals(false, t.translationPending)
+    }
+
+    @Test fun oldTranscriptWithoutTranslationFieldsStillParses() = runBlocking {
+        server.enqueue(json(200, """{"id":"c","userId":"u","direction":"INCOMING","source":"LIVE",
+            "startedAt":"2026-11-01T10:00:00Z","status":"TRANSCRIBED","createdAt":"2026-11-01T10:00:00Z",
+            "user":{"id":"u","email":"a@usaindiacfo.com","name":null},
+            "transcript":{"text":"namaste","provider":"fireflies"}}"""))
+        val t = api.call("c").transcript!!
+        assertNull(t.textEn)
+        assertEquals(false, t.translationPending)
+    }
+
+    @Test fun translateBackfillPostsAndReadsCount() = runBlocking {
+        server.enqueue(json(200, """{"queued":42}"""))
+        assertEquals(42, api.translateBackfill().queued)
+        val req = server.takeRequest()
+        assertEquals("POST", req.method)
+        assertEquals("/api/admin/translate-backfill", req.url.encodedPath)
+    }
+
+    @Test fun compressBackfillSendsLimit() = runBlocking {
+        server.enqueue(json(200, """{"queued":5}"""))
+        assertEquals(5, api.compressBackfill(5).queued)
+        val req = server.takeRequest()
+        assertEquals("/api/admin/compress-backfill", req.url.encodedPath)
+        assertEquals("""{"limit":5}""", req.body?.utf8())
+        server.enqueue(json(200, """{"queued":0}"""))
+        api.compressBackfill()
+        assertEquals("{}", server.takeRequest().body?.utf8())
+    }
+
+    @Test fun statsDecodesCompression() = runBlocking {
+        server.enqueue(json(200, """{"calls":{},"jobs":{},"disk":{"totalBytes":10,"freeBytes":5,"usedPct":50},"staleDevices":0,
+            "compression":{"compressedCalls":4,"bytesSaved":5000000000,"eligibleCalls":10,"queuedJobs":1}}"""))
+        val c = api.stats().compression!!
+        assertEquals(5_000_000_000L, c.bytesSaved)
+        assertEquals(10, c.eligibleCalls)
+    }
+
+    @Test fun statsDecodesThroughput() = runBlocking {
+        server.enqueue(json(200, """{"calls":{},"jobs":{},"disk":{"totalBytes":10,"freeBytes":5,"usedPct":50},"staleDevices":0,
+            "alertsEnabled":true,"throughput":{"jobsPerHour":12.5,"doneLastHour":10,"failureRatePct":2.1,"failureRatePctLastHour":0,
+            "avgJobSeconds":null,"backlogCalls":300,"backlogMinutes":32400,"backlogEtaMonths":2,"backlogEtaHours":24}}"""))
+        val s = api.stats()
+        assertEquals(true, s.alertsEnabled)
+        val t = s.throughput!!
+        assertEquals(12.5, t.jobsPerHour, 0.0)
+        assertNull(t.avgJobSeconds)
+        assertEquals("2 mo of Fireflies budget · 24 h at current rate", t.etaText())
+        assertEquals("No backlog", t.copy(backlogCalls = 0).etaText())
+        assertEquals("3 d at current rate", t.copy(backlogEtaMonths = null, backlogEtaHours = 72).etaText())
+    }
+
+    @Test fun testAlertPosts() = runBlocking {
+        server.enqueue(json(200, """{"sent":true}"""))
+        assertEquals(true, api.testAlert().sent)
+        val req = server.takeRequest()
+        assertEquals("POST", req.method)
+        assertEquals("/api/admin/test-alert", req.url.encodedPath)
+    }
+}

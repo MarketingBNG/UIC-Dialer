@@ -38,7 +38,7 @@ verified developer. Do this once before the rollout:
 1. Sign up at the Android Developer Console (developer verification) with the company Google account
    (organisation account: needs the D-U-N-S number and a company website/email).
 2. Complete identity verification for the organisation.
-3. Register the package name `com.usaindiacfo.uicrecorder`.
+3. Register the package name `com.usaindiacfo.uicdialer`.
 4. Add the **release key SHA-256** fingerprint from step 1 to that package and prove ownership if asked
    (Google may ask you to upload an APK signed with the key that contains a token file it gives you).
 5. Keep using the same key for every release.
@@ -107,8 +107,8 @@ Module `android/baselineprofile` (needs a connected phone; nothing runs on a PC 
 2–3 GB RAM, signed in, with some calls in the list.
 
 - Generate the profile:
-  `./gradlew :baselineprofile:connectedBenchmarkAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.usaindiacfo.uicrecorder.baselineprofile.BaselineProfileGenerator`
+  `./gradlew :baselineprofile:connectedBenchmarkAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.usaindiacfo.uicdialer.baselineprofile.BaselineProfileGenerator`
   then copy the `*-baseline-prof.txt` from `baselineprofile/build/outputs/connected_android_test_additional_output/`
   to `android/app/src/main/baseline-prof.txt` and commit it. `profileinstaller` installs it with the app.
-- Measure: `./gradlew :baselineprofile:connectedBenchmarkAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.usaindiacfo.uicrecorder.baselineprofile.StartupBenchmark`
+- Measure: `./gradlew :baselineprofile:connectedBenchmarkAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.usaindiacfo.uicdialer.baselineprofile.StartupBenchmark`
   (cold start with/without profile, call list scroll frame timing). Results are in the same output folder.

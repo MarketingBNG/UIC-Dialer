@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.usaindiacfo.uicrecorder.baselineprofile"
+    namespace = "com.usaindiacfo.uicdialer.baselineprofile"
     compileSdk = 37
 
     defaultConfig {

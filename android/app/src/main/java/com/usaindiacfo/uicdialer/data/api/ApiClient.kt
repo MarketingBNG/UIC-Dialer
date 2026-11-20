@@ -1,0 +1,464 @@
+package com.usaindiacfo.uicdialer.data.api
+
+import android.content.ContentResolver
+import android.net.Uri
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.encodeToJsonElement
+import kotlinx.serialization.json.jsonObject
+import okhttp3.Authenticator
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.HttpUrl
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.Interceptor
+import okhttp3.MediaType
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import okhttp3.Route
+import okio.BufferedSink
+import okio.buffer
+import okio.source
+import java.io.File
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+
+/** Non-2xx response. [code] is the HTTP status, message is the server's `error` text. */
+/**
+ * A non-2xx reply. [fromServer] is true when the body is our server's JSON error; false means something in
+ * between answered (a proxy's HTML 404/502 page while the server is down or mid-deploy).
+ */
+class ApiException(val code: Int, message: String, val fromServer: Boolean = false, val errorCode: String? = null) : IOException(message) {
+    val isAuth get() = code == 401
+    val isForbidden get() = code == 403
+
+    /** Worth retrying later rather than giving up on the item: server/proxy trouble, not a bad request. */
+    val isTransient get() = code >= 500 || code == 408 || code == 429 || !fromServer
+}
+
+/** What the HTTP layer needs from token storage (implemented by TokenStore; fakes in tests). */
+interface TokenProvider {
+    val accessToken: String?
+    val refreshToken: String?
+    val accessExpiresAtMs: Long
+    fun save(auth: AuthResponse)
+    /** Refresh token rejected: the session is over (device revoked / user deactivated). */
+    fun onRefreshFailed()
+}
+
+/**
+ * Typed client for every server endpoint the app uses.
+ *
+ * Error model: every suspend function returns the decoded body or **throws**
+ * - [ApiException] for HTTP errors (401 after a failed refresh, 403, 404, 409, 422 ...),
+ * - [IOException] for network failures.
+ * Callers catch `IOException` (ApiException is one) and show `e.message`.
+ *
+ * Auth: a Bearer header is added to every request except /v1/auth/. On 401 (or an access token about
+ * to expire) the refresh token is rotated exactly once under a lock; concurrent requests reuse the new
+ * token. If the server rejects the refresh token, [TokenProvider.onRefreshFailed] signs the user out.
+ */
+class ApiClient(
+    baseUrl: String,
+    private val tokens: TokenProvider,
+    base: OkHttpClient = OkHttpClient(),
+) {
+    val baseUrl: HttpUrl = baseUrl.trimEnd('/').toHttpUrl()
+    val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
+    private val lock = Any()
+
+    private val plain = base.newBuilder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .build()
+
+    /** Refresh is never replayed silently: reusing a rotated refresh token revokes the device. */
+    private val refreshClient = plain.newBuilder()
+        .retryOnConnectionFailure(false)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .build()
+
+    /** Authenticated client. Also use it for playback: `OkHttpDataSource.Factory(api.http)`. */
+    val http: OkHttpClient = plain.newBuilder()
+        .addInterceptor(BearerInterceptor())
+        .authenticator(RefreshAuthenticator())
+        .build()
+
+    private val longHttp = http.newBuilder()
+        .writeTimeout(10, TimeUnit.MINUTES)
+        .readTimeout(2, TimeUnit.MINUTES)
+        // OkHttp would silently resend a dropped upload from byte 0 with the old Upload-Offset. SyncEngine
+        // resumes instead (asks the server how much arrived), so a retry here only wastes data.
+        .retryOnConnectionFailure(false)
+        .build()
+
+    // ---- Auth -------------------------------------------------------------
+
+    suspend fun googleSignIn(idToken: String, device: DeviceInfo): AuthResponse =
+        post("/v1/auth/google", GoogleLoginRequest(idToken, device))
+
+    suspend fun logout(refreshToken: String) = postUnit("/v1/auth/logout", RefreshRequest(refreshToken))
+
+    // ---- Sync -------------------------------------------------------------
+
+    /** Hashes (lowercase sha256 hex, 1..500) the server already has fully uploaded. */
+    suspend fun checkHashes(hashes: List<String>): List<String> {
+        require(hashes.size in 1..500)
+        return post<CheckRequest, CheckResponse>("/v1/calls/check", CheckRequest(hashes)).known
+    }
+
+    suspend fun createCall(req: CreateCallRequest): CreateCallResponse = post("/v1/calls", req)
+
+    /**
+     * Streams audio to PUT /v1/calls/:id/audio. [sha256] is X-Content-SHA256: the hash of the bytes
+     * actually sent (the compressed file when compressed), not originalSha256. Server answers 422 on mismatch.
+     * Body content type must be an audio type the server allows (audio/mp4, audio/aac, audio/mpeg, audio/amr, ...).
+     */
+    /**
+     * Uploads the file whose SHA-256 is [sha256]. With [totalLength] the upload is resumable: [body] holds the
+     * bytes from [offset] on, and the server keeps what arrives if the connection drops.
+     */
+    suspend fun uploadAudio(callId: String, body: RequestBody, sha256: String, offset: Long? = null, totalLength: Long? = null): UploadResponse {
+        val req = Request.Builder().url(url("/v1/calls/$callId/audio"))
+            .header("X-Content-SHA256", sha256)
+            .apply { if (offset != null && totalLength != null) header("Upload-Offset", "$offset").header("Upload-Length", "$totalLength") }
+            .put(body)
+            .build()
+        return json.decodeFromString(longHttp.newCall(req).awaitBody())
+    }
+
+    /** How much of this file a previous, interrupted upload delivered. 404 from servers without resume support. */
+    suspend fun uploadProgress(callId: String, sha256: String): UploadProgress =
+        get("/v1/calls/$callId/audio/progress", mapOf("sha256" to sha256))
+
+    // ---- Device -----------------------------------------------------------
+
+    suspend fun deviceConfig(): DeviceConfig = get("/v1/device/config")
+    suspend fun heartbeat(req: HeartbeatRequest) = postUnit("/v1/device/heartbeat", req)
+
+    /** Business-only mode: hashed client-list numbers (never the numbers themselves). */
+    /** Returns null when the server says the list is unchanged since [etag] (304), else the list and its ETag. */
+    suspend fun clientNumberHashes(etag: String? = null): Pair<ClientNumberHashes, String?>? {
+        val req = Request.Builder().url(url("/v1/device/client-numbers")).apply { if (etag != null) header("If-None-Match", etag) }.build()
+        return http.newCall(req).await().use { res ->
+            when {
+                res.code == 304 -> null
+                !res.isSuccessful -> throw res.toApiException()
+                else -> json.decodeFromString<ClientNumberHashes>(res.body.string()) to res.header("ETag")
+            }
+        }
+    }
+    suspend fun latestApp(): LatestApp = get("/v1/app/latest")
+
+    /** Streams the published APK to [dest]. Verify LatestApp.sha256 before installing. */
+    suspend fun downloadApk(dest: File) {
+        longHttp.newCall(Request.Builder().url(url("/v1/app/download")).build()).await().use { res ->
+            if (!res.isSuccessful) throw res.toApiException()
+            dest.outputStream().use { out -> res.body.byteStream().copyTo(out) }
+        }
+    }
+
+    // ---- Activity tracker (dialer) ----------------------------------------
+
+    suspend fun postActivity(req: CreateActivityRequest): CreateActivityResponse = post("/v1/activities", req)
+
+    /** Up to 50 queued activities in one request; each item reports its own result. 404 on older servers. */
+    suspend fun postActivities(items: List<CreateActivityRequest>): ActivityBatchResponse =
+        post("/v1/activities/batch", ActivityBatchRequest(items))
+
+    /** Contacts the rep owns or has any activity on; [q] matches name, company or phone. */
+    /** [filter]: interested | callback | never | mine (stage 2 servers; older ones ignore it). */
+    suspend fun contacts(q: String? = null, cursor: String? = null, limit: Int = 50, filter: String? = null): ContactPage =
+        get("/v1/contacts", mapOf("q" to q?.takeIf { it.isNotBlank() }, "cursor" to cursor, "limit" to limit.toString(), "filter" to filter))
+
+    /** Follow-ups due by the end of today (IST), oldest first. */
+    suspend fun followups(): ContactList = get("/v1/contacts/followups")
+
+    // ---- Follow-ups (stage 1) ----
+
+    /** Today's follow-ups and missed-call tasks, plus the next 24 h of follow-ups (for reminders). 404 on older servers. */
+    /** v=2 also returns NEW_LEAD items (this app version understands them). */
+    suspend fun followupsToday(): FollowUpsToday = get("/v1/followups/today", mapOf("v" to "2"))
+
+    // ---- Stage 2/3 ----
+
+    suspend fun outcomes(): OutcomeList = get("/v1/outcomes")
+    suspend fun templates(): TemplateList = get("/v1/templates")
+    suspend fun script(id: String): ScriptDto = get("/v1/scripts/$id")
+    suspend fun myCallLists(): MyCallLists = get("/v1/call-lists")
+
+    /** Claims (or re-returns) my next contact. Throws ApiException 409 LIST_PAUSED / 403 NOT_ASSIGNED. */
+    suspend fun nextInList(listId: String): NextResponse = post("/v1/call-lists/$listId/next", JsonObject(emptyMap()))
+    suspend fun skipItem(itemId: String): NextResponse = post("/v1/call-lists/items/$itemId/skip", JsonObject(emptyMap()))
+    suspend fun releaseList(listId: String) = postUnit("/v1/call-lists/$listId/release", JsonObject(emptyMap()))
+    suspend fun meToday(): MeToday = get("/v1/me/today")
+    suspend fun markDnc(phone: String, reason: String?): DncDto =
+        post("/v1/dnc", DncRequest(phone, reason?.trim()?.takeIf { it.isNotEmpty() }?.take(200)))
+
+    /** Same as [clientNumberHashes] for the do-not-call list: null on 304. */
+    suspend fun dncHashes(etag: String? = null): Pair<ClientNumberHashes, String?>? {
+        val req = Request.Builder().url(url("/v1/dnc/hashes")).apply { if (etag != null) header("If-None-Match", etag) }.build()
+        return http.newCall(req).await().use { res ->
+            when {
+                res.code == 304 -> null
+                !res.isSuccessful -> throw res.toApiException()
+                else -> json.decodeFromString<ClientNumberHashes>(res.body.string()) to res.header("ETag")
+            }
+        }
+    }
+
+    suspend fun features(): Features = get("/api/features")
+
+    /** Up to 50 missed calls; idempotent by clientId, each item reports its own result. */
+    suspend fun postMissed(items: List<MissedCallItem>): MissedCallResponse =
+        post("/v1/followups/missed", MissedCallBatch(items))
+
+    suspend fun patchFollowUp(taskId: String, patch: FollowUpPatch): FollowUpItem =
+        json.decodeFromString(send(jsonRequest("/v1/followups/$taskId", "PATCH", json.encodeToString(patch))))
+
+    suspend fun contactByPhone(phone: String): ContactByPhone = get("/v1/contacts/by-phone", mapOf("phone" to phone))
+
+    /** Sends both fields; null clears a field (blank text is sent as null). */
+    suspend fun patchContact(id: String, name: String?, company: String?): ContactDto {
+        val body = JsonObject(
+            mapOf(
+                "name" to (name?.trim()?.takeIf { it.isNotEmpty() }?.let { JsonPrimitive(it) } ?: JsonNull),
+                "company" to (company?.trim()?.takeIf { it.isNotEmpty() }?.let { JsonPrimitive(it) } ?: JsonNull),
+            ),
+        )
+        return json.decodeFromString(send(jsonRequest("/v1/contacts/$id", "PATCH", body.toString())))
+    }
+
+    // ---- Dashboard API ----------------------------------------------------
+
+    suspend fun me(): Me = get("/api/me")
+
+    suspend fun calls(filter: CallFilter = CallFilter(), cursor: String? = null, limit: Int = 20): CallPage =
+        get("/api/calls", filterQuery(filter) + mapOf("cursor" to cursor, "limit" to limit.toString()))
+
+    private fun filterQuery(filter: CallFilter): Map<String, String?> = mapOf(
+        "q" to filter.q?.takeIf { it.isNotBlank() },
+        "phone" to filter.phone?.takeIf { it.isNotBlank() },
+        "userId" to filter.userId,
+        "direction" to filter.direction?.name,
+        "status" to filter.status?.name,
+        "from" to filter.from,
+        "to" to filter.to,
+    )
+
+    suspend fun call(id: String): CallDetail = get("/api/calls/$id")
+
+    /** CSV of the filtered list (managers/admins; audit-logged, max 10,000 calls). Fetch with a Bearer header. */
+    fun exportUrl(filter: CallFilter): String = url("/api/calls/export", filterQuery(filter)).toString()
+
+    suspend fun summarizeBackfill(): TranslateBackfill = post("/api/admin/summarize-backfill", JsonObject(emptyMap()))
+
+    /** Range-capable audio URL; play it with a Media3 OkHttpDataSource built on [http] (adds Bearer). */
+    fun audioUrl(id: String): String = url("/api/calls/$id/audio").toString()
+
+    suspend fun deleteCall(id: String) {
+        send(Request.Builder().url(url("/api/calls/$id")).delete().build())
+    }
+
+    suspend fun users(): List<AdminUser> = get("/api/users")
+    suspend fun createUser(req: CreateUserRequest): AdminUser = post("/api/users", req)
+
+    suspend fun patchUser(id: String, patch: UserPatch, clearTeam: Boolean = false): AdminUser {
+        var obj = json.encodeToJsonElement(patch).jsonObject
+        if (clearTeam) obj = JsonObject(obj + ("team" to JsonNull))
+        return json.decodeFromString(send(jsonRequest("/api/users/$id", "PATCH", obj.toString())))
+    }
+
+    suspend fun devices(): List<DeviceDto> = get("/api/devices")
+    suspend fun revokeDevice(id: String) = postUnit("/api/devices/$id/revoke", JsonObject(emptyMap()))
+    suspend fun settings(): ServerSettings = get("/api/settings")
+
+    suspend fun putDeviceConfig(cfg: DeviceConfig): DeviceConfig {
+        val body = JsonObject(json.encodeToJsonElement(cfg).jsonObject - "excludedNumbers")
+        return json.decodeFromString(send(jsonRequest("/api/settings/device-config", "PUT", body.toString())))
+    }
+
+    suspend fun stats(): Stats = get("/api/stats")
+
+    suspend fun firefliesUsage(): FirefliesUsage = get("/api/fireflies/usage")
+
+    suspend fun putFireflies(patch: FirefliesPatch): FirefliesUsage =
+        json.decodeFromString(send(jsonRequest("/api/settings/fireflies", "PUT", json.encodeToString(patch))))
+
+    suspend fun translationUsage(): TranslationUsage = get("/api/translation/usage")
+
+    suspend fun putCostSettings(patch: CostSettingsPatch): TranslationUsage =
+        json.decodeFromString(send(jsonRequest("/api/settings/costs", "PUT", json.encodeToString(patch))))
+
+    /** Queues an English translation for every transcript that has none yet (admin only). */
+    suspend fun translateBackfill(): TranslateBackfill = post("/api/admin/translate-backfill", JsonObject(emptyMap()))
+
+    /** Queues compression of large transcribed recordings, oldest first; [limit] for a trial run (admin only). */
+    suspend fun compressBackfill(limit: Int? = null): TranslateBackfill =
+        post("/api/admin/compress-backfill", JsonObject(if (limit != null) mapOf("limit" to JsonPrimitive(limit)) else emptyMap()))
+
+    // ---- Privacy (admin) ----
+
+    suspend fun privacySettings(): PrivacySettings = get("/api/settings/privacy")
+
+    /** Sends both fields; retentionMonths null = keep forever. */
+    suspend fun putPrivacySettings(s: PrivacySettings): PrivacySettings {
+        val body = JsonObject(
+            mapOf(
+                "retentionMonths" to (s.retentionMonths?.let { JsonPrimitive(it) } ?: JsonNull),
+                "maskPii" to JsonPrimitive(s.maskPii),
+            ),
+        )
+        return json.decodeFromString(send(jsonRequest("/api/settings/privacy", "PUT", body.toString())))
+    }
+
+    suspend fun clientNumbers(): ClientNumberList = get("/api/client-numbers")
+    suspend fun addClientNumber(req: AddClientNumber): ClientNumberDto = post("/api/client-numbers", req)
+    suspend fun importClientNumbers(csv: String): ClientImportResult = post("/api/client-numbers/import", ClientCsv(csv))
+    suspend fun deleteClientNumber(id: String) {
+        send(Request.Builder().url(url("/api/client-numbers/$id")).delete().build())
+    }
+
+    suspend fun audit(action: String? = null, cursor: String? = null, limit: Int = 50): AuditPage =
+        get("/api/audit", mapOf("action" to action, "cursor" to cursor, "limit" to limit.toString()))
+
+    /** Download URL for a recording; the server records a DOWNLOAD in the audit log. */
+    fun downloadUrl(id: String): String = url("/api/calls/$id/audio", mapOf("download" to "1")).toString()
+
+    /** Posts a test message to the Zoho Cliq alert channel (admin only). */
+    suspend fun testAlert(): TestAlertResult = post("/api/admin/test-alert", JsonObject(emptyMap()))
+
+    // ---- Plumbing ---------------------------------------------------------
+
+    fun url(path: String, query: Map<String, String?> = emptyMap()): HttpUrl =
+        baseUrl.newBuilder().addPathSegments(path.trimStart('/')).apply {
+            query.forEach { (k, v) -> if (v != null) addQueryParameter(k, v) }
+        }.build()
+
+    private suspend inline fun <reified T> get(path: String, query: Map<String, String?> = emptyMap()): T =
+        json.decodeFromString(send(Request.Builder().url(url(path, query)).build()))
+
+    private suspend inline fun <reified B, reified T> post(path: String, body: B): T =
+        json.decodeFromString(send(jsonRequest(path, "POST", json.encodeToString(body))))
+
+    private suspend inline fun <reified B> postUnit(path: String, body: B) {
+        send(jsonRequest(path, "POST", json.encodeToString(body)))
+    }
+
+    private fun jsonRequest(path: String, method: String, body: String) =
+        Request.Builder().url(url(path)).method(method, body.toRequestBody(JSON)).build()
+
+    private suspend fun send(req: Request): String = http.newCall(req).awaitBody()
+
+    private suspend fun Call.awaitBody(): String = await().use { res ->
+        if (!res.isSuccessful) throw res.toApiException()
+        res.body.string()
+    }
+
+    private fun Response.toApiException(): ApiException {
+        val parsed = runCatching { json.decodeFromString<ErrorBody>(body.string()) }.getOrNull()
+        val msg = parsed?.error
+        return ApiException(code, msg ?: message.ifBlank { "HTTP $code" }, fromServer = msg != null, errorCode = parsed?.code)
+    }
+
+    private inner class BearerInterceptor : Interceptor {
+        override fun intercept(chain: Interceptor.Chain): Response {
+            val req = chain.request()
+            if (req.url.encodedPath.startsWith("/v1/auth/") || req.header(AUTH) != null) return chain.proceed(req)
+            var token = tokens.accessToken ?: return chain.proceed(req)
+            // Refresh before sending when about to expire, so large upload bodies aren't sent twice.
+            if (tokens.accessExpiresAtMs - System.currentTimeMillis() < 30_000) token = refreshLocked(token) ?: token
+            return chain.proceed(req.newBuilder().header(AUTH, "Bearer $token").build())
+        }
+    }
+
+    private inner class RefreshAuthenticator : Authenticator {
+        override fun authenticate(route: Route?, response: Response): Request? {
+            val req = response.request
+            if (req.url.encodedPath.startsWith("/v1/auth/") || response.priorResponse != null) return null
+            val sent = req.header(AUTH)?.removePrefix("Bearer ") ?: return null
+            val fresh = refreshLocked(sent) ?: return null
+            if (fresh == sent) return null
+            return req.newBuilder().header(AUTH, "Bearer $fresh").build()
+        }
+    }
+
+    /** Returns an access token newer than [stale], rotating the refresh token at most once across threads. */
+    private fun refreshLocked(stale: String): String? = synchronized(lock) {
+        val current = tokens.accessToken ?: return null
+        if (current != stale) return current // another request already refreshed
+        val refresh = tokens.refreshToken ?: return null
+        val req = Request.Builder().url(url("/v1/auth/refresh"))
+            .post(json.encodeToString(RefreshRequest(refresh)).toRequestBody(JSON))
+            .build()
+        val res = try { refreshClient.newCall(req).execute() } catch (_: IOException) { return null }
+        res.use {
+            // Only our server's own "refresh token invalid" (401 + JSON error) ends the session. A proxy's 404/403
+            // page while the server is down or redeploying must not sign the rep out (that wipes local state).
+            if (it.code == 401) {
+                val fromServer = runCatching { json.decodeFromString<ErrorBody>(it.body.string()) }.isSuccess
+                if (fromServer) tokens.onRefreshFailed()
+                return null
+            }
+            if (!it.isSuccessful) return null
+            val auth = runCatching { json.decodeFromString<AuthResponse>(it.body.string()) }.getOrNull() ?: return null
+            tokens.save(auth)
+            auth.accessToken
+        }
+    }
+
+    companion object {
+        private const val AUTH = "Authorization"
+        private val JSON = "application/json".toMediaType()
+
+        /** Re-openable streaming body for a content:// recording (not one-shot, so auth retries work). */
+        /** Streams [uri] from byte [offset] on ([length] is the whole file's size, or -1 if unknown). */
+        fun contentUriBody(resolver: ContentResolver, uri: Uri, mime: String, length: Long = -1, offset: Long = 0): RequestBody =
+            object : RequestBody() {
+                override fun contentType(): MediaType = mime.toMediaType()
+                override fun contentLength() = if (length < 0) -1 else length - offset
+                override fun writeTo(sink: BufferedSink) {
+                    // Must stay an IOException: anything else thrown on OkHttp's thread crashes the process.
+                    val input = try { resolver.openInputStream(uri) } catch (e: SecurityException) { throw IOException("No access: $uri", e) }
+                        ?: throw IOException("Cannot open $uri")
+                    input.source().buffer().use { src ->
+                        if (offset > 0) src.skip(offset)
+                        sink.writeAll(src)
+                    }
+                }
+            }
+
+        /** Streams [file] from byte [offset] on. */
+        fun fileBody(file: java.io.File, mime: String, offset: Long = 0): RequestBody =
+            object : RequestBody() {
+                override fun contentType(): MediaType = mime.toMediaType()
+                override fun contentLength() = file.length() - offset
+                override fun writeTo(sink: BufferedSink) {
+                    file.source().buffer().use { src ->
+                        if (offset > 0) src.skip(offset)
+                        sink.writeAll(src)
+                    }
+                }
+            }
+    }
+}
+
+/** Suspends on an OkHttp call; cancelling the coroutine cancels the call. Caller closes the Response. */
+suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
+    cont.invokeOnCancellation { cancel() }
+    enqueue(object : Callback {
+        override fun onFailure(call: Call, e: IOException) = cont.resumeWithException(e)
+        override fun onResponse(call: Call, response: Response) =
+            cont.resume(response) { _, value, _ -> value.close() }
+    })
+}

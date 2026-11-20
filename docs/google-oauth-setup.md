@@ -18,7 +18,7 @@ The dashboard and the Android app both sign in with Google. The server checks th
 
 ## 3. Android clients (one per signing key)
 Credential Manager needs an Android client for the package and each key that signs installed builds:
-1. Clients > Create client > **Android**, package `com.usaindiacfo.uicrecorder`, SHA-1 of the **release** key
+1. Clients > Create client > **Android**, package `com.usaindiacfo.uicdialer`, SHA-1 of the **release** key
    (`keytool -list -v -keystore <release.jks> -alias uic`).
 2. Optional: a second Android client with the debug key SHA-1 (`keytool -list -v -keystore %USERPROFILE%\.android\debug.keystore -alias androiddebugkey -storepass android`) for local testing.
 

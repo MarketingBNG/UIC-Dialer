@@ -53,7 +53,7 @@ Newest first. One line each for the problem, cause and fix.
 
 ## New Android file under `data/db/` was not picked up by git (M3)
 - **Cause:** the root `.gitignore` rule `data/` (meant for server recordings) also matches the app's `data` package.
-- **Fix:** added `ClientHash.kt` with `git add -f`; check `git status` for new files under `.../uicrecorder/data/`.
+- **Fix:** added `ClientHash.kt` with `git add -f`; check `git status` for new files under `.../uicdialer/data/`.
 
 ## Test database would not start while the dev database was running (M3, local dev)
 - **Cause:** `npm test` reuses `.pgtest` on port 54339; a leftover test Postgres child process still held it ("pre-existing shared memory block is still in use").
