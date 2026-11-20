@@ -1,10 +1,8 @@
 package com.usaindiacfo.uicdialer.ui.theme
 
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
@@ -51,35 +49,14 @@ private val Light = lightColorScheme(
     outlineVariant = Color(0xFFE3E7EF),
 )
 
-private val Dark = darkColorScheme(
-    primary = Color(0xFFA9C7FF),
-    onPrimary = Color(0xFF003063),
-    primaryContainer = Color(0xFF1F4E8C),
-    onPrimaryContainer = Color(0xFFD6E3FF),
-    secondary = Color(0xFFB9C8E0),
-    onSecondary = Color(0xFF0F2A4D),
-    tertiary = Color(0xFF6EE7A0),
-    onTertiary = Color(0xFF003919),
-    tertiaryContainer = Color(0xFF14532D),
-    onTertiaryContainer = Color(0xFFDDF3E4),
-    error = Color(0xFFFF9C9C),
-    background = Color(0xFF0E1420),
-    surface = Color(0xFF161D2B),
-    surfaceVariant = Color(0xFF232C3D),
-    surfaceContainer = Color(0xFF161D2B),
-    surfaceContainerLow = Color(0xFF161D2B),
-    surfaceContainerHigh = Color(0xFF1C2433),
-    surfaceContainerHighest = Color(0xFF232C3D),
-)
-
 private val UicShapes = Shapes(
     small = RoundedCornerShape(10.dp),
     medium = RoundedCornerShape(16.dp),
     large = RoundedCornerShape(16.dp),
 )
 
-/** Material 3 with the brand palette (no dynamic colour, so every phone looks like the mockup). */
+/** Material 3 with the brand palette, always light (no dark mode, no dynamic colour), so every phone looks like the mockup. */
 @Composable
-fun UicTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = if (dark) Dark else Light, shapes = UicShapes, content = content)
+fun UicTheme(content: @Composable () -> Unit) {
+    MaterialTheme(colorScheme = Light, shapes = UicShapes, content = content)
 }
