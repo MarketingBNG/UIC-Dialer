@@ -42,3 +42,9 @@ Thumbs.db
 # Claude Code worktrees (temporary branches)
 .claude/worktrees/
 *.tsbuildinfo
+
+# Desktop app icon (electron-builder buildResources)
+!desktop/build/
+desktop/build/*
+!desktop/build/icon.ico
+!desktop/build/icon.png

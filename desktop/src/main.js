@@ -14,6 +14,8 @@ const path = require("node:path");
 const rules = require("./rules.js");
 
 const APP_URL = rules.resolveAppUrl(process.env.UIC_URL);
+// Logo for the window and tray; the .exe and installer get build/icon.ico from electron-builder.
+const APP_ICON = path.join(__dirname, "..", "build", "icon.png");
 const SCHEME = rules.SCHEME;
 const APP_ID = "com.usaindiacfo.uicdialer";
 /** Started by "Start with Windows": come up in the tray without a window. */
@@ -147,6 +149,7 @@ function createWindow() {
     minHeight: 520,
     show: false,
     title: "UIC Dialer",
+    icon: APP_ICON,
     autoHideMenuBar: true,
     backgroundColor: "#ffffff",
     webPreferences: {
@@ -259,9 +262,8 @@ function showWindow() {
 // ---- tray ---------------------------------------------------------------
 
 async function createTray() {
-  // The installed exe's icon (Electron's default until a branded build/icon.ico is added).
-  const icon = await app.getFileIcon(process.execPath, { size: "small" }).catch(() => nativeImage.createEmpty());
-  tray = new Tray(icon);
+  const icon = nativeImage.createFromPath(APP_ICON).resize({ width: 16, height: 16 });
+  tray = new Tray(icon.isEmpty() ? nativeImage.createEmpty() : icon);
   tray.setToolTip("UIC Dialer");
   tray.on("click", showWindow);
   refreshTray();
