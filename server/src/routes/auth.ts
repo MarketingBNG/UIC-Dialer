@@ -2,7 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
 import { claimsToIdentity } from "../auth/google.js";
-import { SESSION_COOKIE, SESSION_TTL_S } from "../auth/guards.js";
+import { SESSION_COOKIE, issueSession } from "../auth/guards.js";
 import { AccessDeniedError, resolveUser } from "../auth/users.js";
 import { HttpError, type Deps } from "../context.js";
 
@@ -137,8 +137,7 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
               `<p>Signed in. Returning to UIC Dialer…</p><p><a href="${target}">Open UIC Dialer</a></p><p>You can close this tab.</p>`,
           );
       }
-      const session = await deps.tokens.seal({ typ: "session", uid: user.id }, SESSION_TTL_S);
-      reply.setCookie(SESSION_COOKIE, session, { ...cookieOpts, maxAge: SESSION_TTL_S });
+      await issueSession(deps, reply, user.id);
       return reply.redirect("/");
     } catch (e) {
       req.log.warn({ err: e }, "dashboard sign-in failed");
@@ -168,8 +167,7 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
     usedCodes.set(jti, now + DESKTOP_CODE_TTL_S * 1000);
     const user = await deps.db.user.findUnique({ where: { id: uid } });
     if (!user?.active) return reply.redirect("/?error=denied");
-    const session = await deps.tokens.seal({ typ: "session", uid: user.id }, SESSION_TTL_S);
-    reply.setCookie(SESSION_COOKIE, session, { ...cookieOpts, maxAge: SESSION_TTL_S });
+    await issueSession(deps, reply, user.id);
     return reply.redirect("/");
   });
 

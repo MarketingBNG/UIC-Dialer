@@ -1,10 +1,24 @@
-import type { FastifyRequest } from "fastify";
+import type { FastifyReply, FastifyRequest } from "fastify";
 import { HttpError, type Deps } from "../context.js";
 import type { Prisma, Role, User } from "../generated/prisma/client.js";
 import { safeEqual } from "./tokens.js";
 
 export const SESSION_COOKIE = "uic_session";
-export const SESSION_TTL_S = 12 * 3600;
+/** Sliding: a session ends after 30 days without use (it's renewed at most hourly while used)... */
+export const SESSION_TTL_S = 30 * 24 * 3600;
+/** ...and 90 days after sign-in at the latest, so everyone signs in with Google again now and then. */
+export const SESSION_MAX_S = 90 * 24 * 3600;
+const SESSION_RENEW_AFTER_S = 3600;
+
+export function sessionCookieOptions(deps: Deps) {
+  return { httpOnly: true, secure: deps.config.NODE_ENV === "production", sameSite: "lax" as const, path: "/", maxAge: SESSION_TTL_S };
+}
+
+/** Sets a fresh session cookie. [since] = original sign-in time (unix seconds), kept across renewals. */
+export async function issueSession(deps: Deps, reply: FastifyReply, uid: string, since = Math.floor(Date.now() / 1000)) {
+  const session = await deps.tokens.seal({ typ: "session", uid, since }, SESSION_TTL_S);
+  reply.setCookie(SESSION_COOKIE, session, sessionCookieOptions(deps));
+}
 
 function bearer(req: FastifyRequest): string | undefined {
   const h = req.headers.authorization;
@@ -38,7 +52,7 @@ export function requireDevice(deps: Deps) {
  */
 export function requireSession(deps: Deps, roles?: Role[]) {
   const device = requireDevice(deps);
-  return async (req: FastifyRequest) => {
+  return async (req: FastifyRequest, reply?: FastifyReply) => {
     if (bearer(req)) {
       await device(req);
       if (roles && !roles.includes(req.user!.role)) throw new HttpError(403, "Forbidden");
@@ -47,10 +61,14 @@ export function requireSession(deps: Deps, roles?: Role[]) {
     const cookie = req.cookies[SESSION_COOKIE];
     if (!cookie) throw new HttpError(401, "Not signed in");
     let uid: unknown;
+    let iat = 0;
+    let since = 0;
     try {
       const claims = await deps.tokens.unseal(cookie);
       // Only real session cookies: a sealed desktop code or OIDC state must not work as a session.
       if (claims["typ"] === "session") uid = claims["uid"];
+      iat = typeof claims["iat"] === "number" ? claims["iat"] : 0;
+      since = typeof claims["since"] === "number" ? claims["since"] : iat;
     } catch {
       throw new HttpError(401, "Session expired");
     }
@@ -62,6 +80,10 @@ export function requireSession(deps: Deps, roles?: Role[]) {
       const origin = req.headers.origin;
       if (origin !== new URL(deps.config.PUBLIC_URL).origin) throw new HttpError(403, "Bad origin");
     }
+    const now = Math.floor(Date.now() / 1000);
+    if (now - since > SESSION_MAX_S) throw new HttpError(401, "Session expired");
+    // Keep active users signed in: renew the cookie (at most hourly) while it's being used.
+    if (reply && now - iat > SESSION_RENEW_AFTER_S) await issueSession(deps, reply, user.id, since);
     req.user = user;
   };
 }
