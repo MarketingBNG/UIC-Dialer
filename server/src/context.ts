@@ -24,6 +24,8 @@ declare module "fastify" {
   interface FastifyRequest {
     user?: User;
     device?: Device;
+    /** The dashboard sign-in (web_sessions row) behind a cookie request. */
+    webSessionId?: string | undefined;
   }
 }
 

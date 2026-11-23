@@ -135,7 +135,7 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
             desktopReturnPage(target),
           );
       }
-      await issueSession(deps, reply, user.id);
+      await issueSession(deps, req, reply, user.id);
       return reply.redirect("/");
     } catch (e) {
       req.log.warn({ err: e }, "dashboard sign-in failed");
@@ -165,12 +165,18 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
     usedCodes.set(jti, now + DESKTOP_CODE_TTL_S * 1000);
     const user = await deps.db.user.findUnique({ where: { id: uid } });
     if (!user?.active) return reply.redirect("/?error=denied");
-    await issueSession(deps, reply, user.id);
+    await issueSession(deps, req, reply, user.id);
     return reply.redirect("/");
   });
 
   app.post("/auth/logout", async (req, reply) => {
     if (req.headers.origin !== new URL(deps.config.PUBLIC_URL).origin) throw new HttpError(403, "Bad origin");
+    // Mark this computer signed out on the Health page.
+    const cookie = req.cookies[SESSION_COOKIE];
+    if (cookie) {
+      const sid = await deps.tokens.unseal(cookie).then((c) => (typeof c["sid"] === "string" ? c["sid"] : null)).catch(() => null);
+      if (sid) await deps.db.webSession.updateMany({ where: { id: sid, revokedAt: null }, data: { revokedAt: new Date() } });
+    }
     reply.clearCookie(SESSION_COOKIE, cookieOpts);
     return reply.code(204).send();
   });

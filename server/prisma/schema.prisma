@@ -93,6 +93,7 @@ model User {
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
   devices  Device[]
+  webSessions WebSession[]
   calls    Call[]
   auditLog AuditLog[]
 
@@ -738,3 +739,23 @@ model CallScore {
 
   @@map("call_scores")
 }
+
+/// A dashboard sign-in: the Windows app or a browser. Listed with the phones on the Health page; revoking one
+/// signs that computer out on its next request.
+model WebSession {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  /// "desktop" (UIC Dialer for Windows) or "browser".
+  kind        String
+  /// Windows app version, or a short browser name ("Chrome 142 on Windows").
+  label       String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  lastSeenAt  DateTime  @default(now()) @map("last_seen_at")
+  revokedAt   DateTime? @map("revoked_at")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([lastSeenAt])
+  @@map("web_sessions")
+}
+

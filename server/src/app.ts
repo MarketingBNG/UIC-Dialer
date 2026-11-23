@@ -64,7 +64,16 @@ export async function buildApp(deps: Deps, opts: FastifyServerOptions = {}) {
     return reply.code(500).send({ error: "Internal error" });
   });
 
-  app.get("/health", { config: { rateLimit: false } }, async () => {
+  // Built dashboard (React SPA), served from the same origin.
+  // Built: dist/src/app.js -> dist/public. Dev (tsx src/app.ts): falls back to dist/public too.
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const publicDir = [path.resolve(here, "../public"), path.resolve(here, "../dist/public")].find((d) =>
+    existsSync(path.join(d, "index.html")),
+  );
+  app.get("/health", { config: { rateLimit: false } }, async (req, reply) => {
+    // The dashboard also has a /health page: a browser loading it (reload, bookmark) gets the app, not this JSON.
+    // Health checks (curl, Coolify, uptime monitors) don't ask for text/html.
+    if (publicDir && req.headers.accept?.includes("text/html")) return reply.sendFile("index.html");
     await deps.db.$queryRaw`SELECT 1`;
     return { ok: true };
   });
@@ -87,12 +96,6 @@ export async function buildApp(deps: Deps, opts: FastifyServerOptions = {}) {
   await app.register(async (s) => leadRoutes(s, deps));
   await app.register(async (s) => teamRoutes(s, deps));
 
-  // Built dashboard (React SPA), served from the same origin.
-  // Built: dist/src/app.js -> dist/public. Dev (tsx src/app.ts): falls back to dist/public too.
-  const here = path.dirname(fileURLToPath(import.meta.url));
-  const publicDir = [path.resolve(here, "../public"), path.resolve(here, "../dist/public")].find((d) =>
-    existsSync(path.join(d, "index.html")),
-  );
   if (publicDir) {
     await app.register(fastifyStatic, { root: publicDir, wildcard: false });
     app.setNotFoundHandler((req, reply) => {

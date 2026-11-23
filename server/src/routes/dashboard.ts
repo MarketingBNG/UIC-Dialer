@@ -372,6 +372,31 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     return reply.code(204).send();
   });
 
+  /** Computers signed in to the dashboard (Windows app and browsers): in use in the last 30 days, or revoked this week. */
+  app.get("/api/web-sessions", managers, async () => {
+    const day = 24 * 3600 * 1000;
+    const rows = await deps.db.webSession.findMany({
+      where: {
+        OR: [
+          { revokedAt: null, lastSeenAt: { gte: new Date(Date.now() - 30 * day) } },
+          { revokedAt: { gte: new Date(Date.now() - 7 * day) } },
+        ],
+      },
+      orderBy: { lastSeenAt: "desc" },
+      include: { user: { select: { id: true, name: true, email: true } } },
+      take: 500,
+    });
+    return { items: rows };
+  });
+
+  app.post("/api/web-sessions/:id/revoke", admins, async (req, reply) => {
+    const id = idParam(req);
+    const { count } = await deps.db.webSession.updateMany({ where: { id, revokedAt: null }, data: { revokedAt: new Date() } });
+    if (!count) throw new HttpError(404, "Sign-in not found");
+    await audit(req, "DEVICE_REVOKE", undefined, { webSessionId: id });
+    return reply.code(204).send();
+  });
+
   // ---- Settings & health ------------------------------------------------
 
   app.get("/api/settings", admins, async () => getSettings(deps.db));

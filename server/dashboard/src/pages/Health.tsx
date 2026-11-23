@@ -5,6 +5,7 @@ import { useMe } from "../App";
 import { STATUS_LABEL, ago, jobStatusLabel, formatBytes, formatWhen, personName } from "../format";
 import { FirefliesPanel } from "../components/Fireflies";
 import { TranslationPanel } from "../components/Translation";
+import { ComputersPanel } from "../components/Computers";
 import { Empty, ErrorBox, FormError, PageHeader, Spinner } from "../ui";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { RefreshCw, Send, Smartphone } from "lucide-react";
@@ -51,7 +52,7 @@ export function HealthPage() {
     <>
       <PageHeader
         title="Sync health"
-        subtitle="Phones that upload recordings. A phone not seen for 24 hours is flagged."
+        subtitle="Phones that upload recordings (a phone not seen for 24 hours is flagged), and computers signed in to the dashboard."
         actions={
           <Button variant="outline"
             disabled={devices.isFetching}
@@ -167,6 +168,8 @@ export function HealthPage() {
           })}
         </ul>
       )}
+
+      <ComputersPanel isAdmin={isAdmin} />
 
       <AlertDialog
         open={!!confirm}
