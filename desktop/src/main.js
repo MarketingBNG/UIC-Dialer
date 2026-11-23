@@ -8,7 +8,7 @@
 // The link and sign-in rules are in rules.js, tested by test/rules.test.js.
 "use strict";
 
-const { app, BrowserWindow, Menu, Tray, dialog, nativeImage, screen, session, shell } = require("electron");
+const { app, BrowserWindow, Menu, Tray, dialog, nativeImage, powerSaveBlocker, screen, session, shell } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 const rules = require("./rules.js");
@@ -29,6 +29,27 @@ let flows = [];
 /** Failed page loads in a row; sets the retry wait, reset by a good load. */
 let failures = 0;
 let retryTimer = null;
+
+// Startup timing: ms since launch for each step, one line per launch in logs/startup.log (last 50 kept).
+const launchedAt = Date.now();
+const marks = {};
+let timingWritten = false;
+function mark(name) {
+  if (!(name in marks)) marks[name] = Date.now() - launchedAt;
+}
+function writeStartupTiming() {
+  if (timingWritten) return;
+  timingWritten = true;
+  try {
+    const file = path.join(app.getPath("logs"), "startup.log");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const line = `${new Date().toISOString()} v${app.getVersion()}${startHidden ? " hidden" : ""} ${Object.entries(marks).map(([k, v]) => `${k}=${v}ms`).join(" ")}`;
+    const old = fs.existsSync(file) ? fs.readFileSync(file, "utf8").split("\n").filter(Boolean) : [];
+    fs.writeFileSync(file, [...old.slice(-49), line].join("\n") + "\n");
+  } catch {
+    /* timing is best-effort */
+  }
+}
 
 // ---- small helpers ------------------------------------------------------
 
@@ -128,11 +149,23 @@ function scheduleRetry(reason, url) {
   const wait = rules.retryDelayMs(failures);
   failures += 1;
   log(`load problem: ${reason}; retrying in ${wait / 1000}s`);
+  const target = rules.sameOrigin(url, APP_URL) && !url.includes("/auth/") ? url : APP_URL.href;
+  // A friendly "can't reach" page with a countdown and Retry now, instead of Chromium's error or a blank page.
+  void win
+    .loadFile(path.join(__dirname, "offline.html"), { query: { reason, wait: String(wait), target } })
+    .then(() => {
+      // A failed first load never paints, so "ready-to-show" never fires: show the offline page instead.
+      if (!startHidden && win && !win.isDestroyed() && !win.isVisible()) {
+        win.show();
+        mark("shown");
+      }
+    })
+    .catch(() => {});
   retryTimer = setTimeout(() => {
     retryTimer = null;
     if (!win || win.isDestroyed()) return;
     // Back to the page that failed when it's ours, so the rep lands where they were.
-    void win.loadURL(rules.sameOrigin(url, APP_URL) && !url.includes("/auth/") ? url : APP_URL.href);
+    void win.loadURL(target);
   }, wait);
 }
 
@@ -158,8 +191,11 @@ function createWindow() {
       nodeIntegration: false,
       webviewTag: false,
       spellcheck: true,
+      // Lives in the tray: keep timers (follow-up reminders, live updates) running at full speed while hidden.
+      backgroundThrottling: false,
     },
   });
+  mark("window");
   if (state?.maximised) win.maximize();
   const wc = win.webContents;
 
@@ -169,7 +205,15 @@ function createWindow() {
 
   // Show once painted, so there's no white flash; "Start with Windows" keeps it in the tray.
   win.once("ready-to-show", () => {
-    if (!startHidden) win?.show();
+    mark("painted");
+    if (!startHidden) {
+      win?.show();
+      mark("shown");
+    }
+  });
+  wc.once("did-finish-load", () => {
+    mark("loaded");
+    writeStartupTiming();
   });
 
   // Ctrl + / Ctrl - / Ctrl 0 zoom, including the "=" key and the numpad (the default binding needs Shift).
@@ -188,7 +232,12 @@ function createWindow() {
     return { action: "deny" };
   });
   wc.on("will-navigate", (e, url) => {
-    if (!route(url)) e.preventDefault();
+    if (!route(url)) return e.preventDefault();
+    // "Retry now" on the offline page: this load replaces the scheduled one.
+    if (retryTimer && wc.getURL().startsWith("file:")) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
   });
   // A server redirect elsewhere fires will-redirect, not will-navigate.
   wc.on("will-redirect", (e, url) => {
@@ -332,6 +381,9 @@ function main() {
   else app.setAsDefaultProtocolClient(SCHEME);
 
   app.whenReady().then(() => {
+    mark("ready");
+    // Don't let Windows suspend the app in the tray (reminders and live updates keep working).
+    powerSaveBlocker.start("prevent-app-suspension");
     // Taskbar grouping and notifications under "UIC Dialer", not "electron.app.Electron".
     app.setAppUserModelId(APP_ID);
     // The dashboard needs no camera, mic or location; only notifications (follow-up reminders), and only for the
