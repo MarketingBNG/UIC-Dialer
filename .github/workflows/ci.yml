@@ -148,8 +148,12 @@ jobs:
         run: |
           npm ci --no-fund
           # Always higher than any earlier build: 1.2.<run number>.
-          npm version --no-git-tag-version "1.2.${{ github.run_number }}"
-          npx electron-builder --win nsis --publish always
+          v="1.2.${{ github.run_number }}"
+          npm version --no-git-tag-version "$v"
+          # Build, then create the release with every file in one go (electron-builder's own upload races
+          # itself creating the release). latest.yml is what installed apps read to find the update.
+          npx electron-builder --win nsis --publish never
+          gh release create "v$v" --target "${{ github.sha }}" --title "UIC Dialer for Windows $v"             --notes "Desktop app $v. Installed apps update by themselves."             "dist/UIC-Dialer-Setup-$v.exe" "dist/UIC-Dialer-Setup-$v.exe.blockmap" dist/latest.yml
 
   secrets:
     name: Secret scan (gitleaks)
