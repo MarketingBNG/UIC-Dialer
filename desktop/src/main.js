@@ -12,6 +12,7 @@ const { app, BrowserWindow, Menu, Tray, dialog, nativeImage, powerSaveBlocker, s
 const fs = require("node:fs");
 const path = require("node:path");
 const rules = require("./rules.js");
+const { startUpdater } = require("./updater.js");
 
 const APP_URL = rules.resolveAppUrl(process.env.UIC_URL);
 // Logo for the window and tray; the .exe and installer get build/icon.ico from electron-builder.
@@ -23,6 +24,8 @@ const startHidden = process.argv.includes("--hidden");
 
 let win = null;
 let tray = null;
+/** Auto-update (installed app only); set once the app is ready. */
+let updater = null;
 let quitting = false;
 /** Browser sign-ins started from this app and not yet finished (see rules.addFlow). */
 let flows = [];
@@ -330,6 +333,7 @@ function refreshTray() {
     Menu.buildFromTemplate([
       { label: "Open UIC Dialer", click: showWindow },
       { label: `Version ${app.getVersion()}`, enabled: false },
+      ...updateMenuItems(),
       { type: "separator" },
       { label: "Reload", click: () => win?.webContents.reload() },
       // Reachable even when the window shows an error, which is when it's needed.
@@ -357,6 +361,14 @@ function refreshTray() {
       },
     ]),
   );
+}
+
+function updateMenuItems() {
+  const u = updater?.state();
+  if (!u) return [];
+  if (u.status === "ready") return [{ label: `Restart to update (v${u.version})`, click: () => updater.installNow() }];
+  if (u.status === "downloading") return [{ label: `Downloading update v${u.version}…`, enabled: false }];
+  return [];
 }
 
 // ---- startup ------------------------------------------------------------
@@ -401,6 +413,7 @@ function main() {
     Menu.setApplicationMenu(null);
     createWindow();
     void createTray();
+    updater = startUpdater({ log, onChange: refreshTray, isIdle: () => !win || win.isDestroyed() || !win.isVisible() });
     log(`started${startHidden ? " (hidden)" : ""} → ${APP_URL.origin}`);
   });
   app.on("before-quit", () => {
