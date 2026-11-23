@@ -199,8 +199,9 @@ function createWindow() {
   if (state?.maximised) win.maximize();
   // Taskbar icon and pinned shortcut under our name and logo (otherwise Windows shows electron.exe's icon).
   if (process.platform === "win32") {
-    win.setAppDetails({ appId: APP_ID, // Installed: the .exe carries icon.ico (Windows can't read icons inside app.asar).
-      appIconPath: app.isPackaged ? process.execPath : path.join(__dirname, "..", "build", "icon.ico"), appIconIndex: 0, relaunchDisplayName: "UIC Dialer" });
+    // Installed, the .exe carries icon.ico (Windows can't read icons inside app.asar).
+    const appIconPath = app.isPackaged ? process.execPath : path.join(__dirname, "..", "build", "icon.ico");
+    win.setAppDetails({ appId: APP_ID, appIconPath, appIconIndex: 0, relaunchDisplayName: "UIC Dialer" });
   }
   const wc = win.webContents;
 
