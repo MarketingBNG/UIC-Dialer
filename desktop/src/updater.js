@@ -25,6 +25,7 @@ function startUpdater({ log, onChange, isIdle }) {
   const { autoUpdater } = require("electron-updater");
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.disableWebInstaller = true; // we ship the full installer, not the web one
   autoUpdater.logger = { info: () => {}, warn: (m) => log(`update: ${m}`), error: (m) => log(`update error: ${m}`), debug: () => {} };
 
   let timer = null;
