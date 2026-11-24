@@ -175,7 +175,7 @@ private fun ConfigEditor(
         Segments(listOf("any" to "Any network", "wifi" to "Wi-Fi only"), form.liveNetwork) { onChange(form.copy(liveNetwork = it)) }
 
         HorizontalDivider()
-        SwitchRow("Sync old recordings (backlog)", "Only while charging on Wi-Fi", form.backlogEnabled) {
+        SwitchRow("Sync old recordings (backlog)", "On any network, unless the battery is low", form.backlogEnabled) {
             onChange(form.copy(backlogEnabled = it))
         }
         OutlinedTextField(

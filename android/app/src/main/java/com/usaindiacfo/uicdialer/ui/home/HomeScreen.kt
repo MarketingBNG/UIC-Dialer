@@ -107,7 +107,7 @@ fun SyncStatus(onOpenSetup: () -> Unit) {
                         modifier = Modifier.fillMaxWidth(),
                     )
                     Text(
-                        "These upload while the phone is charging on Wi-Fi.",
+                        "These upload in the background.",
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }

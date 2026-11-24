@@ -23,7 +23,9 @@ object SyncScheduler {
     const val SCAN_NOW = "uic-scan-now"
     const val RECHECK = "uic-recheck"
     const val UPLOAD = "uic-upload-live"
-    const val BACKLOG = "uic-backlog"
+    /** "-2": a new name so phones drop the old job, which waited for charging + Wi-Fi (KEEP would keep it). */
+    const val BACKLOG = "uic-backlog-2"
+    private const val OLD_BACKLOG = "uic-backlog"
     const val SWEEP = "uic-sweep"
     const val ACTIVITIES = "uic-activities"
     const val RESUME = "uic-resume"
@@ -37,6 +39,7 @@ object SyncScheduler {
                 .setConstraints(Constraints.Builder().setRequiresCharging(true).build())
                 .build(),
         )
+        WorkManager.getInstance(context).cancelUniqueWork(OLD_BACKLOG)
         enqueueBacklog(context)
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             RESUME, ExistingPeriodicWorkPolicy.KEEP,
@@ -118,11 +121,10 @@ object SyncScheduler {
         WorkManager.getInstance(context).enqueueUniqueWork(ACTIVITIES, policy, req)
     }
 
-    /** Old recordings: only while charging, on unmetered network, battery not low. */
+    /** Old recordings: on any network (mobile data too), unless the battery is low. */
     fun enqueueBacklog(context: Context, policy: ExistingWorkPolicy = ExistingWorkPolicy.KEEP) {
         val constraints = Constraints.Builder()
-            .setRequiresCharging(true)
-            .setRequiredNetworkType(NetworkType.UNMETERED)
+            .setRequiredNetworkType(NetworkType.CONNECTED)
             .setRequiresBatteryNotLow(true)
             .build()
         WorkManager.getInstance(context).enqueueUniqueWork(

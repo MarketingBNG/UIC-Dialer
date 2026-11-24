@@ -64,7 +64,7 @@ class UploadWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
     }
 }
 
-/** Old recordings, newest first, within the server's cutoff. Runs only while charging on Wi-Fi. */
+/** Old recordings, newest first, within the server's cutoff. Runs on any network unless the battery is low. */
 class BacklogWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         val ctx = applicationContext

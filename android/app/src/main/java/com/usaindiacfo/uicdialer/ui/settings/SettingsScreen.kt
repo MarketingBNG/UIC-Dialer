@@ -112,7 +112,7 @@ fun SettingsScreen(onOpenSetup: () -> Unit, onOpenGuide: () -> Unit, onOpenAdmin
             Section("Network") {
                 Text("New calls: " + if (config.liveNetwork == "wifi") "Wi-Fi only" else "Wi-Fi or mobile data")
                 Text(
-                    if (config.backlogEnabled) "Older recordings (last ${config.backlogCutoffDays} days): while charging on Wi-Fi"
+                    if (config.backlogEnabled) "Older recordings (last ${config.backlogCutoffDays} days): upload in the background"
                     else "Older recordings: not synced",
                 )
                 if (config.compressAudio) Text("Audio is compressed before upload to save data.")
