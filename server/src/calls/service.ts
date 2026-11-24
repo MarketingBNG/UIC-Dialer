@@ -32,9 +32,14 @@ export type CallMeta = z.infer<typeof CallMeta>;
 export const PRIORITY: Record<CallSource, number> = { LIVE: 10, BACKLOG: 0, IMPORT: 0 };
 
 /** Which of these original-file hashes are already fully uploaded for this user? */
-export async function knownHashes(deps: Deps, userId: string, hashes: string[]): Promise<string[]> {
+/**
+ * Hashes the server already has, from ANY user: the same recording file copied to a second phone (or synced from a
+ * backup) is skipped instead of being stored twice. [userId] is kept for the call signature and logging.
+ */
+export async function knownHashes(deps: Deps, _userId: string, hashes: string[]): Promise<string[]> {
   const rows = await deps.db.call.findMany({
-    where: { userId, originalSha256: { in: hashes }, status: { not: "PENDING_UPLOAD" } },
+    where: { originalSha256: { in: hashes }, status: { not: "PENDING_UPLOAD" } },
+    distinct: ["originalSha256"],
     select: { originalSha256: true },
   });
   return rows.map((r) => r.originalSha256);

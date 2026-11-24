@@ -130,7 +130,7 @@ object SetupChecks {
 
     /** Runtime permissions a step asks for (empty = opens a system settings screen instead). */
     fun stepPermissions(step: GuideStep): List<String> = when (step) {
-        GuideStep.PHONE -> listOf(Manifest.permission.READ_CALL_LOG, Manifest.permission.READ_PHONE_STATE)
+        GuideStep.PHONE -> listOf(Manifest.permission.READ_CALL_LOG, Manifest.permission.READ_PHONE_STATE, Manifest.permission.READ_PHONE_NUMBERS)
         GuideStep.CONTACTS -> listOf(Manifest.permission.READ_CONTACTS)
         GuideStep.NOTIFICATIONS -> if (Build.VERSION.SDK_INT >= 33) listOf(Manifest.permission.POST_NOTIFICATIONS) else emptyList()
         GuideStep.RECORDINGS -> listOf(audioPermission)

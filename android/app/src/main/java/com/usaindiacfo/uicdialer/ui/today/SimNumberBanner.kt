@@ -1,6 +1,10 @@
 package com.usaindiacfo.uicdialer.ui.today
 
+import android.Manifest
 import android.content.Context
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -47,7 +51,17 @@ fun SimNumberBanner(checkKey: Any = Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
 
-    LaunchedEffect(checkKey) {
+    // Phones set up before READ_PHONE_NUMBERS was added: ask once. With phone state already allowed, Android
+    // usually grants it without a dialog (same permission group); then the number is read instead of typed.
+    var numbersAsked by remember { mutableStateOf(0) }
+    val numbersLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { numbersAsked++ }
+    LaunchedEffect(Unit) {
+        if (SimInfo.hasPermission(context) &&
+            context.checkSelfPermission(Manifest.permission.READ_PHONE_NUMBERS) != PackageManager.PERMISSION_GRANTED
+        ) numbersLauncher.launch(Manifest.permission.READ_PHONE_NUMBERS)
+    }
+
+    LaunchedEffect(checkKey, numbersAsked) {
         missing = runCatching { missingNumbers(context, api.deviceSims().sims.associateBy { it.key }) }.getOrDefault(emptyList())
             .filterNot { it.key in dismissed }
     }

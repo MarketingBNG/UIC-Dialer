@@ -147,7 +147,7 @@ fun SetupScreen(onDone: () -> Unit) {
                 else -> "The caller card shows on the ringing screen."
             },
         ) {
-            if (!phoneStateOk) OutlinedButton(onClick = { permLauncher.launch(arrayOf(android.Manifest.permission.READ_PHONE_STATE)) }) { Text("Allow") }
+            if (!phoneStateOk) OutlinedButton(onClick = { permLauncher.launch(arrayOf(android.Manifest.permission.READ_PHONE_STATE, android.Manifest.permission.READ_PHONE_NUMBERS)) }) { Text("Allow") }
             else if (!overlayOk) OutlinedButton(onClick = { SetupChecks.openOverlaySettings(context) }) { Text("Open settings") }
         }
 

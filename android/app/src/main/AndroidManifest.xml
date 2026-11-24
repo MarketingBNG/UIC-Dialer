@@ -30,6 +30,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Caller card: know when the phone rings, and show the card over the incoming-call screen. -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!-- The SIM's own number, so calls show which of the rep's numbers they used. Same "Phone" group as above. -->
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- Android 11+ package visibility: OEM autostart screens we resolve for the heartbeat. -->
