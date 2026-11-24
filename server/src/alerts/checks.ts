@@ -3,7 +3,7 @@ import { firefliesUsage } from "../fireflies/budget.js";
 import type { LocalStorage } from "../storage/local.js";
 import { type AlertSender, resolveAlert, sendAlert } from "./cliq.js";
 import { jobStats } from "./metrics.js";
-import { CALLS_NO_REC_MIN, HEALTH_FRESH_MS } from "../devices/health.js";
+import { CALLS_NO_REC_MIN, HEALTH_FRESH_MS, LOW_REC_MIN_CALLS, fewRecordings } from "../devices/health.js";
 import { translationUsage } from "../translation/cost.js";
 
 const MIN = 60_000;
@@ -161,6 +161,25 @@ async function noRecordingsCheck(db: Db, now: Date): Promise<CheckResult> {
   };
 }
 
+/** Phones recording only some of their calls (e.g. one SIM, or auto-record turned off partway through the week). */
+async function fewRecordingsCheck(db: Db, now: Date): Promise<CheckResult> {
+  const candidates = await db.device.findMany({
+    where: { revokedAt: null, user: { active: true }, calls7d: { gte: LOW_REC_MIN_CALLS }, recordings7d: { gt: 0 },
+      lastSeenAt: { gte: new Date(now.getTime() - HEALTH_FRESH_MS) } },
+    select: { model: true, calls7d: true, recordings7d: true, standbyBucket: true, lastSeenAt: true, user: { select: { name: true, email: true } } },
+  });
+  const rows = candidates.filter((d) => fewRecordings(d, now));
+  const names = rows.slice(0, 10).map((d) => `${d.user.name ?? d.user.email} (${d.model ?? "phone"}, ${d.recordings7d} of ${d.calls7d} calls recorded)`);
+  const more = rows.length > names.length ? ` and ${rows.length - names.length} more` : "";
+  return {
+    key: "few-recordings",
+    firing: rows.length > 0,
+    text: rows.length > 0
+      ? `${rows.length} phone(s) recorded fewer than half their calls this week (check auto-record is on for every SIM): ${names.join(", ")}${more}.`
+      : "Every phone is recording most of its calls again.",
+  };
+}
+
 const CLAUDE_THRESHOLDS = [80, 100] as const;
 
 /** Claude translation spend vs. its monthly cap (80% warning, 100% = translations paused). */
@@ -190,6 +209,7 @@ export async function evaluateChecks(db: Db, storage: LocalStorage, now = new Da
     diskCheck(storage),
     phoneCheck(db, now).catch(() => null),
     noRecordingsCheck(db, now).catch(() => null),
+    fewRecordingsCheck(db, now).catch(() => null),
     claudeSpendChecks(db, now).catch(() => []),
   ]);
   return parts.flat().filter((c): c is CheckResult => c !== null);

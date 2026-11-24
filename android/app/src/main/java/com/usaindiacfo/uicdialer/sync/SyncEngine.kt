@@ -22,6 +22,8 @@ import com.usaindiacfo.uicdialer.detect.CallLogMatcher
 import com.usaindiacfo.uicdialer.detect.RecorderScanner
 import com.usaindiacfo.uicdialer.detect.RecordingNameParser
 import com.usaindiacfo.uicdialer.detect.ScannedFile
+import com.usaindiacfo.uicdialer.detect.Sim
+import com.usaindiacfo.uicdialer.detect.SimInfo
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -62,16 +64,19 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
             val new = chunk.filter { it.uri !in known }
             if (new.isEmpty()) continue
             val log = CallLogMatcher.query(context, new.minOf { it.dateModified }, new.maxOf { it.dateModified })
-            inserted += dao.insertAllIgnore(new.map { toEntity(it, log, cfg, now) }).count { it != -1L }
+            val sims = SimInfo.active(context)
+            val accounts = SimInfo.accountToSub(context)
+            inserted += dao.insertAllIgnore(new.map { toEntity(it, log, sims, accounts, cfg, now) }).count { it != -1L }
         }
         ScanResult(inserted, fresh.isNotEmpty())
     }
 
-    private fun toEntity(f: ScannedFile, log: List<CallLogEntry>, cfg: DeviceConfig, now: Long): RecordingEntity {
+    private fun toEntity(f: ScannedFile, log: List<CallLogEntry>, sims: List<Sim>, accounts: Map<String, Int>, cfg: DeviceConfig, now: Long): RecordingEntity {
         val tz = TimeZone.getDefault().getOffset(f.dateModified) / 60_000
         val parsed = RecordingNameParser.parse(f.displayName, tz)
         val match = CallLogMatcher.resolve(CallLogMatcher.bestMatch(log, f.dateModified, parsed.startedAt), parsed, f.dateModified)
         val skip = PrivacyFilter.skipReason(match.phone, cfg)
+        val sim = SimInfo.match(match.accountId, sims, accounts)
         return RecordingEntity(
             uri = f.uri, path = f.path, displayName = f.displayName, mimeType = f.mimeType, size = f.size,
             dateModified = f.dateModified,
@@ -80,6 +85,8 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
             source = if (now - f.dateModified <= LIVE_WINDOW_MS) RecordingSource.LIVE else RecordingSource.BACKLOG,
             phone = match.phone, contactName = match.contactName, direction = match.direction,
             startedAt = match.startedAt, durationS = match.durationS, updatedAt = now,
+            simKey = sim?.key ?: match.accountId?.takeIf { it.isNotBlank() }?.take(100),
+            simSlot = sim?.slot?.takeIf { it >= 0 }, simCarrier = sim?.carrier?.take(100),
         )
     }
 
@@ -165,6 +172,7 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
                     durationS = r.durationS?.coerceIn(0, 24 * 3600),
                     originalName = r.displayName.take(255),
                     source = if (r.source == RecordingSource.LIVE) CallSource.LIVE else CallSource.BACKLOG,
+                    simKey = r.simKey, simSlot = r.simSlot, simCarrier = r.simCarrier,
                     via = if (r.direction == Direction.OUTGOING && DialLogic.isAppDial(appDials, r.phone, r.startedAt ?: r.dateModified)) DialVia.APP else null,
                 ),
             )

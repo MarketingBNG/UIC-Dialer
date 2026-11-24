@@ -5,6 +5,7 @@ import { Prisma, type CallSource, type DialVia } from "../generated/prisma/clien
 import { LINK_WINDOW_MS, closeMissedTasks, linkCallToActivity } from "../activity/service.js";
 import { decideCallVia } from "../activity/via.js";
 import { toE164 } from "../phone.js";
+import { upsertSims } from "../devices/sims.js";
 import { ChecksumMismatchError, UploadTooLargeError, mimeFromContentType } from "../storage/local.js";
 
 export const sha256Hex = z.string().regex(/^[a-f0-9]{64}$/);
@@ -19,6 +20,10 @@ export const CallMeta = z.object({
   startedAt: z.iso.datetime({ offset: true }),
   durationS: z.number().int().min(0).max(24 * 3600).optional(),
   originalName: z.string().max(255).optional(),
+  /** The SIM the call used (call log PHONE_ACCOUNT_ID), its slot and carrier. */
+  simKey: z.string().min(1).max(100).optional(),
+  simSlot: z.number().int().min(0).max(8).optional(),
+  simCarrier: z.string().max(100).optional(),
 });
 export type CallMeta = z.infer<typeof CallMeta>;
 
@@ -53,6 +58,9 @@ export async function registerCall(
     startedAt: new Date(body.startedAt),
     durationS: body.durationS ?? null,
     originalName: body.originalName ?? null,
+    simKey: body.simKey ?? null,
+    simSlot: body.simSlot ?? null,
+    simCarrier: body.simCarrier ?? null,
   };
   const key = { userId_originalSha256: { userId, originalSha256: body.originalSha256 } };
   let existing = await deps.db.call.findUnique({ where: key });
@@ -70,6 +78,9 @@ export async function registerCall(
     existing = await deps.db.call.update({ where: { id: existing.id }, data });
   }
   let call = existing;
+  if (deviceId && body.simKey) {
+    await upsertSims(deps.db, deviceId, [{ key: body.simKey, slot: body.simSlot, carrier: body.simCarrier }], deps.config.DEFAULT_PHONE_REGION, call.startedAt, false);
+  }
   // Imported files carry no dialling history.
   if (!call.via && source !== "IMPORT") call = await setCallVia(deps, call, bodyVia);
   if (call.phoneE164 && (call.direction === "OUTGOING" || (call.direction === "INCOMING" && (call.durationS ?? 0) > 0))) {

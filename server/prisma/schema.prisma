@@ -133,14 +133,38 @@ model Device {
   autostartIntent String?  @map("autostart_intent")
   defaultDialer  String?   @map("default_dialer")
   revokedAt      DateTime? @map("revoked_at")
+  /// First heartbeat that listed SIMs; never changes. SIMs reported later than this are "new".
+  simsReportedAt DateTime? @map("sims_reported_at")
   createdAt      DateTime  @default(now()) @map("created_at")
 
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   refreshTokens RefreshToken[]
   calls         Call[]
+  sims          DeviceSim[]
 
   @@unique([userId, installId])
   @@map("devices")
+}
+
+/// A SIM seen on a device (from heartbeats and calls). number is E.164, read from the SIM or typed by the user/admin.
+model DeviceSim {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  deviceId    String    @map("device_id") @db.Uuid
+  simKey      String    @map("sim_key")
+  slot        Int?
+  carrier     String?
+  number      String?
+  /// SIM | USER | ADMIN
+  numberSetBy String?   @map("number_set_by")
+  firstSeenAt DateTime  @default(now()) @map("first_seen_at")
+  /// First heartbeat that listed this SIM; never changes. Null for SIMs known only from uploaded calls.
+  reportedAt  DateTime? @map("reported_at")
+  lastSeenAt  DateTime  @default(now()) @map("last_seen_at")
+
+  device Device @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@unique([deviceId, simKey])
+  @@map("device_sims")
 }
 
 model RefreshToken {
@@ -198,6 +222,11 @@ model Call {
   crmLockedUntil   DateTime? @map("crm_locked_until")
   // How an OUTGOING call was dialled (src/activity/via.ts); null for incoming/missed and old rows.
   via              DialVia?  @map("via")
+  // Which SIM on the device made/took the call: the call log's PHONE_ACCOUNT_ID. The number itself lives on
+  // DeviceSim (device_id, sim_key) so a corrected number applies to past calls too.
+  simKey           String?   @map("sim_key")
+  simSlot          Int?      @map("sim_slot")
+  simCarrier       String?   @map("sim_carrier")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 

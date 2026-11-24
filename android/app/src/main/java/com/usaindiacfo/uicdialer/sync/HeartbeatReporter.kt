@@ -7,6 +7,7 @@ import com.usaindiacfo.uicdialer.container
 import com.usaindiacfo.uicdialer.data.api.HeartbeatRequest
 import com.usaindiacfo.uicdialer.detect.CallLogMatcher
 import com.usaindiacfo.uicdialer.detect.RecorderScanner
+import com.usaindiacfo.uicdialer.detect.SimInfo
 import com.usaindiacfo.uicdialer.ui.setup.SetupChecks
 import java.time.Instant
 import java.util.concurrent.atomic.AtomicLong
@@ -43,6 +44,7 @@ object HeartbeatReporter {
                     recordings7d = if (calls != null) c.db.recordings().foundSince(now - DeviceHealth.WINDOW_MS) else null,
                     autostartIntent = SetupChecks.resolvedAutostart(context),
                     defaultDialer = DeviceHealth.defaultDialer(context),
+                    sims = SimInfo.reports(context).takeIf { it.isNotEmpty() },
                 ),
             )
         }.onFailure { lastSent.set(prev) }

@@ -123,6 +123,7 @@ fun TodayScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             item(key = "update") { UpdateBanner(checkKey = resumeTick / 10) } // re-check occasionally
+            item(key = "sim") { SimNumberBanner(checkKey = resumeTick / 10) }
             if (!setupOk) item(key = "setup") {
                 Banner("Setup needs attention: calls can't be synced.", "Fix", MaterialTheme.colorScheme.errorContainer, onOpenSetup)
             }

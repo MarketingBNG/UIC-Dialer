@@ -147,6 +147,10 @@ class ApiClient(
 
     suspend fun deviceConfig(): DeviceConfig = get("/v1/device/config")
     suspend fun heartbeat(req: HeartbeatRequest) = postUnit("/v1/device/heartbeat", req)
+    suspend fun deviceSims(): DeviceSims = get("/v1/device/sims")
+    suspend fun setSimNumber(simKey: String, number: String) {
+        send(jsonRequest("/v1/device/sims", "PUT", json.encodeToString(SimNumberRequest(simKey, number))))
+    }
 
     /** Business-only mode: hashed client-list numbers (never the numbers themselves). */
     /** Returns null when the server says the list is unchanged since [etag] (304), else the list and its ETag. */

@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [RecordingEntity::class, CachedCallEntity::class, ClientHashEntity::class, PendingActivityEntity::class, PendingMissedEntity::class, DncHashEntity::class], version = 5, exportSchema = true)
+@Database(entities = [RecordingEntity::class, CachedCallEntity::class, ClientHashEntity::class, PendingActivityEntity::class, PendingMissedEntity::class, DncHashEntity::class], version = 6, exportSchema = true)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun recordings(): RecordingDao
     abstract fun cachedCalls(): CachedCallDao
@@ -66,9 +66,18 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v6: the SIM each recording's call used. */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `recordings` ADD COLUMN `simKey` TEXT")
+                db.execSQL("ALTER TABLE `recordings` ADD COLUMN `simSlot` INTEGER")
+                db.execSQL("ALTER TABLE `recordings` ADD COLUMN `simCarrier` TEXT")
+            }
+        }
+
         fun build(context: Context): AppDatabase =
             Room.databaseBuilder(context, AppDatabase::class.java, "uic.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .fallbackToDestructiveMigration(dropAllTables = true)
                 .build()
     }

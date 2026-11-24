@@ -6,6 +6,7 @@ import { STATUS_LABEL, ago, jobStatusLabel, formatBytes, formatWhen, personName 
 import { FirefliesPanel } from "../components/Fireflies";
 import { TranslationPanel } from "../components/Translation";
 import { ComputersPanel } from "../components/Computers";
+import { DeviceSims } from "../components/DeviceSims";
 import { Empty, ErrorBox, FormError, PageHeader, Spinner } from "../ui";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { RefreshCw, Send, Smartphone } from "lucide-react";
@@ -105,6 +106,8 @@ export function HealthPage() {
                     {!d.revokedAt && !d.permissionsOk && <Badge variant="red">Permissions missing</Badge>}
                     {!d.revokedAt && d.throttled && <Badge variant="amber">Throttled ({d.standbyBucketName})</Badge>}
                     {!d.revokedAt && d.callsWithoutRecordings && <Badge variant="red">Calls but no recordings</Badge>}
+                    {!d.revokedAt && d.fewRecordings && <Badge variant="amber">Missing most recordings</Badge>}
+                    {!d.revokedAt && d.sims?.some((x) => x.isNew) && <Badge variant="amber">New SIM</Badge>}
                   </div>
                 </div>
                 <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
@@ -119,7 +122,7 @@ export function HealthPage() {
                   {d.calls7d != null && (
                     <>
                       <dt className="text-muted-foreground">Calls / recordings (7 d)</dt>
-                      <dd className={d.callsWithoutRecordings ? "font-medium text-destructive" : ""}>
+                      <dd className={d.callsWithoutRecordings ? "font-medium text-destructive" : d.fewRecordings ? "font-medium text-amber-700" : ""}>
                         {d.calls7d} / {d.recordings7d ?? "–"}
                       </dd>
                     </>
@@ -157,6 +160,7 @@ export function HealthPage() {
                     </>
                   )}
                 </dl>
+                <DeviceSims deviceId={d.id} sims={d.sims ?? []} isAdmin={isAdmin} />
                 {isAdmin && !d.revokedAt && (
                   <Button variant="ghost" className="mt-3 -ml-3 px-3 text-destructive hover:text-destructive" onClick={() => setConfirm(d)}>
                     Revoke device

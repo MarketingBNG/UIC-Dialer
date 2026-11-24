@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { api, isManager, qs, type CallPage, type CallStatus, type Direction, type User } from "../api";
 import { useMe } from "../App";
-import { DIRECTION_LABEL, STATUS_LABEL, formatDuration, formatShortWhen, personName } from "../format";
+import { DIRECTION_LABEL, STATUS_LABEL, formatDuration, formatShortWhen, fromLabel, personName } from "../format";
 import { Download, PhoneCall, Search, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -213,6 +213,7 @@ export function CallsPage() {
                     <span>{formatShortWhen(c.startedAt)}</span>
                     <span>{formatDuration(c.durationS)}</span>
                     {manager && <span className="truncate">{personName(c.user)}</span>}
+                    {fromLabel(c) && <span className="truncate">{fromLabel(c)}</span>}
                     {c.score != null && <ScorePill score={c.score} />}
                   </div>
                 </Link>
@@ -257,7 +258,12 @@ export function CallsPage() {
                     </TableCell>
                     <TableCell className="whitespace-nowrap">{formatShortWhen(c.startedAt)}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatDuration(c.durationS)}</TableCell>
-                    {manager && <TableCell className="max-w-48 truncate">{personName(c.user)}</TableCell>}
+                    {manager && (
+                      <TableCell className="max-w-48">
+                        <div className="truncate">{personName(c.user)}</div>
+                        {fromLabel(c) && <div className="truncate text-xs text-muted-foreground">{fromLabel(c)}</div>}
+                      </TableCell>
+                    )}
                     <TableCell>
                       <StatusBadge status={c.status} />
                     </TableCell>

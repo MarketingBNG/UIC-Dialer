@@ -3,7 +3,7 @@ import { useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { api, ApiError, isManager, type CallCrm, type CallDetail, type Features, type ScoreDto, type SpeakerRole } from "../api";
 import { useMe } from "../App";
-import { formatBytes, formatDuration, formatWhen, parseSegments, personName } from "../format";
+import { formatBytes, formatDuration, formatWhen, fromLabel, parseSegments, personName } from "../format";
 import { CallButton } from "../dialer";
 import { ArrowLeft, Check, Copy, Download, RefreshCw, Trash2, X } from "lucide-react";
 import {
@@ -139,6 +139,12 @@ export function CallDetailPage() {
               <DirectionTag direction={c.direction} />
               <ViaTag via={c.via} />
             </dd>
+            {fromLabel(c) && (
+              <>
+                <dt className="text-muted-foreground">Rep's number</dt>
+                <dd>{fromLabel(c)!.replace(/^From /, "")}</dd>
+              </>
+            )}
             <dt className="text-muted-foreground">When</dt>
             <dd>{formatWhen(c.startedAt)}</dd>
             <dt className="text-muted-foreground">Duration</dt>

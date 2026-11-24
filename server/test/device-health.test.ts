@@ -73,6 +73,16 @@ describe("device health flags", () => {
     const after = (await evaluateChecks(t.db, disk)).find((x) => x.key === "calls-no-recordings");
     expect(after?.text).not.toContain(email);
 
+    // Recording only some calls: under half of 10+ calls raises its own alert and badge.
+    await t.db.device.updateMany({ where: { user: { email } }, data: { calls7d: 20, recordings7d: 3 } });
+    const few = (await evaluateChecks(t.db, disk)).find((x) => x.key === "few-recordings");
+    expect(few?.text).toContain(`${email}`);
+    expect(few?.text).toContain("3 of 20 calls recorded");
+    const list3 = await t.app.inject({ method: "GET", url: "/api/devices", headers: await t.sessionFor(admin) });
+    expect(list3.json().find((x: { user: { email: string } }) => x.user.email === email).fewRecordings).toBe(true);
+    await t.db.device.updateMany({ where: { user: { email } }, data: { recordings7d: 12 } });
+    expect((await evaluateChecks(t.db, disk)).find((x) => x.key === "few-recordings")?.text ?? "").not.toContain(email);
+
     // A phone that stopped reporting no longer keeps the alert (or the badge) on with old numbers.
     const old8d = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
     await t.db.device.updateMany({ where: { user: { email } }, data: { recordings7d: 0, lastSeenAt: old8d } });

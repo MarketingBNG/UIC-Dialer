@@ -27,6 +27,10 @@ export interface CallItem {
   durationS: number | null;
   status: CallStatus;
   via?: DialVia | null;
+  /** The rep's own number the call used (from its SIM); absent on older servers/apps. */
+  fromNumber?: string | null;
+  simSlot?: number | null;
+  simCarrier?: string | null;
   user: UserRef;
   transcript: { language: string | null } | null;
   /** Overall AI score (0..100); absent on older servers. */
@@ -93,6 +97,17 @@ export interface User {
   targetCallsPerDay?: number | null;
   targetTalkMinPerDay?: number | null;
 }
+export interface DeviceSim {
+  key: string;
+  slot: number | null;
+  carrier: string | null;
+  number: string | null;
+  /** SIM | USER | ADMIN */
+  numberSetBy: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  isNew: boolean;
+}
 export interface Device {
   id: string;
   userId: string;
@@ -118,6 +133,9 @@ export interface Device {
   defaultDialer?: string | null;
   throttled?: boolean;
   callsWithoutRecordings?: boolean;
+  /** Recorded under half of 10+ calls this week. */
+  fewRecordings?: boolean;
+  sims?: DeviceSim[];
 }
 export interface Stats {
   calls: Partial<Record<CallStatus, number>>;

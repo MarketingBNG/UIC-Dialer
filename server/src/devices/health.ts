@@ -5,6 +5,9 @@ export const BUCKET_RARE = 30;
 export const BUCKET_RESTRICTED = 45;
 /** "Calls but no recordings": more than this many 30 s+ calls in 7 days with zero recordings found. */
 export const CALLS_NO_REC_MIN = 5;
+/** "Missing recordings": at least this many 30 s+ calls in 7 days, and recordings for under LOW_REC_PCT% of them. */
+export const LOW_REC_MIN_CALLS = 10;
+export const LOW_REC_PCT = 50;
 
 export function bucketName(bucket: number | null | undefined): string | null {
   if (bucket == null) return null;
@@ -33,3 +36,12 @@ export const isThrottled = (d: HealthFields) => d.standbyBucket != null && d.sta
 export const callsWithoutRecordings = (d: HealthFields, now = new Date()) =>
   (d.lastSeenAt === undefined || (d.lastSeenAt != null && now.getTime() - d.lastSeenAt.getTime() <= HEALTH_FRESH_MS)) &&
   d.calls7d != null && d.calls7d > CALLS_NO_REC_MIN && d.recordings7d === 0;
+
+/**
+ * Some calls are recorded but most aren't: auto-record on for one SIM only, switched off mid-week, or the
+ * recorder folder changed. Not raised when callsWithoutRecordings already is.
+ */
+export const fewRecordings = (d: HealthFields, now = new Date()) =>
+  (d.lastSeenAt === undefined || (d.lastSeenAt != null && now.getTime() - d.lastSeenAt.getTime() <= HEALTH_FRESH_MS)) &&
+  d.calls7d != null && d.recordings7d != null && d.recordings7d > 0 &&
+  d.calls7d >= LOW_REC_MIN_CALLS && d.recordings7d * 100 < d.calls7d * LOW_REC_PCT;

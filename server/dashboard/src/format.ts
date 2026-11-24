@@ -156,3 +156,16 @@ export function whatsAppUrl(raw: string): string | null {
   }
   return digits.length >= 8 && digits.length <= 15 ? `https://wa.me/${digits}` : null;
 }
+
+/** "SIM 2 · Jio" for a call's or device's SIM; null when unknown. */
+export function simName(slot: number | null | undefined, carrier: string | null | undefined): string | null {
+  const parts = [slot != null && slot >= 0 ? `SIM ${slot + 1}` : null, carrier || null].filter(Boolean);
+  return parts.length ? parts.join(" · ") : null;
+}
+
+/** Which of the rep's numbers a call used: the number, else the SIM with "number not set"; null for old calls. */
+export function fromLabel(c: { fromNumber?: string | null; simSlot?: number | null; simCarrier?: string | null }): string | null {
+  if (c.fromNumber) return `From ${c.fromNumber}`;
+  const sim = simName(c.simSlot, c.simCarrier);
+  return sim ? `From ${sim} (number not set)` : null;
+}

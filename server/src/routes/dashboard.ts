@@ -4,7 +4,8 @@ import { callScope, requireSession } from "../auth/guards.js";
 import { HttpError, currentUser, type Deps } from "../context.js";
 import { Prisma, type AuditAction, type User } from "../generated/prisma/client.js";
 import { DeviceConfig, getSettings } from "../settings.js";
-import { bucketName, callsWithoutRecordings, isThrottled } from "../devices/health.js";
+import { bucketName, callsWithoutRecordings, fewRecordings, isThrottled } from "../devices/health.js";
+import { fromNumbers, isNewSim, setSimNumber } from "../devices/sims.js";
 import { firefliesUsage } from "../fireflies/budget.js";
 import { compressionStats, queueCompressionBackfill, queueSummaryBackfill, queueTranslationBackfill } from "../jobs/queue.js";
 import { BOM, CSV_HEADER, EXPORT_MAX_ROWS, csvLines } from "../calls/export.js";
@@ -137,13 +138,19 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
         durationS: true,
         status: true,
         via: true,
+        deviceId: true,
+        simKey: true,
+        simSlot: true,
+        simCarrier: true,
         user: { select: { id: true, name: true, email: true } },
         transcript: { select: { language: true } },
         score: { select: { overall: true } },
       },
     });
     const more = rows.length > q.limit;
-    const items = (more ? rows.slice(0, q.limit) : rows).map(({ score, ...c }) => ({ ...c, score: score?.overall ?? null }));
+    const page = more ? rows.slice(0, q.limit) : rows;
+    const from = await fromNumbers(deps.db, page);
+    const items = page.map(({ score, deviceId: _d, simKey: _k, ...c }, i) => ({ ...c, ...from[i], score: score?.overall ?? null }));
     return { items, nextCursor: more ? items.at(-1)?.id : null };
   });
 
@@ -261,7 +268,8 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
           createdAt: s.createdAt,
         }
       : null;
-    return { ...rest, transcript, crm, fileSize: call.fileSize?.toString() ?? null, score, scorePending: pending("score") };
+    const [from] = await fromNumbers(deps.db, [call]);
+    return { ...rest, ...from, transcript, crm, fileSize: call.fileSize?.toString() ?? null, score, scorePending: pending("score") };
   });
 
   /** Audio playback with HTTP Range support (seeking in the browser player). `?download=1` saves the file (audited). */
@@ -353,16 +361,35 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
   app.get("/api/devices", managers, async () => {
     const devices = await deps.db.device.findMany({
       orderBy: { lastSeenAt: { sort: "desc", nulls: "last" } },
-      include: { user: { select: { id: true, name: true, email: true } } },
+      include: { user: { select: { id: true, name: true, email: true } }, sims: { orderBy: { slot: "asc" } } },
     });
-    return devices.map((d) => ({
+    return devices.map(({ sims, ...d }) => ({
       ...d,
+      sims: sims.map((x) => ({
+        key: x.simKey, slot: x.slot, carrier: x.carrier, number: x.number, numberSetBy: x.numberSetBy,
+        firstSeenAt: x.firstSeenAt, lastSeenAt: x.lastSeenAt, isNew: isNewSim(x, d.simsReportedAt),
+      })),
       freeBytes: d.freeBytes?.toString() ?? null,
       // Derived flags (additive) so the dashboard and the app show the same warnings.
       standbyBucketName: bucketName(d.standbyBucket),
       throttled: isThrottled(d),
       callsWithoutRecordings: callsWithoutRecordings(d),
+      fewRecordings: fewRecordings(d),
     }));
+  });
+
+  /** Admin sets or corrects the number of a SIM; the rep can't change it after this. null clears it. */
+  app.put("/api/devices/:id/sims", admins, async (req, reply) => {
+    const id = idParam(req);
+    const body = z.object({ simKey: z.string().min(1).max(100), number: z.string().max(40).nullable() }).parse(req.body);
+    if (!(await deps.db.deviceSim.findUnique({ where: { deviceId_simKey: { deviceId: id, simKey: body.simKey } } }))) {
+      throw new HttpError(404, "SIM not found");
+    }
+    if (!(await setSimNumber(deps.db, id, body.simKey, body.number, "ADMIN", deps.config.DEFAULT_PHONE_REGION))) {
+      throw new HttpError(400, "That doesn't look like a phone number");
+    }
+    await audit(req, "SETTINGS_CHANGE", undefined, { change: "sim_number", deviceId: id, simKey: body.simKey, number: body.number });
+    return reply.code(204).send();
   });
 
   app.post("/api/devices/:id/revoke", admins, async (req, reply) => {

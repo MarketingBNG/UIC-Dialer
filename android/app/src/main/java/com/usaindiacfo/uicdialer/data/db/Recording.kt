@@ -41,6 +41,10 @@ data class RecordingEntity(
     /** Epoch millis of call start (CallLog match, else file time). */
     val startedAt: Long? = null,
     val durationS: Int? = null,
+    /** The SIM the call used: subscription id (or the raw call-log account id if no active SIM matched), slot, carrier. */
+    val simKey: String? = null,
+    val simSlot: Int? = null,
+    val simCarrier: String? = null,
     /** Epoch millis of the last state change. */
     val updatedAt: Long = System.currentTimeMillis(),
 )

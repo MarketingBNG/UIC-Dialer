@@ -7,7 +7,11 @@ import android.provider.CallLog
 import com.usaindiacfo.uicdialer.data.api.Direction
 import kotlin.math.abs
 
-data class CallLogEntry(val number: String?, val type: Int, val dateMs: Long, val durationS: Int, val cachedName: String?) {
+data class CallLogEntry(
+    val number: String?, val type: Int, val dateMs: Long, val durationS: Int, val cachedName: String?,
+    /** PHONE_ACCOUNT_ID: which SIM the call used (see SimInfo.match). */
+    val accountId: String? = null,
+) {
     val direction get() = when (type) {
         CallLog.Calls.INCOMING_TYPE, CallLog.Calls.ANSWERED_EXTERNALLY_TYPE -> Direction.INCOMING
         CallLog.Calls.OUTGOING_TYPE -> Direction.OUTGOING
@@ -25,6 +29,7 @@ data class CallMatch(
     /** Epoch millis. */
     val startedAt: Long,
     val durationS: Int?,
+    val accountId: String? = null,
 )
 
 object CallLogMatcher {
@@ -59,6 +64,7 @@ object CallLogMatcher {
             direction = entry.direction,
             startedAt = entry.dateMs,
             durationS = entry.durationS,
+            accountId = entry.accountId,
         ) else CallMatch(
             phone = parsed.phone,
             contactName = parsed.contactName,
@@ -73,7 +79,7 @@ object CallLogMatcher {
     /** CallLog rows around [fromMs]..[toMs]; empty without permission. */
     fun query(context: Context, fromMs: Long, toMs: Long): List<CallLogEntry> {
         if (!hasPermission(context)) return emptyList()
-        val cols = arrayOf(CallLog.Calls.NUMBER, CallLog.Calls.TYPE, CallLog.Calls.DATE, CallLog.Calls.DURATION, CallLog.Calls.CACHED_NAME)
+        val cols = arrayOf(CallLog.Calls.NUMBER, CallLog.Calls.TYPE, CallLog.Calls.DATE, CallLog.Calls.DURATION, CallLog.Calls.CACHED_NAME, CallLog.Calls.PHONE_ACCOUNT_ID)
         val out = ArrayList<CallLogEntry>()
         runCatching {
             context.contentResolver.query(
@@ -82,7 +88,7 @@ object CallLogMatcher {
                 "${CallLog.Calls.DATE} DESC",
             )?.use { c ->
                 while (c.moveToNext()) {
-                    out += CallLogEntry(c.getString(0), c.getInt(1), c.getLong(2), c.getInt(3), c.getString(4))
+                    out += CallLogEntry(c.getString(0), c.getInt(1), c.getLong(2), c.getInt(3), c.getString(4), c.getString(5))
                 }
             }
         }

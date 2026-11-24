@@ -46,6 +46,9 @@ data class CreateCallRequest(
     val source: CallSource = CallSource.LIVE,
     /** Only APP is sent: the rep dialled this call from the app. */
     val via: DialVia? = null,
+    val simKey: String? = null,
+    val simSlot: Int? = null,
+    val simCarrier: String? = null,
 )
 
 /** 201 → uploadPath set, alreadyUploaded=false; 200 → alreadyUploaded=true (skip the PUT). */
@@ -93,7 +96,16 @@ data class HeartbeatRequest(
     /** OEM autostart screen that resolves on this phone (package/class). */
     val autostartIntent: String? = null,
     val defaultDialer: String? = null,
+    /** SIMs in the phone; null without phone-state permission (server keeps what it has). */
+    val sims: List<SimReport>? = null,
 )
+
+@Serializable data class SimReport(val key: String, val slot: Int? = null, val carrier: String? = null, val number: String? = null)
+
+/** GET /v1/device/sims. numberSetBy: SIM | USER | ADMIN | null. */
+@Serializable data class DeviceSimDto(val key: String, val slot: Int? = null, val carrier: String? = null, val number: String? = null, val numberSetBy: String? = null)
+@Serializable data class DeviceSims(val sims: List<DeviceSimDto> = emptyList())
+@Serializable data class SimNumberRequest(val simKey: String, val number: String?)
 
 @Serializable
 data class LatestApp(

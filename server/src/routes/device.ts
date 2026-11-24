@@ -8,6 +8,7 @@ import { requireDevice } from "../auth/guards.js";
 import { HttpError, currentDevice, currentUser, type Deps } from "../context.js";
 import { hashKey } from "../privacy/clientNumbers.js";
 import { getSettings } from "../settings.js";
+import { SimReport, setSimNumber, upsertSims } from "../devices/sims.js";
 
 const Heartbeat = z.object({
   appVersion: z.string().max(40).optional(),
@@ -22,7 +23,11 @@ const Heartbeat = z.object({
   recordings7d: z.number().int().min(0).max(100_000).nullable().optional(),
   autostartIntent: z.string().max(200).nullable().optional(),
   defaultDialer: z.string().max(200).nullable().optional(),
+  /** The SIMs in the phone right now; absent from older apps or without phone-state permission. */
+  sims: z.array(SimReport).max(8).optional(),
 });
+
+const SimNumber = z.object({ simKey: z.string().min(1).max(100), number: z.string().max(40).nullish() });
 const M4_FIELDS = ["standbyBucket", "lastStopReason", "calls7d", "recordings7d", "autostartIntent", "defaultDialer"] as const;
 
 export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
@@ -70,6 +75,25 @@ export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
         lastSeenAt: new Date(),
       },
     });
+    if (body.sims?.length) await upsertSims(deps.db, currentDevice(req).id, body.sims, deps.config.DEFAULT_PHONE_REGION);
+    return reply.code(204).send();
+  });
+
+  /** This phone's SIMs, so the app can ask for any number it doesn't know yet. */
+  app.get("/v1/device/sims", auth, async (req) => {
+    const sims = await deps.db.deviceSim.findMany({ where: { deviceId: currentDevice(req).id }, orderBy: { slot: "asc" } });
+    return { sims: sims.map((s) => ({ key: s.simKey, slot: s.slot, carrier: s.carrier, number: s.number, numberSetBy: s.numberSetBy })) };
+  });
+
+  /** The rep types the number of one of their SIMs. An admin-set number can only be changed from the dashboard. */
+  app.put("/v1/device/sims", auth, async (req, reply) => {
+    const body = SimNumber.parse(req.body);
+    const deviceId = currentDevice(req).id;
+    const cur = await deps.db.deviceSim.findUnique({ where: { deviceId_simKey: { deviceId, simKey: body.simKey } } });
+    if (cur?.numberSetBy === "ADMIN") throw new HttpError(409, "Your admin set this number; ask them to change it");
+    if (!(await setSimNumber(deps.db, deviceId, body.simKey, body.number ?? null, "USER", deps.config.DEFAULT_PHONE_REGION))) {
+      throw new HttpError(400, "That doesn't look like a phone number");
+    }
     return reply.code(204).send();
   });
 
