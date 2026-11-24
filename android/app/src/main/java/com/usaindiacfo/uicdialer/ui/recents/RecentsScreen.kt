@@ -1,5 +1,6 @@
 package com.usaindiacfo.uicdialer.ui.recents
 
+import kotlinx.coroutines.flow.flowOn
 import android.Manifest
 import android.content.Context
 import android.text.format.DateUtils
@@ -101,7 +102,7 @@ class RecentsViewModel(c: AppContainer, app: Context) : ViewModel() {
         val nameOf: (String) -> String? = { n -> PhoneBookLogic.numberKey(n)?.let { phoneNames[it] ?: crmMap[it] } }
         val shown = PhoneBookLogic.filterRecents(cs, f, q, nameOf)
         RecentsState(PhoneBookLogic.groupByDay(shown, ZoneId.systemDefault()), cs.size, f, q, phoneNames, crmMap, loaded = true)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RecentsState())
+    }.flowOn(kotlinx.coroutines.Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RecentsState())
 
     fun setFilter(f: RecentsFilter) { filter.value = f }
     fun setQuery(q: String) { query.value = q }

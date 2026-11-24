@@ -1,5 +1,6 @@
 package com.usaindiacfo.uicdialer.ui.contacts
 
+import kotlinx.coroutines.flow.flowOn
 import android.Manifest
 import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -87,7 +88,7 @@ class PhoneContactsViewModel(app: Context) : ViewModel() {
             favourites = if (q.isBlank()) shown.filter { it.starred } else emptyList(),
             all = shown, query = q, total = list.size, loaded = true,
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PhoneContactsState())
+    }.flowOn(kotlinx.coroutines.Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PhoneContactsState())
 
     fun setQuery(q: String) { query.value = q }
     fun recheck() { permTick.value++ }

@@ -107,9 +107,12 @@ object PhoneBookLogic {
         't' to '8', 'u' to '8', 'v' to '8', 'w' to '9', 'x' to '9', 'y' to '9', 'z' to '9',
     )
 
-    /** "Rahul Mehta" -> "72485 634382"-style keypad digits, one word per entry. */
+    /** Compiled once: compiling per name froze the UI with thousands of contacts. */
+    private val WORD_SPLIT = Regex("[^\\p{L}\\p{N}]+")
+
+    /** "Rahul Mehta" ->"72485 634382"-style keypad digits, one word per entry. */
     fun t9Words(name: String): List<String> =
-        name.lowercase().split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotEmpty() }.map { w ->
+        name.lowercase().split(WORD_SPLIT).filter { it.isNotEmpty() }.map { w ->
             w.map { ch -> if (ch.isDigit()) ch else T9[ch] ?: '1' }.joinToString("")
         }
 

@@ -123,7 +123,8 @@ object SyncScheduler {
                 .setInputData(workDataOf(NewRecordingWorker.KEY_ONE_SHOT to true, NewRecordingWorker.KEY_RESET_FAILED to true))
                 .build(),
         )
-        enqueueBacklog(context)
+        // Restart a backlog run that is only waiting out a retry delay, so "Sync now" really syncs now.
+        Thread { runCatching { restartIfWaiting(context, BACKLOG) { enqueueBacklog(context, it) } } }.start()
         enqueueCallLogTrigger(context, ExistingWorkPolicy.KEEP)
         enqueueCallLogSync(context, policy = ExistingWorkPolicy.REPLACE)
     }
@@ -173,7 +174,8 @@ object SyncScheduler {
             BACKLOG, policy,
             OneTimeWorkRequestBuilder<BacklogWorker>()
                 .setConstraints(constraints)
-                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 5, TimeUnit.MINUTES)
+                // Linear 1 min: Android stops each run after ~10 min; a doubling backoff left old recordings waiting hours.
+                .setBackoffCriteria(BackoffPolicy.LINEAR, 1, TimeUnit.MINUTES)
                 .build(),
         )
     }

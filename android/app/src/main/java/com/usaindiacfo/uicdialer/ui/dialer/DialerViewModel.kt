@@ -46,7 +46,15 @@ class DialerViewModel(private val c: AppContainer, private val app: android.cont
     }
 
     /** Local, in-memory: cheap enough to run on every key press. */
+    private var suggestJob: kotlinx.coroutines.Job? = null
+
+    /** Off the main thread: thousands of phone contacts made this freeze the keypad. */
     private fun suggest() {
+        suggestJob?.cancel()
+        suggestJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) { suggestNow() }
+    }
+
+    private fun suggestNow() {
         val n = _state.value.number
         val crm = (_state.value.matches + c.contactCache.recent + c.contactCache.followUps).map { it.name to it.phoneE164 }
         val list = com.usaindiacfo.uicdialer.phonebook.PhoneBookLogic.suggestions(n, phoneContacts, crm, recents)
