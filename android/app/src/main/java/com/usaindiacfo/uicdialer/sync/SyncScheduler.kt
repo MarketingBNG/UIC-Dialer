@@ -29,10 +29,14 @@ object SyncScheduler {
     const val SWEEP = "uic-sweep"
     const val ACTIVITIES = "uic-activities"
     const val RESUME = "uic-resume"
+    const val CALL_LOG_TRIGGER = "uic-call-log-trigger"
+    const val CALL_LOG = "uic-call-log"
 
     /** Call once from Application.onCreate. Cheap: only registers jobs that aren't already scheduled. */
     fun init(context: Context) {
         enqueueTrigger(context, ExistingWorkPolicy.KEEP)
+        enqueueCallLogTrigger(context, ExistingWorkPolicy.KEEP)
+        enqueueCallLogSync(context)
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             SWEEP, ExistingPeriodicWorkPolicy.KEEP,
             PeriodicWorkRequestBuilder<SweepWorker>(12, TimeUnit.HOURS)
@@ -75,6 +79,42 @@ object SyncScheduler {
         )
     }
 
+    /**
+     * One-shot content-URI trigger on the call log; [CallLogWorker] re-arms it each run and queues
+     * [enqueueCallLogSync]. Only armed with READ_CALL_LOG (app start and "Sync now" arm it once granted).
+     */
+    fun enqueueCallLogTrigger(context: Context, policy: ExistingWorkPolicy) {
+        if (!com.usaindiacfo.uicdialer.detect.CallLogMatcher.hasPermission(context)) return
+        val constraints = Constraints.Builder()
+            .addContentUriTrigger(android.provider.CallLog.Calls.CONTENT_URI, true)
+            .setTriggerContentUpdateDelay(2, TimeUnit.SECONDS)
+            .setTriggerContentMaxDelay(10, TimeUnit.SECONDS)
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            CALL_LOG_TRIGGER, policy,
+            OneTimeWorkRequestBuilder<CallLogWorker>()
+                .setConstraints(constraints)
+                .setInputData(workDataOf(CallLogWorker.KEY_TRIGGER to true))
+                .build(),
+        )
+    }
+
+    /**
+     * Sends new call-log entries on any network. APPEND_OR_REPLACE so an entry logged while a run is going still
+     * gets a run after it. [delaySec] lets the dialer write the entry first (after a call ends).
+     */
+    fun enqueueCallLogSync(context: Context, delaySec: Long = 0, policy: ExistingWorkPolicy = ExistingWorkPolicy.APPEND_OR_REPLACE) {
+        val req = OneTimeWorkRequestBuilder<CallLogWorker>()
+            .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+            .apply {
+                if (delaySec > 0) setInitialDelay(delaySec, TimeUnit.SECONDS)
+                else if (Build.VERSION.SDK_INT >= 31) setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+            }
+            .build()
+        WorkManager.getInstance(context).enqueueUniqueWork(CALL_LOG, policy, req)
+    }
+
     /** "Sync now" (home screen, after setup): scan recent files, upload them, and nudge the backlog. */
     fun syncNow(context: Context) {
         WorkManager.getInstance(context).enqueueUniqueWork(
@@ -84,6 +124,8 @@ object SyncScheduler {
                 .build(),
         )
         enqueueBacklog(context)
+        enqueueCallLogTrigger(context, ExistingWorkPolicy.KEEP)
+        enqueueCallLogSync(context, policy = ExistingWorkPolicy.REPLACE)
     }
 
     /** Re-scan once a file that was still being written has settled. */
@@ -139,6 +181,6 @@ object SyncScheduler {
     /** Optional on sign-out; workers no-op while signed out anyway and [init] re-arms at next start. */
     fun cancelSyncWork(context: Context) {
         val wm = WorkManager.getInstance(context)
-        listOf(SCAN_NOW, RECHECK, UPLOAD, BACKLOG, ACTIVITIES).forEach(wm::cancelUniqueWork)
+        listOf(SCAN_NOW, RECHECK, UPLOAD, BACKLOG, ACTIVITIES, CALL_LOG).forEach(wm::cancelUniqueWork)
     }
 }

@@ -39,6 +39,9 @@ enum CallStatus {
   TRANSCRIBING
   TRANSCRIBED
   FAILED
+  // From the phone's call log with no recording (missed, rejected, unanswered, or not recorded).
+  // Becomes PENDING_UPLOAD when a recording for the same call arrives. Hidden from /api/calls unless ?v=2.
+  NO_RECORDING
 }
 
 enum JobStatus {
@@ -227,6 +230,11 @@ model Call {
   simKey           String?   @map("sim_key")
   simSlot          Int?      @map("sim_slot")
   simCarrier       String?   @map("sim_carrier")
+  // Call-log entry this row came from (src/calls/callLog.ts callLogKey); dedupes re-sent entries and lets a
+  // later recording attach to the same row. logType: the call log's own type (INCOMING, OUTGOING, MISSED,
+  // REJECTED, BLOCKED, VOICEMAIL, ...); null for rows made only from a recording.
+  callLogKey       String?   @map("call_log_key")
+  logType          String?   @map("log_type")
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
 
@@ -240,6 +248,7 @@ model Call {
   score                 CallScore?
 
   @@unique([userId, originalSha256])
+  @@unique([userId, callLogKey])
   @@index([userId, startedAt(sort: Desc)])
   @@index([startedAt(sort: Desc)])
   @@index([crmStatus])

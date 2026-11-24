@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { requireDevice } from "../auth/guards.js";
-import { CallMeta, CheckBody, audioProgress, knownHashes, registerCall, sha256Hex, storeAudio } from "../calls/service.js";
+import { CallLogBatch, CallMeta, CheckBody, audioProgress, knownHashes, recordCallLog, registerCall, sha256Hex, storeAudio } from "../calls/service.js";
 import { HttpError, currentDevice, currentUser, type Deps } from "../context.js";
 import { WindowLimiter } from "../privacy/uploadLimit.js";
 import { ALLOWED_AUDIO_MIME } from "../storage/local.js";
@@ -26,6 +26,12 @@ export async function callRoutes(app: FastifyInstance, deps: Deps) {
     const r = await registerCall(deps, currentUser(req).id, currentDevice(req).id, source, meta, via);
     if (r.alreadyUploaded) return reply.code(200).send(r);
     return reply.code(201).send({ ...r, uploadPath: `/v1/calls/${r.callId}/audio` });
+  });
+
+  /** The phone's call log (every call, recorded or not); idempotent per entry. Results are in request order. */
+  app.post("/v1/calls/log", auth, async (req) => {
+    const { entries } = CallLogBatch.parse(req.body);
+    return { results: await recordCallLog(deps, currentUser(req).id, currentDevice(req).id, entries) };
   });
 
   // Per-phone upload cap; the app treats 429 like a network error and retries later.

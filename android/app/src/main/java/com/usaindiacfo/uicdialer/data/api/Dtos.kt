@@ -9,7 +9,8 @@ import kotlinx.serialization.json.JsonElement
 @Serializable enum class Role { ADMIN, MANAGER, AGENT }
 @Serializable enum class Direction { INCOMING, OUTGOING, MISSED, UNKNOWN }
 @Serializable enum class CallSource { LIVE, BACKLOG, IMPORT }
-@Serializable enum class CallStatus { PENDING_UPLOAD, UPLOADED, TRANSCRIBING, TRANSCRIBED, FAILED }
+/** NO_RECORDING: a call-log entry without a recording; only sent to clients that ask with ?v=2. */
+@Serializable enum class CallStatus { PENDING_UPLOAD, UPLOADED, TRANSCRIBING, TRANSCRIBED, FAILED, NO_RECORDING }
 
 // ---- Auth -------------------------------------------------------------------
 
@@ -50,6 +51,24 @@ data class CreateCallRequest(
     val simSlot: Int? = null,
     val simCarrier: String? = null,
 )
+
+/** One CallLog row for POST /v1/calls/log. type: INCOMING, OUTGOING, MISSED, REJECTED, BLOCKED, VOICEMAIL, ... */
+@Serializable
+data class CallLogEntryRequest(
+    val phoneNumber: String? = null,
+    val contactName: String? = null,
+    val type: String,
+    val startedAt: String,
+    val durationS: Int? = null,
+    val simKey: String? = null,
+    val simSlot: Int? = null,
+    val simCarrier: String? = null,
+    /** Only APP is sent: the rep dialled this call from the app. */
+    val via: DialVia? = null,
+)
+@Serializable data class CallLogBatchRequest(val entries: List<CallLogEntryRequest>)
+@Serializable data class CallLogResult(val callId: String, val created: Boolean = false)
+@Serializable data class CallLogResponse(val results: List<CallLogResult> = emptyList())
 
 /** 201 → uploadPath set, alreadyUploaded=false; 200 → alreadyUploaded=true (skip the PUT). */
 @Serializable data class CreateCallResponse(val callId: String, val alreadyUploaded: Boolean, val uploadPath: String? = null)
@@ -135,6 +154,8 @@ data class CallListItem(
     val startedAt: String,
     val durationS: Int? = null,
     val status: CallStatus,
+    /** The phone's call-log type (MISSED, REJECTED, OUTGOING, ...); null for calls known only from a recording. */
+    val logType: String? = null,
     val user: UserRef,
     val transcript: TranscriptLang? = null,
     val via: DialVia? = null,
@@ -195,6 +216,7 @@ data class CallDetail(
     val mimeType: String? = null,
     val fileSize: String? = null,
     val status: CallStatus,
+    val logType: String? = null,
     val uploadedAt: String? = null,
     val createdAt: String,
     val user: UserRef,

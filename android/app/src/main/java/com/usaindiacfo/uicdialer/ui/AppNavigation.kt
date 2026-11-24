@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -73,6 +74,7 @@ object Routes {
     const val SETUP_GUIDE = "setupGuide"
     const val TODAY = "today"
     const val DIALER = "dialer"
+    const val RECENTS = "recents"
     const val CONTACTS = "contacts"
     const val CONTACT = "contact/{phone}"
     const val CALLS = "calls"
@@ -101,6 +103,7 @@ private data class NavTab(val route: String, val label: String, val icon: ImageV
 
 private val TABS = listOf(
     NavTab(Routes.TODAY, "Today", Icons.Filled.Home),
+    NavTab(Routes.RECENTS, "Recents", Icons.Filled.DateRange),
     NavTab(Routes.CONTACTS, "Contacts", Icons.Filled.Person),
     NavTab(Routes.CALLS, "Calls", Icons.Filled.Call),
 )
@@ -242,6 +245,7 @@ fun AppNavigation(
                     DialerScreen(onOpenContact = { nav.navigate(Routes.contact(it)) })
                 }
             }
+            composable(Routes.RECENTS) { com.usaindiacfo.uicdialer.ui.recents.RecentsScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
             composable(Routes.CONTACTS) { ContactsScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
             composable(Routes.CONTACT, arguments = listOf(navArgument("phone") { type = NavType.StringType })) {
                 ContactDetailScreen(phone = it.arguments?.getString("phone").orEmpty(), onBack = { nav.popBackStack() })

@@ -98,7 +98,7 @@ fun CallDetailScreen(id: String, onBack: () -> Unit) {
         onDispose { lifecycle.removeObserver(obs); player.release() }
     }
     LaunchedEffect(player, lifecycle) { lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) { player.trackProgress() } }
-    val hasAudio = state.call?.let { it.status != CallStatus.PENDING_UPLOAD && it.audioDeletedAt == null } == true
+    val hasAudio = state.call?.let { it.status in AUDIO_STATUSES && it.audioDeletedAt == null } == true
     val scope = rememberCoroutineScope()
     LaunchedEffect(player, hasAudio) { if (hasAudio) player.load(vm.audioUrl) }
     LaunchedEffect(state.deleted) { if (state.deleted) onBack() }
@@ -158,7 +158,10 @@ fun CallDetailScreen(id: String, onBack: () -> Unit) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(bottom = 4.dp))
                     }
                     when {
-                        transcript == null -> item(key = "none") { Text("No transcript yet. " + CallStatusText.of(call.status).explanation, style = MaterialTheme.typography.bodyMedium) }
+                        transcript == null -> item(key = "none") {
+                            val why = CallStatusText.of(call.status, call.logType, call.direction, call.durationS).explanation
+                            Text(if (call.status == CallStatus.NO_RECORDING) why else "No transcript yet. $why", style = MaterialTheme.typography.bodyMedium)
+                        }
                         state.segments.isEmpty() -> item(key = "text") { Text(transcript, style = MaterialTheme.typography.bodyMedium) }
                         else -> itemsIndexed(state.segments, key = { i, _ -> "s$i" }, contentType = { _, _ -> "seg" }) { _, s ->
                             SegmentRow(s, state.showsEnglish, roles, active = s.startMs != null && ps.positionMs >= s.startMs) {
@@ -186,9 +189,9 @@ private fun Meta(call: CallDetail) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             DirectionIcon(call.direction)
             Text(call.direction.label(), Modifier.padding(start = 8.dp).weight(1f))
-            StatusBadge(call.status)
+            StatusBadge(call.status, call.logType, call.direction, call.durationS)
         }
-        Text(CallStatusText.of(call.status).explanation, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(CallStatusText.of(call.status, call.logType, call.direction, call.durationS).explanation, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         val phone = call.phoneE164 ?: call.phoneRaw
         if (!call.contactName.isNullOrBlank() && phone != null) MetaLine("Number", phone)
         MetaLine("When", formatWhen(call.startedAt))
@@ -295,9 +298,14 @@ private val PauseIcon: ImageVector by lazy {
 }
 
 /** Why there is no player: not uploaded yet, or removed by the server's retention setting. */
-internal fun noAudioText(call: CallDetail): String =
-    if (call.audioDeletedAt != null) "Audio deleted by the retention setting. The transcript is kept."
-    else "No recording yet: waiting for the phone to upload it."
+internal fun noAudioText(call: CallDetail): String = when {
+    call.audioDeletedAt != null -> "Audio deleted by the retention setting. The transcript is kept."
+    call.status == CallStatus.NO_RECORDING -> "No recording for this call. It comes from the phone's call log."
+    else -> "No recording yet: waiting for the phone to upload it."
+}
+
+/** Statuses whose call has an audio file on the server (unless retention deleted it). */
+internal val AUDIO_STATUSES = setOf(CallStatus.UPLOADED, CallStatus.TRANSCRIBING, CallStatus.TRANSCRIBED, CallStatus.FAILED)
 
 /** Queues the recording in the system DownloadManager (Downloads folder) with a fresh access token. */
 private suspend fun downloadRecording(context: Context, container: AppContainer, call: CallDetail) {

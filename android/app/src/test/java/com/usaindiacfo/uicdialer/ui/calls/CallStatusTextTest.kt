@@ -1,6 +1,7 @@
 package com.usaindiacfo.uicdialer.ui.calls
 
 import com.usaindiacfo.uicdialer.data.api.CallStatus
+import com.usaindiacfo.uicdialer.data.api.Direction
 import com.usaindiacfo.uicdialer.data.db.RecordingStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -15,6 +16,16 @@ class CallStatusTextTest {
         assertEquals("No transcript", CallStatusText.of(CallStatus.FAILED).label)
         assertEquals(StatusTone.GOOD, CallStatusText.of(CallStatus.TRANSCRIBED).tone)
         assertEquals(StatusTone.BAD, CallStatusText.of(CallStatus.FAILED).tone)
+        assertEquals("No recording", CallStatusText.of(CallStatus.NO_RECORDING).label)
+    }
+
+    @Test fun callLogOnlyRowsSayWhatHappened() {
+        val nr = CallStatus.NO_RECORDING
+        assertEquals("Missed", CallStatusText.of(nr, "MISSED", Direction.MISSED, 0).label)
+        assertEquals("Rejected", CallStatusText.of(nr, "REJECTED", Direction.MISSED, 0).label)
+        assertEquals("Not answered", CallStatusText.of(nr, "OUTGOING", Direction.OUTGOING, 0).label)
+        assertEquals("No recording", CallStatusText.of(nr, "INCOMING", Direction.INCOMING, 45).label)
+        assertEquals("Transcript ready", CallStatusText.of(CallStatus.TRANSCRIBED, "MISSED", Direction.MISSED, 0).label)
     }
 
     @Test fun recordingStatusLabels() {

@@ -34,7 +34,9 @@ const ListQuery = z.object({
   phone: z.string().trim().max(40).optional(),
   userId: z.uuid().optional(),
   direction: z.enum(["INCOMING", "OUTGOING", "MISSED", "UNKNOWN"]).optional(),
-  status: z.enum(["PENDING_UPLOAD", "UPLOADED", "TRANSCRIBING", "TRANSCRIBED", "FAILED"]).optional(),
+  status: z.enum(["PENDING_UPLOAD", "UPLOADED", "TRANSCRIBING", "TRANSCRIBED", "FAILED", "NO_RECORDING"]).optional(),
+  // v=2: include call-log-only calls (status NO_RECORDING); old apps' Kotlin enum can't decode that status.
+  v: z.string().max(5).optional(),
   from: z.iso.datetime({ offset: true }).optional(),
   to: z.iso.datetime({ offset: true }).optional(),
   cursor: z.uuid().optional(),
@@ -71,6 +73,7 @@ function searchCallIds(db: Deps["db"], user: User, q: z.infer<typeof ListQuery> 
   if (q.userId) where.push(Prisma.sql`c."user_id" = ${q.userId}::uuid`);
   if (q.direction) where.push(Prisma.sql`c."direction"::text = ${q.direction}`);
   if (q.status) where.push(Prisma.sql`c."status"::text = ${q.status}`);
+  if (Number(q.v ?? "1") < 2) where.push(Prisma.sql`c."status"::text <> 'NO_RECORDING'`);
   if (q.from) where.push(Prisma.sql`c."started_at" >= ${new Date(q.from)}`);
   if (q.to) where.push(Prisma.sql`c."started_at" <= ${new Date(q.to)}`);
   return db.$queryRaw<{ id: string }[]>`
@@ -108,6 +111,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     if (q.userId) and.push({ userId: q.userId });
     if (q.direction) and.push({ direction: q.direction });
     if (q.status) and.push({ status: q.status });
+    if (Number(q.v ?? "1") < 2) and.push({ status: { not: "NO_RECORDING" } });
     if (q.phone) and.push({ phoneE164: { contains: q.phone.replace(/[^\d+]/g, "") } });
     if (q.from || q.to) {
       and.push({ startedAt: { gte: q.from ? new Date(q.from) : undefined, lte: q.to ? new Date(q.to) : undefined } });
@@ -137,6 +141,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
         startedAt: true,
         durationS: true,
         status: true,
+        logType: true,
         via: true,
         deviceId: true,
         simKey: true,

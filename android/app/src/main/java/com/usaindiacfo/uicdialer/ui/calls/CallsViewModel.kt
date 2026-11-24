@@ -51,12 +51,14 @@ data class CallRow(
     val person: String,
     /** DialVia name ("LAPTOP" / "APP" / "PHONE_DIALER"); null for old rows and the offline cache. */
     val via: String? = null,
+    /** Call-log type when there is no recording (MISSED, REJECTED, ...). */
+    val logType: String? = null,
 )
 
 private fun CachedCallEntity.toRow() = CallRow(
     id, contactName?.takeIf { it.isNotBlank() } ?: phoneE164 ?: phoneRaw ?: "Unknown number",
     if (!contactName.isNullOrBlank()) phoneE164 ?: phoneRaw else null,
-    direction, startedAt, durationS, status, userName ?: userEmail,
+    direction, startedAt, durationS, status, userName ?: userEmail, logType = logType,
 )
 
 private fun CallListItem.toRow() = toCached().toRow().copy(via = viaName)

@@ -60,6 +60,7 @@ describe("topicFor", () => {
     expect(topicFor("POST", "/v1/activities/batch")).toBe("activity");
     expect(topicFor("PATCH", "/api/contacts/:id")).toBe("contacts");
     expect(topicFor("POST", "/v1/calls")).toBe("calls");
+    expect(topicFor("POST", "/v1/calls/log")).toBe("calls");
     expect(topicFor("POST", "/internal/jobs/:jobId/result")).toBe("calls");
     expect(topicFor("POST", "/internal/jobs/claim")).toBeNull();
     expect(topicFor("POST", "/internal/jobs/:jobId/heartbeat")).toBeNull();

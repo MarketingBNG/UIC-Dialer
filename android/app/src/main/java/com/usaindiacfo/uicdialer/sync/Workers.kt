@@ -95,7 +95,9 @@ class SweepWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
     override suspend fun doWork(): Result {
         val ctx = applicationContext
         SyncScheduler.enqueueTrigger(ctx, ExistingWorkPolicy.KEEP)
+        SyncScheduler.enqueueCallLogTrigger(ctx, ExistingWorkPolicy.KEEP)
         if (!ctx.signedIn) return Result.success()
+        SyncScheduler.enqueueCallLogSync(ctx)
         val c = ctx.container
         val cfg = c.deviceConfigRepository.refreshIfStale()
         runCatching { SyncEngine(ctx, c).scan(cfg, System.currentTimeMillis() - 7 * DAY_MS) }
@@ -187,6 +189,9 @@ class ResumeWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         if (c.db.pendingActivities().pendingCount() > 0) {
             SyncScheduler.restartIfWaiting(ctx, SyncScheduler.ACTIVITIES) { SyncScheduler.enqueueActivities(ctx, it) }
         }
+        // Call-log entries: catches a missed trigger and restarts a run sitting in backoff.
+        SyncScheduler.enqueueCallLogTrigger(ctx, ExistingWorkPolicy.KEEP)
+        SyncScheduler.restartIfWaiting(ctx, SyncScheduler.CALL_LOG) { SyncScheduler.enqueueCallLogSync(ctx, policy = it) }
         // Hourly heartbeat keeps the dashboard's "Phone online" (75 min) accurate.
         HeartbeatReporter.report(ctx, force = true)
         // Missed calls and follow-up alarms, even when the rep hasn't opened the app.

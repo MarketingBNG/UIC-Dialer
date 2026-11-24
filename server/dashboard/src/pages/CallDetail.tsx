@@ -21,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
-import { callStatusText } from "../callStatus";
+import { callRowStatusText } from "../callStatus";
 import { DirectionTag, ErrorBox, FormError, Spinner, StatusBadge, ViaTag } from "../ui";
 
 const SPEEDS = [1, 1.25, 1.5, 2];
@@ -127,7 +127,7 @@ export function CallDetailPage() {
         </div>
         <div className="flex items-center gap-2">
           <CallButton phone={number} label={c.contactName || number || undefined} />
-          <StatusBadge status={c.status} />
+          <StatusBadge status={c.status} logType={c.logType} direction={c.direction} durationS={c.durationS} />
         </div>
       </div>
 
@@ -221,7 +221,9 @@ export function CallDetailPage() {
               <p className="text-sm text-muted-foreground">
                 {c.audioDeletedAt
                   ? `Audio deleted on ${formatWhen(c.audioDeletedAt)} by the retention setting. The transcript is kept.`
-                  : "No audio yet. The phone hasn't uploaded this recording."}
+                  : c.status === "NO_RECORDING"
+                    ? "No recording for this call. It comes from the phone's call log."
+                    : "No audio yet. The phone hasn't uploaded this recording."}
               </p>
             )}
           </Card>
@@ -274,7 +276,7 @@ export function CallDetailPage() {
             )}
             {!c.transcript ? (
               <p className="text-sm text-muted-foreground">
-                {callStatusText(c.status).explanation}
+                {callRowStatusText(c.status, c.logType, c.direction, c.durationS).explanation}
               </p>
             ) : segments.length ? (
               <ol className="space-y-1">

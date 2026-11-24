@@ -121,6 +121,9 @@ class ApiClient(
 
     suspend fun createCall(req: CreateCallRequest): CreateCallResponse = post("/v1/calls", req)
 
+    /** Up to 200 call-log entries (recorded or not); idempotent per entry on the server. */
+    suspend fun postCallLog(entries: List<CallLogEntryRequest>): CallLogResponse = post("/v1/calls/log", CallLogBatchRequest(entries))
+
     /**
      * Streams audio to PUT /v1/calls/:id/audio. [sha256] is X-Content-SHA256: the hash of the bytes
      * actually sent (the compressed file when compressed), not originalSha256. Server answers 422 on mismatch.
@@ -250,7 +253,8 @@ class ApiClient(
     suspend fun me(): Me = get("/api/me")
 
     suspend fun calls(filter: CallFilter = CallFilter(), cursor: String? = null, limit: Int = 20): CallPage =
-        get("/api/calls", filterQuery(filter) + mapOf("cursor" to cursor, "limit" to limit.toString()))
+        // v=2: also call-log-only calls (status NO_RECORDING), which this app version understands.
+        get("/api/calls", filterQuery(filter) + mapOf("cursor" to cursor, "limit" to limit.toString(), "v" to "2"))
 
     private fun filterQuery(filter: CallFilter): Map<String, String?> = mapOf(
         "q" to filter.q?.takeIf { it.isNotBlank() },

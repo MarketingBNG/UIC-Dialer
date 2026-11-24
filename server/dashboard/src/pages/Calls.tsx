@@ -68,6 +68,8 @@ export function CallsPage() {
     status: get("status"),
     from: dayBoundary(get("from"), false),
     to: dayBoundary(get("to"), true),
+    // Include call-log-only calls (no recording).
+    v: "2",
   };
   const activeCount = [filters.phone, filters.userId, filters.direction, filters.status, get("from"), get("to")].filter(Boolean).length;
 
@@ -93,7 +95,7 @@ export function CallsPage() {
 
   return (
     <>
-      <PageHeader title="Calls" subtitle={me.role === "ADMIN" ? "All recorded calls" : me.role === "MANAGER" && me.team ? `Calls from team ${me.team}` : "Your recorded calls"} />
+      <PageHeader title="Calls" subtitle={me.role === "ADMIN" ? "All calls" : me.role === "MANAGER" && me.team ? `Calls from team ${me.team}` : "Your calls"} />
 
       <Card className="mb-4 p-3 sm:p-4">
         <div className="flex flex-wrap gap-2">
@@ -205,7 +207,7 @@ export function CallsPage() {
                       <div className="truncate font-medium">{c.contactName || c.phoneE164 || c.phoneRaw || "Unknown number"}</div>
                       {c.contactName && <div className="truncate text-sm text-muted-foreground">{c.phoneE164 || c.phoneRaw}</div>}
                     </div>
-                    <StatusBadge status={c.status} />
+                    <StatusBadge status={c.status} logType={c.logType} direction={c.direction} durationS={c.durationS} />
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                     <DirectionTag direction={c.direction} />
@@ -265,7 +267,7 @@ export function CallsPage() {
                       </TableCell>
                     )}
                     <TableCell>
-                      <StatusBadge status={c.status} />
+                      <StatusBadge status={c.status} logType={c.logType} direction={c.direction} durationS={c.durationS} />
                     </TableCell>
                     {hasScores && <TableCell className="text-right tabular-nums">{c.score != null ? <ScorePill score={c.score} /> : "—"}</TableCell>}
                   </TableRow>

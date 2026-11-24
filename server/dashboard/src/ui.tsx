@@ -15,7 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import type { CallStatus, ContactStatus, DialVia, Direction } from "./api";
 import { CONTACT_STATUS_LABEL, DIRECTION_LABEL, VIA_LABEL } from "./format";
-import { callStatusText } from "./callStatus";
+import { callRowStatusText } from "./callStatus";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export function PageHeader({ title, subtitle, actions }: { title: string; subtitle?: ReactNode; actions?: ReactNode }) {
@@ -81,8 +81,8 @@ export function ToneBadge({ tone = "gray", children, className }: { tone?: Tone;
   );
 }
 
-export function StatusBadge({ status }: { status: CallStatus }) {
-  const t = callStatusText(status);
+export function StatusBadge({ status, logType, direction, durationS }: { status: CallStatus; logType?: string | null; direction?: Direction; durationS?: number | null }) {
+  const t = callRowStatusText(status, logType, direction, durationS);
   return (
     <Tooltip>
       <TooltipTrigger asChild>

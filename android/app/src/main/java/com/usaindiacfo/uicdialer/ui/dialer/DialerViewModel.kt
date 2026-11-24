@@ -20,23 +20,45 @@ data class DialerState(
     val number: String = "",
     /** Saved contacts matching what's typed; the first is shown above the keypad. */
     val matches: List<ContactDto> = emptyList(),
+    /** Phone contacts, CRM contacts and recent numbers matching the typed digits (T9 on names too). */
+    val suggestions: List<com.usaindiacfo.uicdialer.phonebook.PhoneBookLogic.Suggestion> = emptyList(),
+    /** The typed number is saved in the phone's contacts. */
+    val savedOnPhone: Boolean = false,
 )
 
 @OptIn(FlowPreview::class)
-class DialerViewModel(private val c: AppContainer) : ViewModel() {
+class DialerViewModel(private val c: AppContainer, private val app: android.content.Context? = null) : ViewModel() {
     private val _state = MutableStateFlow(DialerState())
     val state: StateFlow<DialerState> = _state.asStateFlow()
     private val query = MutableStateFlow("")
+
+    private var phoneContacts: List<com.usaindiacfo.uicdialer.phonebook.PhoneContact> = emptyList()
+    private var recents: List<com.usaindiacfo.uicdialer.phonebook.RecentCall> = emptyList()
 
     init {
         viewModelScope.launch {
             query.debounce(350).distinctUntilChanged().collectLatest { lookup(it) }
         }
+        if (app != null) {
+            viewModelScope.launch { com.usaindiacfo.uicdialer.phonebook.PhoneBook.contactsFlow(app).collect { phoneContacts = it; suggest() } }
+            viewModelScope.launch { com.usaindiacfo.uicdialer.phonebook.PhoneBook.recentsFlow(app).collect { recents = it; suggest() } }
+        }
+    }
+
+    /** Local, in-memory: cheap enough to run on every key press. */
+    private fun suggest() {
+        val n = _state.value.number
+        val crm = (_state.value.matches + c.contactCache.recent + c.contactCache.followUps).map { it.name to it.phoneE164 }
+        val list = com.usaindiacfo.uicdialer.phonebook.PhoneBookLogic.suggestions(n, phoneContacts, crm, recents)
+        val key = com.usaindiacfo.uicdialer.phonebook.PhoneBookLogic.numberKey(n)
+        val saved = key != null && phoneContacts.any { com.usaindiacfo.uicdialer.phonebook.PhoneBookLogic.numberKey(it.number) == key }
+        _state.update { it.copy(suggestions = list, savedOnPhone = saved) }
     }
 
     fun setNumber(n: String) {
         _state.update { it.copy(number = n) }
         query.value = n
+        suggest()
     }
 
     fun logWhatsApp(phone: String) = viewModelScope.launch { c.activityRepository.log(phone, ActivityType.WHATSAPP) }
@@ -53,6 +75,7 @@ class DialerViewModel(private val c: AppContainer) : ViewModel() {
             c.contactCache.recent.filter { matchesQuery(it, q) } // offline: the saved list
         }
         _state.update { it.copy(matches = found) }
+        suggest()
     }
 }
 

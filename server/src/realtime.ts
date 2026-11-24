@@ -33,7 +33,7 @@ export function topicFor(method: string, route: string): Topic | null {
   if (/^\/(v1|api)\/activities/.test(route)) return "activity";
   if (/^\/(v1|api)\/followups/.test(route)) return "followups";
   if (/^\/(v1|api)\/(contacts|dnc)/.test(route)) return "contacts";
-  if (route === "/v1/calls" || /^\/api\/calls\//.test(route)) return "calls";
+  if (route === "/v1/calls" || route === "/v1/calls/log" || /^\/api\/calls\//.test(route)) return "calls";
   if (/^\/internal\/calls\/|^\/internal\/jobs\/:jobId\/(result|translation|summary|score)$/.test(route)) return "calls";
   if (/^\/(v1|api)\/(call-lists|my\/call-list-items)|^\/api\/lists?\b/.test(route)) return "lists";
   if (/^\/api\/(outcomes|templates|scripts|targets)/.test(route)) return "settings";

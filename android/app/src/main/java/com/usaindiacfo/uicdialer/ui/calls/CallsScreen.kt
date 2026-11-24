@@ -234,7 +234,7 @@ private fun CallRowItem(row: CallRow, showPerson: Boolean, onClick: () -> Unit) 
         },
         trailingContent = {
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                StatusBadge(row.status)
+                StatusBadge(row.status, row.logType, row.direction, row.durationS)
                 com.usaindiacfo.uicdialer.ui.dialer.ViaChip(row.via)
             }
         },
@@ -253,9 +253,9 @@ internal fun DirectionIcon(d: Direction) {
 }
 
 @Composable
-internal fun StatusBadge(s: CallStatus) {
+internal fun StatusBadge(s: CallStatus, logType: String? = null, direction: Direction? = null, durationS: Int? = null) {
     val cs = MaterialTheme.colorScheme
-    val text = CallStatusText.of(s)
+    val text = CallStatusText.of(s, logType, direction, durationS)
     val (bg, fg) = when (text.tone) {
         StatusTone.GOOD -> cs.primaryContainer to cs.onPrimaryContainer
         StatusTone.BAD -> cs.errorContainer to cs.onErrorContainer
@@ -263,7 +263,7 @@ internal fun StatusBadge(s: CallStatus) {
         StatusTone.NEUTRAL -> cs.surfaceVariant to cs.onSurfaceVariant
     }
     Surface(color = bg, contentColor = fg, shape = MaterialTheme.shapes.small) {
-        Text(s.label(), style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+        Text(text.label, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
     }
 }
 

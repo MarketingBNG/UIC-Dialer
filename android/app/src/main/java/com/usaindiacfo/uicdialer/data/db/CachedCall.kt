@@ -29,6 +29,8 @@ data class CachedCallEntity(
     val userName: String?,
     val userEmail: String,
     val transcriptLanguage: String?,
+    /** Call-log type of a call without a recording (see CallListItem.logType). */
+    val logType: String? = null,
     val cachedAt: Long = System.currentTimeMillis(),
 )
 
@@ -45,6 +47,7 @@ fun CallListItem.toCached() = CachedCallEntity(
     userName = user.name,
     userEmail = user.email,
     transcriptLanguage = transcript?.language,
+    logType = logType,
 )
 
 @Dao

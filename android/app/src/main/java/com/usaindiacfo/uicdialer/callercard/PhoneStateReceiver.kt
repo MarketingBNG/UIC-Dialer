@@ -45,6 +45,8 @@ class PhoneStateReceiver : BroadcastReceiver() {
             TelephonyManager.EXTRA_STATE_OFFHOOK -> CallerCard.hideAfter(app, ANSWERED_HIDE_MS)
             TelephonyManager.EXTRA_STATE_IDLE -> {
                 CallerCard.hide(app)
+                // Any call just ended: send its call-log entry once the dialer has written it.
+                if (app.container.tokenStore.user.value != null) com.usaindiacfo.uicdialer.sync.SyncScheduler.enqueueCallLogSync(app, delaySec = 3)
                 if (rang(app)) {
                     setRang(app, false)
                     // Let the call log entry land first.

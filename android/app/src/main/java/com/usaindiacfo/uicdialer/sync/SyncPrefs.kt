@@ -32,6 +32,11 @@ class SyncPrefs(context: Context) {
         get() = if (prefs.contains(KEY_STOP)) prefs.getInt(KEY_STOP, 0) else null
         set(v) = prefs.edit().apply { if (v == null) remove(KEY_STOP) else putInt(KEY_STOP, v) }.apply()
 
+    /** CallLog _ID of the newest call-log row sent to the server (or skipped as private); -1 before the first run. */
+    var callLogCursor: Long
+        get() = prefs.getLong(KEY_CALL_LOG_CURSOR, -1L)
+        set(v) = prefs.edit().putLong(KEY_CALL_LOG_CURSOR, v).apply()
+
     /** ETag of the last GET /v1/dnc/hashes (only sent while the dnc_hashes table is loaded). */
     var dncEtag: String?
         get() = prefs.getString(KEY_DNC_ETAG, null)
@@ -39,6 +44,7 @@ class SyncPrefs(context: Context) {
 
     companion object {
         private const val KEY_DNC_ETAG = "dnc_etag"
+        private const val KEY_CALL_LOG_CURSOR = "call_log_cursor"
         private const val KEY_STOP = "last_stop_reason"
         private const val KEY_TREE = "saf_tree"
         private const val KEY_LAST = "last_sync_at"

@@ -1,6 +1,6 @@
 export type Role = "ADMIN" | "MANAGER" | "AGENT";
 export type Direction = "INCOMING" | "OUTGOING" | "MISSED" | "UNKNOWN";
-export type CallStatus = "PENDING_UPLOAD" | "UPLOADED" | "TRANSCRIBING" | "TRANSCRIBED" | "FAILED";
+export type CallStatus = "PENDING_UPLOAD" | "UPLOADED" | "TRANSCRIBING" | "TRANSCRIBED" | "FAILED" | "NO_RECORDING";
 /** How an outgoing call was dialled; null for incoming calls and older rows. */
 export type DialVia = "LAPTOP" | "APP" | "PHONE_DIALER";
 
@@ -26,6 +26,8 @@ export interface CallItem {
   startedAt: string;
   durationS: number | null;
   status: CallStatus;
+  /** The phone's call-log type (MISSED, REJECTED, ...); null for calls known only from a recording. */
+  logType?: string | null;
   via?: DialVia | null;
   /** The rep's own number the call used (from its SIM); absent on older servers/apps. */
   fromNumber?: string | null;

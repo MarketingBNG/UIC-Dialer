@@ -67,9 +67,9 @@ private val KEYS = listOf(
 @Composable
 fun DialerScreen(onOpenContact: (phone: String) -> Unit) {
     val container = appContainer()
-    val vm: DialerViewModel = viewModel(factory = viewModelFactory { initializer { DialerViewModel(container) } })
-    val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val vm: DialerViewModel = viewModel(factory = viewModelFactory { initializer { DialerViewModel(container, context.applicationContext) } })
+    val state by vm.state.collectAsStateWithLifecycle()
     val call = rememberCaller()
     @Suppress("DEPRECATION") val clipboard = LocalClipboardManager.current
 
@@ -103,6 +103,16 @@ fun DialerScreen(onOpenContact: (phone: String) -> Unit) {
             TextButton(onClick = { clipboard.getText()?.text?.let { vm.setNumber(DialLogic.cleanNumber(it).take(40)) } }) { Text("Paste number") }
         } else if (canDial) {
             TextButton(onClick = { onOpenContact(number) }) { Text("Details and notes for this number") }
+        }
+        // Other matches (phone contacts, CRM, recent numbers); tap fills the number.
+        state.suggestions.filter { s -> match == null || !DialLogic.sameNumber(s.number, match.phoneE164) }.take(3).forEach { s ->
+            SuggestionRow(s, onPick = { vm.setNumber(DialLogic.cleanNumber(s.number).take(40)) }, onCall = { call(s.number) })
+        }
+        if (canDial && !state.savedOnPhone) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = { com.usaindiacfo.uicdialer.phonebook.PhoneBook.createContact(context, number) }) { Text("Create new contact") }
+                TextButton(onClick = { com.usaindiacfo.uicdialer.phonebook.PhoneBook.addToExisting(context, number) }) { Text("Add to existing") }
+            }
         }
 
         KEYS.chunked(3).forEach { row ->
@@ -159,6 +169,29 @@ private fun MatchCard(contact: ContactDto, onClick: () -> Unit) {
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun SuggestionRow(s: com.usaindiacfo.uicdialer.phonebook.PhoneBookLogic.Suggestion, onPick: () -> Unit, onCall: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clip(MaterialTheme.shapes.small).clickable(onClick = onPick).padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Avatar(s.name, size = 32.dp)
+        Column(Modifier.weight(1f)) {
+            Text(s.name ?: s.number, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val src = when (s.source) {
+                com.usaindiacfo.uicdialer.phonebook.PhoneBookLogic.Source.PHONE -> "Phone contact"
+                com.usaindiacfo.uicdialer.phonebook.PhoneBookLogic.Source.CRM -> "CRM"
+                com.usaindiacfo.uicdialer.phonebook.PhoneBookLogic.Source.RECENT -> "Recent"
+            }
+            Text(
+                listOfNotNull(s.number.takeIf { s.name != null }, src).joinToString(" · "),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+            )
+        }
+        GreenCallButton(onClick = onCall, size = 40.dp)
     }
 }
 

@@ -23,12 +23,14 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -136,8 +138,26 @@ class ContactsViewModel(private val c: AppContainer) : ViewModel() {
     }
 }
 
+/** CRM contacts (server) or the phone's own contacts, switched by a segmented control. */
 @Composable
 fun ContactsScreen(onOpenContact: (phone: String) -> Unit) {
+    var phone by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    Column(Modifier.fillMaxSize()) {
+        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 8.dp)) {
+            listOf("CRM", "Phone").forEachIndexed { i, label ->
+                SegmentedButton(
+                    selected = phone == (i == 1),
+                    onClick = { phone = i == 1 },
+                    shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, 2),
+                ) { Text(label) }
+            }
+        }
+        if (phone) PhoneContactsTab(onOpenContact) else CrmContactsTab(onOpenContact)
+    }
+}
+
+@Composable
+private fun CrmContactsTab(onOpenContact: (phone: String) -> Unit) {
     val container = appContainer()
     val vm: ContactsViewModel = viewModel(factory = viewModelFactory { initializer { ContactsViewModel(container) } })
     val state by vm.state.collectAsStateWithLifecycle()
