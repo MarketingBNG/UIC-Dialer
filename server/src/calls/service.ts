@@ -85,6 +85,12 @@ export async function registerCall(
   const key = { userId_originalSha256: { userId, originalSha256: body.originalSha256 } };
   let existing = await deps.db.call.findUnique({ where: key });
   if (!existing) {
+    // The exact same file already stored for someone else (copied between phones, a restored backup): don't keep it twice.
+    const elsewhere = await deps.db.call.findFirst({
+      where: { originalSha256: body.originalSha256, status: { not: "PENDING_UPLOAD" }, userId: { not: userId } },
+      select: { id: true },
+    });
+    if (elsewhere) return { callId: elsewhere.id, alreadyUploaded: true };
     existing = await attachOrCreate(deps, userId, body.originalSha256, data);
     if (existing.status !== "PENDING_UPLOAD") return { callId: existing.id, alreadyUploaded: true };
   } else {

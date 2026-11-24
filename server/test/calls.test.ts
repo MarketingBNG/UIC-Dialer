@@ -55,6 +55,22 @@ describe("call upload", () => {
     expect(again.json()).toMatchObject({ callId, alreadyUploaded: true });
   });
 
+  it("skips a recording another user already uploaded (same file on two phones)", async () => {
+    const a = await t.loginDevice(uniqueEmail());
+    const audio = randomBytes(2048);
+    const first = await uploadCall(a.headers, audio);
+    expect(first.put.statusCode).toBe(201);
+    const original = first.original;
+
+    const b = await t.loginDevice(uniqueEmail());
+    const check = await t.app.inject({ method: "POST", url: "/v1/calls/check", headers: b.headers, payload: { hashes: [original] } });
+    expect(check.json().known).toEqual([original]);
+    const reg = await t.app.inject({ method: "POST", url: "/v1/calls", headers: b.headers, payload: meta(original) });
+    expect(reg.statusCode).toBe(200);
+    expect(reg.json()).toMatchObject({ alreadyUploaded: true });
+    expect(await t.db.call.count({ where: { originalSha256: original } })).toBe(1);
+  });
+
   it("rejects checksum mismatches and keeps the call pending", async () => {
     const s = await t.loginDevice(uniqueEmail());
     const created = await t.app.inject({ method: "POST", url: "/v1/calls", headers: s.headers, payload: meta(sha256("x1")) });
