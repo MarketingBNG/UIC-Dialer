@@ -48,7 +48,7 @@ fun SignInScreen(onSignedIn: () -> Unit) {
         Text("UIC Dialer", style = MaterialTheme.typography.headlineMedium)
         Spacer(Modifier.height(8.dp))
         Text(
-            "Sign in with your usaindiacfo.com Google account to sync your call recordings.",
+            "Sign in with your usaindiacfo.com Google account, or a Gmail account an admin has added.",
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
         )
