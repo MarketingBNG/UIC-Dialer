@@ -122,6 +122,12 @@ interface RecordingDao {
     @Query("SELECT COUNT(*) FROM recordings WHERE status IN ('PENDING','UPLOADING','FAILED')")
     suspend fun pendingCount(): Int
 
+    @Query("SELECT COUNT(*) FROM recordings WHERE status IN ('PENDING','UPLOADING','FAILED') AND source = :source")
+    suspend fun pendingCount(source: RecordingSource): Int
+
+    @Query("SELECT COUNT(*) FROM recordings WHERE source = :source")
+    suspend fun totalCount(source: RecordingSource): Int
+
     /** Recordings found (any status) whose file is newer than [sinceMs]; for the heartbeat's "calls but no recordings" check. */
     @Query("SELECT COUNT(*) FROM recordings WHERE dateModified >= :sinceMs")
     suspend fun foundSince(sinceMs: Long): Int

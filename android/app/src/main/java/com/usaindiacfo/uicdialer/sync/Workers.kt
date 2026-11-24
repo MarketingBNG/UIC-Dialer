@@ -9,6 +9,7 @@ import com.usaindiacfo.uicdialer.data.api.ApiException
 import com.usaindiacfo.uicdialer.data.db.RecordingSource
 import com.usaindiacfo.uicdialer.data.db.toRequest
 import java.io.IOException
+import kotlinx.coroutines.launch
 
 private val Context.signedIn get() = container.tokenStore.user.value != null
 private const val DAY_MS = 24 * 3600_000L
@@ -73,10 +74,25 @@ class BacklogWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         val cfg = c.deviceConfigRepository.refreshIfStale()
         if (!cfg.backlogEnabled) return Result.success()
         val engine = SyncEngine(ctx, c)
+        val dao = c.db.recordings()
         return try {
             engine.scan(cfg, System.currentTimeMillis() - cfg.backlogCutoffDays.coerceAtLeast(1) * DAY_MS)
             engine.dedup(RecordingSource.BACKLOG) { isStopped }
-            val outcome = engine.upload(RecordingSource.BACKLOG, cfg) { isStopped }
+            // Visible progress notification (foreground): Android doesn't stop the run after ~10 minutes.
+            val showing = dao.pendingCount(RecordingSource.BACKLOG) > 0 && runCatching { showProgress(dao) }.isSuccess
+            val outcome = kotlinx.coroutines.coroutineScope {
+                val progress = if (!showing) null else launch {
+                    while (true) {
+                        kotlinx.coroutines.delay(5_000)
+                        runCatching { showProgress(dao) }
+                    }
+                }
+                try {
+                    engine.upload(RecordingSource.BACKLOG, cfg) { isStopped }
+                } finally {
+                    progress?.cancel()
+                }
+            }
             if (isStopped) recordStop(ctx)
             HeartbeatReporter.report(ctx)
             when {
@@ -87,6 +103,12 @@ class BacklogWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         } catch (e: IOException) {
             if (e is ApiException && e.isAuth) Result.success() else Result.retry()
         }
+    }
+
+    private suspend fun showProgress(dao: com.usaindiacfo.uicdialer.data.db.RecordingDao) {
+        val total = dao.totalCount(RecordingSource.BACKLOG)
+        val left = dao.pendingCount(RecordingSource.BACKLOG)
+        setForeground(BacklogNotification.foregroundInfo(applicationContext, total - left, total))
     }
 }
 
