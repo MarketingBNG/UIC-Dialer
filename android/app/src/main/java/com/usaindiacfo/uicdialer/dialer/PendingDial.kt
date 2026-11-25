@@ -85,6 +85,8 @@ object Dialer {
                 prefs.setLastSim(n, sim.id)
             }
             context.startActivity(intent)
+            // Legal: the other person must be told the call is recorded (India DPDP notice; US all-party-consent states).
+            Toast.makeText(context, "Tell the caller: \"This call is recorded for quality and records.\"", Toast.LENGTH_LONG).show()
             return clientId
         } catch (_: ActivityNotFoundException) {
             prefs.pending = null

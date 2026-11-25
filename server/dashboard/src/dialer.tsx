@@ -1,3 +1,4 @@
+import { toast } from "sonner";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api, type OutcomeDto } from "./api";
@@ -128,6 +129,8 @@ export function DialerProvider({ children }: { children: ReactNode }) {
     // The desktop shell hands window.open'd tel: links to Windows (Phone Link); a browser follows the link itself.
     if (isDesktopApp()) window.open(`tel:${p.phone}`);
     else window.location.href = `tel:${p.phone}`;
+    // Legal: the other person must be told the call is recorded (India DPDP notice; US all-party-consent states).
+    toast("Tell the caller: “This call is recorded for quality and records.”", { duration: 8000 });
   }, []);
 
   const call = useCallback(
