@@ -26,10 +26,6 @@ class Settings:
     concurrency: int
     idle_max_sleep: float
     # Provider-specific
-    whisper_model: str
-    whisper_device: str
-    whisper_compute_type: str
-    whisper_task: str
     openai_api_key: str | None
     openai_model: str
     fireflies_api_key: str | None = None
@@ -65,11 +61,6 @@ class Settings:
             # Jobs transcribed in parallel by this worker process.
             concurrency=max(1, int(e.get("WORKER_CONCURRENCY", "4"))),
             idle_max_sleep=float(e.get("WORKER_IDLE_MAX_SLEEP", "30")),
-            whisper_model=e.get("WHISPER_MODEL", "large-v3-turbo"),
-            whisper_device=e.get("WHISPER_DEVICE", "auto"),
-            whisper_compute_type=e.get("WHISPER_COMPUTE_TYPE", "default"),
-            # "translate" = Whisper writes English directly (needs large-v3; turbo was not trained to translate).
-            whisper_task=e.get("WHISPER_TASK", "transcribe"),
             openai_api_key=e.get("OPENAI_API_KEY") or None,
             openai_model=e.get("OPENAI_TRANSCRIBE_MODEL", "whisper-1"),
             fireflies_api_key=e.get("FIREFLIES_API_KEY") or None,

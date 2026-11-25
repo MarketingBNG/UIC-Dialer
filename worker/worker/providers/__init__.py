@@ -33,10 +33,6 @@ def load_provider(settings: Settings) -> Provider:
             from .stub import StubProvider
 
             return StubProvider()
-        case "faster_whisper":
-            from .faster_whisper import FasterWhisperProvider
-
-            return FasterWhisperProvider(settings)
         case "openai":
             from .openai import OpenAIProvider
 
