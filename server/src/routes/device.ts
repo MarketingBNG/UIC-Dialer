@@ -103,7 +103,8 @@ export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
     return { available: true, ...latestApp, downloadPath: "/v1/app/download" };
   });
 
-  app.get("/v1/app/download", auth, async (_req, reply) => {
+  // Public link for first installs (people without the app yet). Sign-in still limits who can use it.
+  const sendApk = async (_req: unknown, reply: import("fastify").FastifyReply) => {
     const { latestApp } = await getSettings(deps.db);
     if (!latestApp) throw new HttpError(404, "No app published");
     // Inside the mounted storage dir so it survives redeploys.
@@ -114,5 +115,7 @@ export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
     reply.header("content-type", "application/vnd.android.package-archive");
     reply.header("content-disposition", `attachment; filename="${latestApp.fileName}"`);
     return reply.send(createReadStream(file));
-  });
+  };
+  app.get("/v1/app/download", auth, sendApk);
+  app.get("/app.apk", sendApk);
 }
