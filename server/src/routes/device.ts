@@ -116,6 +116,8 @@ export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
     if (!found?.isFile()) throw new HttpError(404, "App file missing");
     reply.header("content-length", found.size);
     reply.header("content-type", "application/vnd.android.package-archive");
+    // Always the newest version: stop Cloudflare/browsers keeping an old APK (it caches .apk for hours).
+    reply.header("cache-control", "no-store");
     reply.header("content-disposition", `attachment; filename="${latestApp.fileName}"`);
     return reply.send(createReadStream(file));
   };
