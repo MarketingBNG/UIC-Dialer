@@ -61,6 +61,7 @@ class FakeApi:
     def __init__(self, jobs, transcripts):
         self.jobs, self.transcripts = list(jobs), transcripts
         self.claims, self.translations, self.results, self.beats = [], {}, {}, []
+        self.released, self.batch_refs = [], []
 
     def claim(self, limit, kinds=("transcribe",)):
         self.claims.append((limit, tuple(kinds)))
@@ -79,6 +80,12 @@ class FakeApi:
     def heartbeat(self, job_id):
         self.beats.append(job_id)
         return True
+
+    def release(self, job_id):
+        self.released.append(job_id)
+
+    def set_batch(self, job_ids, batch_id):
+        self.batch_refs.append((tuple(job_ids), batch_id))
 
 
 def test_settings_defaults():
@@ -247,8 +254,29 @@ def test_shutdown_hands_back_pending_jobs():
     assert len(t.pending) == 1
     stop.set()
     t.run()
-    assert api.results["j1"]["ok"] is False and api.results["j1"]["retryable"] is True
+    # Handed back without counting as a failed attempt.
+    assert api.released == ["j1"] and "j1" not in api.results
     assert not t.pending and not t.held
+
+
+def test_batch_id_saved_and_resumed_after_restart():
+    segs = {"c1": {"text": "नमस्ते"}, "c2": {"text": "शुक्रिया"}}
+    settings = Settings.from_env({**KEYED, "TRANSLATE_BATCH_MAX": "2"})
+    batches = FakeBatches({"j1": ["Hello"], "j2": ["Thanks"]})
+    api = FakeApi([{"jobId": "j1", "callId": "c1"}, {"jobId": "j2", "callId": "c2"}], segs)
+    t = Translator(api, FakeClient(batches=batches), settings, poll_s=0)
+    t.tick()
+    t.batch_thread.join()
+    assert api.batch_refs == [(("j1", "j2"), "b1")] and len(batches.created) == 1
+
+    # A new worker claims the same jobs with the saved batch id: it waits for b1 and sends nothing new.
+    api2 = FakeApi([{"jobId": "j1", "callId": "c1", "batchId": "b1"}, {"jobId": "j2", "callId": "c2", "batchId": "b1"}], segs)
+    t2 = Translator(api2, FakeClient(batches=batches), settings, poll_s=0)
+    t2.tick()
+    for th in t2.resume_threads:
+        th.join()
+    assert len(batches.created) == 1 and not t2.pending
+    assert set(api2.translations) == {"j1", "j2"} and api2.translations["j1"]["textEn"] == "Hello"
 
 
 def test_lost_lock_drops_job_from_pending_and_heartbeats():
@@ -277,3 +305,37 @@ def test_failure_after_paid_reply_reports_usage():
     r = api.results["j1"]
     assert r["ok"] is False and r["model"] == "claude-opus-5-5"
     assert r["usage"] == {"inputTokens": 30, "outputTokens": 15, "batch": False}
+
+
+def test_no_batch_sent_once_shutdown_began():
+    stop = threading.Event()
+    batches = FakeBatches({"j1": ["Hello"]})
+    api = FakeApi([{"jobId": "j1", "callId": "c1"}], {"c1": {"text": "नमस्ते"}})
+    t = Translator(api, FakeClient(batches=batches), Settings.from_env({**KEYED, "TRANSLATE_BATCH_MAX": "5"}),
+                   stopping=stop.is_set, poll_s=0)
+    t.tick()
+    stop.set()
+    t.translate_backlog(t.pending)
+    assert batches.created == [] and "j1" not in api.results  # nothing billed, nothing failed
+
+
+def test_transient_poll_error_does_not_drop_the_batch(monkeypatch):
+    import worker.batches as b
+
+    monkeypatch.setattr(b.time, "sleep", lambda _s: None)
+    batches = FakeBatches({"j1": ["Hello"]})
+    real = batches.retrieve
+    calls = {"n": 0}
+
+    def flaky(batch_id):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise RuntimeError("529 overloaded")
+        return real(batch_id)
+
+    batches.retrieve = flaky
+    api = FakeApi([{"jobId": "j1", "callId": "c1"}], {"c1": {"text": "नमस्ते"}})
+    t = Translator(api, FakeClient(batches=batches), Settings.from_env({**KEYED, "TRANSLATE_BATCH_MAX": "1"}), poll_s=0)
+    t.tick()
+    t.batch_thread.join()
+    assert len(batches.created) == 1 and api.translations["j1"]["textEn"] == "Hello" and "j1" not in api.results

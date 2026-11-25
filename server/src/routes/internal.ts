@@ -21,6 +21,8 @@ import {
   failJob,
   heartbeatJob,
   recordTranslationCost,
+  releaseJob,
+  setJobBatch,
 } from "../jobs/queue.js";
 
 const Claim = z.object({
@@ -143,6 +145,8 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
         kind: j.kind,
         priority: j.priority,
         attempt: j.attempts,
+        // Claude batch this job is already in (sent before a worker restart): wait for it instead of resending.
+        batchId: j.batchId ?? null,
         mimeType: byId.get(j.callId)?.mimeType ?? null,
         durationS: byId.get(j.callId)?.durationS ?? null,
         audioPath: `/internal/audio/${j.callId}`,
@@ -193,6 +197,24 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
     const { workerId } = z.object({ workerId: z.string().max(100) }).parse(req.body);
     await touchWorker(deps.db, workerId);
     if (!(await heartbeatJob(deps.db, jobId, workerId))) throw new HttpError(409, "Job is not locked by this worker");
+    return reply.code(204).send();
+  });
+
+  /** After sending a Claude batch: remember its id on the jobs, so a restarted worker can resume it. */
+  app.post("/internal/jobs/batch-ref", auth, async (req) => {
+    const body = z.object({
+      workerId: z.string().max(100),
+      jobIds: z.array(z.uuid()).min(1).max(1000),
+      batchId: z.string().min(1).max(200),
+    }).parse(req.body);
+    return { updated: await setJobBatch(deps.db, body.jobIds, body.workerId, body.batchId) };
+  });
+
+  /** Worker shutdown: put a held job straight back in the queue (attempt not counted, batch id kept). */
+  app.post<{ Params: { jobId: string } }>("/internal/jobs/:jobId/release", auth, async (req, reply) => {
+    const jobId = z.uuid().parse(req.params.jobId);
+    const { workerId } = z.object({ workerId: z.string().max(100) }).parse(req.body);
+    if (!(await releaseJob(deps.db, jobId, workerId))) throw new HttpError(409, "Job is not locked by this worker");
     return reply.code(204).send();
   });
 

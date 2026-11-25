@@ -261,3 +261,28 @@ describe("translate backfill", () => {
     expect(again.json()).toEqual({ queued: 0 });
   });
 });
+
+describe("batch resume after a worker restart", () => {
+  it("keeps the batch id across release and reclaim; a failure clears it", async () => {
+    const { jobId } = await translateReady(0);
+    const [job] = (await claim({ workerId: "w1", kinds: ["translate"] })).json().jobs;
+    expect(job).toMatchObject({ jobId, batchId: null, attempt: 1 });
+
+    const ref = (payload: object) => t.app.inject({ method: "POST", url: "/internal/jobs/batch-ref", headers: t.workerHeaders, payload });
+    expect((await ref({ workerId: "w2", jobIds: [jobId], batchId: "msgbatch_1" })).json().updated).toBe(0); // not its lock
+    expect((await ref({ workerId: "w1", jobIds: [jobId], batchId: "msgbatch_1" })).json().updated).toBe(1);
+
+    const release = (workerId: string) =>
+      t.app.inject({ method: "POST", url: `/internal/jobs/${jobId}/release`, headers: t.workerHeaders, payload: { workerId } });
+    expect((await release("w2")).statusCode).toBe(409);
+    expect((await release("w1")).statusCode).toBe(204);
+
+    // Back in the queue right away, attempt not counted, batch id kept for the next worker.
+    const [again] = (await claim({ workerId: "w3", kinds: ["translate"] })).json().jobs;
+    expect(again).toMatchObject({ jobId, batchId: "msgbatch_1", attempt: 1 });
+
+    expect((await postResult(jobId, { workerId: "w3", ok: false, error: "batch result errored", retryable: true })).statusCode).toBe(204);
+    const row = await t.db.job.findUniqueOrThrow({ where: { id: jobId } });
+    expect(row).toMatchObject({ status: "QUEUED", externalRef: null });
+  });
+});

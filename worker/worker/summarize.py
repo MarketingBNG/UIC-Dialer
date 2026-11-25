@@ -9,6 +9,7 @@ import json
 import time
 
 from .translate import SONNET
+from .batches import batch_results, open_batch, wait_batch
 
 SENTIMENTS = ("positive", "neutral", "negative", "mixed")
 ROLES = ("Agent", "Customer", "Unknown")
@@ -157,7 +158,8 @@ def summarize_call(client, transcript: dict, agent: str | None = None, model: st
     raise err
 
 
-def summarize_batch(client, calls: dict[str, tuple[dict, str | None]], model: str = SONNET, poll_s: int = 30) -> dict:
+def summarize_batch(client, calls: dict[str, tuple[dict, str | None]], model: str = SONNET, poll_s: int = 30,
+                    batch_id: str | None = None, on_submit=None, guard=None, allowed=None) -> dict:
     """Backlog: one Message Batch. `calls` is {id: (transcript, agent)}. Returns {id: (summary, usage) | Exception}."""
     results: dict = {}
     todo = {}
@@ -169,12 +171,11 @@ def summarize_batch(client, calls: dict[str, tuple[dict, str | None]], model: st
             results[cid] = SummaryError("empty transcript")
     if not todo:
         return results
-    batch = client.messages.batches.create(requests=[
+    bid = open_batch(client, lambda: [
         {"custom_id": cid, "params": request_params(model, lines, agent)} for cid, (lines, _, agent) in todo.items()
-    ])
-    while (batch := client.messages.batches.retrieve(batch.id)).processing_status != "ended":
-        time.sleep(poll_s)
-    for r in client.messages.batches.results(batch.id):
+    ], batch_id, on_submit, guard, allowed)
+    wait_batch(client, bid, poll_s)
+    for r in batch_results(client, bid, poll_s):
         if r.custom_id not in todo:
             continue
         _, speakers, agent = todo[r.custom_id]

@@ -10,6 +10,7 @@ import time
 
 from .summarize import MAX_CHARS, SENTIMENTS, transcript_lines
 from .translate import SONNET
+from .batches import batch_results, open_batch, wait_batch
 
 MAX_OBJECTIONS, MAX_POINTS = 10, 5
 
@@ -165,7 +166,7 @@ def score_call(client, transcript: dict, agent: str | None = None, script: dict 
 
 
 def score_batch(client, calls: dict[str, tuple[dict, str | None, dict | None]], model: str = SONNET,
-                poll_s: int = 30) -> dict:
+                poll_s: int = 30, batch_id: str | None = None, on_submit=None, guard=None, allowed=None) -> dict:
     """Backlog: one Message Batch. `calls` is {id: (transcript, agent, script)}. Returns {id: (score, usage) | Exception}."""
     results: dict = {}
     todo = {}
@@ -177,13 +178,12 @@ def score_batch(client, calls: dict[str, tuple[dict, str | None, dict | None]], 
             results[cid] = ScoreError("empty transcript")
     if not todo:
         return results
-    batch = client.messages.batches.create(requests=[
+    bid = open_batch(client, lambda: [
         {"custom_id": cid, "params": request_params(model, lines, agent, script)}
         for cid, (lines, agent, script) in todo.items()
-    ])
-    while (batch := client.messages.batches.retrieve(batch.id)).processing_status != "ended":
-        time.sleep(poll_s)
-    for r in client.messages.batches.results(batch.id):
+    ], batch_id, on_submit, guard, allowed)
+    wait_batch(client, bid, poll_s)
+    for r in batch_results(client, bid, poll_s):
         if r.custom_id not in todo:
             continue
         _, agent, script = todo[r.custom_id]

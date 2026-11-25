@@ -10,6 +10,7 @@ Cost levers (measured on 18 real calls: output ~63% of cost, ~30% of output was 
 import json
 import re
 import time
+from .batches import batch_results, open_batch, wait_batch
 
 SONNET = "claude-sonnet-5-5"
 OPUS = "claude-opus-5-5"
@@ -146,20 +147,23 @@ def translate_segments(client, segments: list[dict], model: str | None = None) -
     raise err
 
 
-def translate_batch(client, calls: dict[str, list[dict]], model: str | None = None, poll_s: int = 30) -> dict:
-    """Backlog: all calls in one Message Batch (50% off). Returns {call_id: (segments, usage) | TranslationError}."""
+def translate_batch(client, calls: dict[str, list[dict]], model: str | None = None, poll_s: int = 30,
+                    batch_id: str | None = None, on_submit=None, guard=None, allowed=None) -> dict:
+    """Backlog: all calls in one Message Batch (50% off). Returns {call_id: (segments, usage) | TranslationError}.
+    With [batch_id], waits for that earlier batch instead of sending a new one (resume after a worker restart)."""
     plans = {cid: plan(segs, model) for cid, segs in calls.items()}
     results: dict = {cid: (merge(calls[cid], [], []), {"model": None, "input_tokens": 0, "output_tokens": 0})
                      for cid, (_, send, _) in plans.items() if not send}
     todo = {cid: p for cid, p in plans.items() if p[1]}
     if not todo:
         return results
-    batch = client.messages.batches.create(requests=[
+    bid = open_batch(client, lambda: [
         {"custom_id": cid, "params": request_params(m, send)} for cid, (_, send, m) in todo.items()
-    ])
-    while (batch := client.messages.batches.retrieve(batch.id)).processing_status != "ended":
-        time.sleep(poll_s)
-    for r in client.messages.batches.results(batch.id):
+    ], batch_id, on_submit, guard, allowed)
+    wait_batch(client, bid, poll_s)
+    for r in batch_results(client, bid, poll_s):
+        if r.custom_id not in todo:  # a resumed batch holds jobs this worker didn't claim
+            continue
         idx, send, m = todo[r.custom_id]
         if r.result.type != "succeeded":
             results[r.custom_id] = TranslationError(f"batch result {r.result.type}")

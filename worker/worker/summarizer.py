@@ -43,7 +43,7 @@ class Summarizer(Translator):
         finally:
             self._release(job_id)
 
-    def translate_backlog(self, jobs: list[dict]) -> None:
+    def translate_backlog(self, jobs: list[dict], batch_id: str | None = None) -> None:
         calls: dict[str, tuple[dict, str | None]] = {}
         mask = {job["jobId"]: bool(job.get("maskPii")) for job in jobs}
         for job in jobs:
@@ -55,11 +55,11 @@ class Summarizer(Translator):
         if not calls:
             return
         try:
-            results = summarize_batch(self.client, calls, model=self.model, poll_s=self.poll_s)
+            results = summarize_batch(self.client, calls, model=self.model, poll_s=self.poll_s,
+                                      **self._batch_opts(list(calls), batch_id))
         except Exception as e:  # noqa: BLE001 - whole batch failed; every job is retried
             log.exception("summarize batch failed", jobs=len(calls))
-            for job_id in calls:
-                self._fail(job_id, e)
+            self._batch_failed(calls, e)
             return
         for job_id in calls:
             r = results.get(job_id, SummaryError("missing from batch results"))

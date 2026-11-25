@@ -76,6 +76,20 @@ class Api:
             return True  # transient; try again next beat
 
     @_network_retry
+    def set_batch(self, job_ids: list[str], batch_id: str) -> None:
+        """Remembers the Claude batch these jobs were sent in, so a restarted worker resumes it."""
+        res = self.http.post("/internal/jobs/batch-ref", json={"workerId": self.worker_id, "jobIds": job_ids,
+                                                                "batchId": batch_id})
+        res.raise_for_status()
+
+    def release(self, job_id: str) -> None:
+        """Shutdown: hands a held job straight back (attempt not counted, batch id kept). Best effort."""
+        try:
+            self.http.post(f"/internal/jobs/{job_id}/release", json={"workerId": self.worker_id}, timeout=10)
+        except httpx.HTTPError:
+            log.warning("could not release job", job_id=job_id)
+
+    @_network_retry
     def post_result(self, job_id: str, payload: dict) -> None:
         res = self.http.post(f"/internal/jobs/{job_id}/result", json={"workerId": self.worker_id, **payload})
         if res.status_code == 409:

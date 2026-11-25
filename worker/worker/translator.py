@@ -3,6 +3,9 @@
 Live calls (priority >= 10) are translated right away; backlog calls are collected and sent as one
 Message Batch (50% off) once TRANSLATE_BATCH_MAX jobs are waiting or TRANSLATE_BATCH_WAIT_S has passed.
 Every claimed job is heartbeated while it waits or while its batch runs (a batch can take hours).
+
+A batch's id is saved on its jobs. When the worker stops (a deploy), it hands its jobs back at once; the next
+worker that claims them waits for the same batch instead of sending (and paying for) a new one.
 """
 
 import threading
@@ -13,6 +16,7 @@ import structlog
 
 from .config import Settings
 from .pii import mask_segments
+from .batches import BatchCancelled
 from .translate import TranslationError, translate_batch, translate_segments
 
 CLAIM_MAX = 20  # server limit per /internal/jobs/claim
@@ -62,6 +66,10 @@ class Translator:
         self.held: set[str] = set()  # job ids we keep alive with heartbeats
         self.lock = threading.Lock()
         self.batch_thread: threading.Thread | None = None
+        self.resume_threads: list[threading.Thread] = []
+        # Held while a new batch is sent and its id saved; release_held takes it too, so a shutdown never hands
+        # jobs back between "batch sent (billed)" and "id saved" (the next worker would send it again).
+        self.submit_lock = threading.Lock()
         self._beat_stop = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -85,7 +93,9 @@ class Translator:
         beat.start()
         idle = 1.0
         try:
-            while not self.stopping() or self._batch_running():
+            # Stop promptly: a batch can take hours, longer than any deploy waits. Its jobs are handed back with
+            # their batch id (release_held) and the next worker resumes the batch.
+            while not self.stopping():
                 got = self.tick()
                 if got:
                     idle = 1.0
@@ -93,16 +103,18 @@ class Translator:
                     time.sleep(idle)
                     idle = min(idle * 2, self.settings.idle_max_sleep)
         finally:
-            self.release_pending()
             self._beat_stop.set()
+            self.release_held()
 
-    def release_pending(self) -> None:
-        """Shutdown: hand back claimed jobs that never made it into a batch, so they are retried at once."""
-        with self.lock:
-            jobs, self.pending, self.pending_since = self.pending, [], None
-        for job in jobs:
-            self._release(job["jobId"])
-            self._fail(job["jobId"], RuntimeError("worker shutting down before translation started"))
+    def release_held(self) -> None:
+        """Shutdown: hand every held job back to the queue at once (not counted as a failed attempt). Jobs already
+        in a Claude batch keep its id, so the next worker waits for that batch instead of sending a new one."""
+        with self.submit_lock:  # a batch being sent finishes saving its id first; later ones see stopping()
+            with self.lock:
+                ids, self.held = list(self.held), set()
+                self.pending, self.pending_since = [], None
+        for job_id in ids:
+            self.api.release(job_id)
 
     def tick(self) -> int:
         """One round: claim, start a due batch, run live jobs. Returns jobs claimed."""
@@ -115,15 +127,24 @@ class Translator:
             except Exception:
                 log.exception("claim failed", kind=self.KIND)
         live = []
+        resume: dict[str, list[dict]] = {}
         with self.lock:
             for job in jobs:
-                if job.get("priority", 0) >= LIVE_PRIORITY:
+                if job.get("batchId"):
+                    # Sent in a batch before a worker restart: wait for that batch, whatever the priority.
+                    self.held.add(job["jobId"])
+                    resume.setdefault(job["batchId"], []).append(job)
+                elif job.get("priority", 0) >= LIVE_PRIORITY:
                     live.append(job)
                 else:
                     self.held.add(job["jobId"])
                     if not self.pending:
                         self.pending_since = self.clock()
                     self.pending.append(job)
+        for batch_id, group in resume.items():
+            t = threading.Thread(target=self._safe_batch, args=(group, batch_id), name=f"{self.KIND}-resume", daemon=True)
+            self.resume_threads = [x for x in self.resume_threads if x.is_alive()] + [t]
+            t.start()
         # Start a due batch before live work so live calls never delay the batch timer.
         self._maybe_start_batch()
         for job in live:
@@ -146,6 +167,7 @@ class Translator:
         self.batch_thread.start()
 
     def _batch_running(self) -> bool:
+        """Only the new-batch thread: resumed batches run alongside and don't hold up the next new batch."""
         return self.batch_thread is not None and self.batch_thread.is_alive()
 
     # ---- heartbeats ----
@@ -203,16 +225,34 @@ class Translator:
         finally:
             self._release(job_id)
 
-    def _safe_batch(self, jobs: list[dict]) -> None:
+    def _safe_batch(self, jobs: list[dict], batch_id: str | None = None) -> None:
         try:
-            self.translate_backlog(jobs)
+            self.translate_backlog(jobs, batch_id)
         except Exception:
             log.exception("batch crashed", kind=self.KIND)
         finally:
-            for job in jobs:
-                self._release(job["jobId"])
+            if not self.stopping():  # on shutdown release_held hands them back instead
+                for job in jobs:
+                    self._release(job["jobId"])
 
-    def translate_backlog(self, jobs: list[dict]) -> None:
+    def _remember_batch(self, job_ids: list[str]):
+        """on_submit callback: saves the new batch id on these jobs."""
+        return lambda batch_id: self.api.set_batch(job_ids, batch_id)
+
+    def _batch_opts(self, job_ids: list[str], batch_id: str | None) -> dict:
+        """Keyword args for *_batch: resume [batch_id], or send a new batch under submit_lock and save its id."""
+        return {"batch_id": batch_id, "on_submit": self._remember_batch(job_ids), "guard": self.submit_lock,
+                "allowed": lambda: not self.stopping()}
+
+    def _batch_failed(self, job_ids, e: BaseException) -> None:
+        """Whole batch failed. On shutdown the jobs are handed back instead (release_held), not failed: failing
+        would count an attempt and clear a batch id the next worker can still resume."""
+        if self.stopping() or isinstance(e, BatchCancelled):
+            return
+        for job_id in job_ids:
+            self._fail(job_id, e)
+
+    def translate_backlog(self, jobs: list[dict], batch_id: str | None = None) -> None:
         calls: dict[str, list[dict]] = {}
         mask = {job["jobId"]: bool(job.get("maskPii")) for job in jobs}
         for job in jobs:
@@ -224,11 +264,11 @@ class Translator:
         if not calls:
             return
         try:
-            results = translate_batch(self.client, calls, model=self.settings.translate_model, poll_s=self.poll_s)
+            results = translate_batch(self.client, calls, model=self.settings.translate_model, poll_s=self.poll_s,
+                                      **self._batch_opts(list(calls), batch_id))
         except Exception as e:  # noqa: BLE001 - whole batch failed; every job is retried
             log.exception("translate batch failed", jobs=len(calls))
-            for job_id in calls:
-                self._fail(job_id, e)
+            self._batch_failed(calls, e)
             return
         for job_id in calls:
             r = results.get(job_id, TranslationError("missing from batch results"))

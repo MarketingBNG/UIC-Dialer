@@ -300,6 +300,9 @@ model Job {
   status    JobStatus @default(QUEUED)
   attempts  Int       @default(0)
   lastError String?   @map("last_error")
+  /// Claude Message Batch id this job was sent in (translate/summarize/score). A worker that claims the job after a
+  /// restart waits for that batch instead of sending (and paying for) a new one. Cleared when the job fails.
+  externalRef String? @map("external_ref")
   runAfter  DateTime  @default(now()) @map("run_after")
   lockedAt  DateTime? @map("locked_at")
   lockedBy  String?   @map("locked_by")

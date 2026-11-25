@@ -24,6 +24,8 @@ export interface ClaimedJob {
   attempts: number;
   kind: string;
   priority: number;
+  /** Claude batch id from an earlier claim (see Job.externalRef); null when the job was never batched. */
+  batchId: string | null;
 }
 
 /**
@@ -56,7 +58,7 @@ export async function claimJobs(
       LIMIT ${limit}
       FOR UPDATE SKIP LOCKED
     )
-    RETURNING "id", "call_id" AS "callId", "attempts", "kind", "priority"`;
+    RETURNING "id", "call_id" AS "callId", "attempts", "kind", "priority", "external_ref" AS "batchId"`;
 }
 
 /**
@@ -85,7 +87,7 @@ export async function claimOverflowJobs(db: Db, workerId: string, limit: number)
       LIMIT ${limit}
       FOR UPDATE OF j SKIP LOCKED
     )
-    RETURNING "id", "call_id" AS "callId", "attempts", "kind", "priority"`;
+    RETURNING "id", "call_id" AS "callId", "attempts", "kind", "priority", "external_ref" AS "batchId"`;
 }
 
 /** Stale jobs that already hit MAX_ATTEMPTS (e.g. a file that crashes the worker) stop here. */
@@ -156,6 +158,12 @@ export async function completeJob(
     await tx.job.updateMany({
       where: { callId: job.callId, kind: { in: [...CLAUDE_KINDS] }, status: "RUNNING" },
       data: { status: "FAILED", lockedBy: null, lockedAt: null, lastError: SUPERSEDED, finishedAt: new Date() },
+    });
+    // A queued job handed back mid-batch (worker restart) would resume that batch, which was built from the old
+    // transcript: forget the batch so it is sent again from the new text.
+    await tx.job.updateMany({
+      where: { callId: job.callId, kind: { in: [...CLAUDE_KINDS] }, status: "QUEUED", externalRef: { not: null } },
+      data: { externalRef: null },
     });
     if (opts.translate) {
       // A queued summary would read the new, untranslated text: drop it; the translation queues a fresh one.
@@ -254,6 +262,27 @@ export async function queueTranslationBackfill(db: Db): Promise<number> {
       )`;
 }
 
+/** Saves the Claude batch id for jobs this worker holds, so a restarted worker can resume that batch. */
+export async function setJobBatch(db: Db, jobIds: string[], workerId: string, batchId: string): Promise<number> {
+  const { count } = await db.job.updateMany({
+    where: { id: { in: jobIds }, status: "RUNNING", lockedBy: workerId },
+    data: { externalRef: batchId },
+  });
+  return count;
+}
+
+/**
+ * Worker shutdown: hands a held job back to the queue at once, without counting the attempt or adding a retry
+ * delay. Its batch id is kept, so the next worker resumes that batch. Returns false if the lock was lost.
+ */
+export async function releaseJob(db: Db, jobId: string, workerId: string): Promise<boolean> {
+  const n = await db.$executeRaw`
+    UPDATE "jobs" SET "status" = 'QUEUED', "locked_at" = NULL, "locked_by" = NULL, "run_after" = now(),
+      "attempts" = GREATEST("attempts" - 1, 0), "updated_at" = now()
+    WHERE "id" = ${jobId}::uuid AND "status" = 'RUNNING' AND "locked_by" = ${workerId}`;
+  return n === 1;
+}
+
 /** Records a failure; retries with exponential backoff until MAX_ATTEMPTS. */
 export async function failJob(db: Db, jobId: string, workerId: string, error: string, retryable: boolean) {
   return db.$transaction(async (tx) => {
@@ -271,6 +300,8 @@ export async function failJob(db: Db, jobId: string, workerId: string, error: st
       data: {
         status: giveUp ? "FAILED" : "QUEUED",
         lastError: error.slice(0, 2000),
+        // The batch failed this job: a retry must send a new request, not read the same result again.
+        externalRef: null,
         lockedAt: null,
         lockedBy: null,
         runAfter: giveUp ? job.runAfter : new Date(Date.now() + backoffMs),
