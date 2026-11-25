@@ -16,6 +16,7 @@ Docs: https://docs.fireflies.ai/graphql-api/mutation/upload-audio
 from __future__ import annotations
 
 import math
+import threading
 import re
 import time
 from datetime import UTC, datetime, timedelta
@@ -56,9 +57,13 @@ RATE_TEXT = re.compile(r"rate|too many|per minute|requests", re.I)
 UPLOAD = """mutation uploadAudio($input: AudioUploadInput) {
   uploadAudio(input: $input) { success title message }
 }"""
-FIND = """query Find($keyword: String, $fromDate: DateTime) {
-  transcripts(keyword: $keyword, scope: "title", fromDate: $fromDate, mine: true, limit: 10) { id title }
+FIND = """query Find($fromDate: DateTime, $skip: Int) {
+  transcripts(keyword: "uic-", scope: "title", fromDate: $fromDate, mine: true, limit: 50, skip: $skip) { id title }
 }"""
+# One shared list of our recent uploads answers "has Fireflies made it yet?" for every waiting job, instead of one
+# search per job per poll (that hit Fireflies' rate limit with 20 jobs). Refreshed at most this often.
+FIND_EVERY_S = 20.0
+FIND_MAX_PAGES = 10
 GET = """query Get($id: String!) {
   transcript(id: $id) {
     id title duration
@@ -92,6 +97,10 @@ class FirefliesProvider:
             raise SystemExit("FIREFLIES_API_KEY is required for TRANSCRIBE_PROVIDER=fireflies")
         self.max_wait_s = settings.fireflies_max_wait_s
         self.sleep = sleep
+        self._find_lock = threading.Lock()
+        self._found: dict[str, str] = {}  # title -> transcript id, from the last shared list
+        self._found_at: float | None = None
+        self._slept = 0.0  # time slept by waiting jobs; with a stubbed sleep it stands in for the clock
         self.client = httpx.Client(
             headers={"Authorization": f"Bearer {settings.fireflies_api_key}"},
             timeout=httpx.Timeout(60, connect=10),
@@ -249,6 +258,21 @@ class FirefliesProvider:
                 log.warning("fireflies sweep delete failed", transcript_id=t["id"], error=str(e))
         return deleted
 
+    def _find_id(self, title: str, since: str) -> str | None:
+        """Transcript id for [title] from the shared list of our recent uploads (one list call per FIND_EVERY_S
+        for all waiting jobs). Only one thread refreshes; the others use its result."""
+        with self._find_lock:
+            now = time.monotonic() + self._slept
+            if title not in self._found and (self._found_at is None or now - self._found_at >= FIND_EVERY_S):
+                found: dict[str, str] = {}
+                for page in range(FIND_MAX_PAGES):
+                    batch = self._gql(FIND, {"fromDate": since, "skip": page * 50}).get("transcripts") or []
+                    found.update({x["title"]: x["id"] for x in batch if x.get("title") and x.get("id")})
+                    if len(batch) < 50:
+                        break
+                self._found, self._found_at = found, now
+            return self._found.get(title)
+
     def _wait_for_transcript(self, title: str) -> dict:
         start = time.monotonic()
         deadline = start + self.max_wait_s
@@ -258,8 +282,7 @@ class FirefliesProvider:
         transcript_id: str | None = None
         while True:
             if transcript_id is None:
-                found = self._gql(FIND, {"keyword": title, "fromDate": since}).get("transcripts") or []
-                transcript_id = next((x["id"] for x in found if x.get("title") == title), None)
+                transcript_id = self._find_id(title, since)
             if transcript_id is not None:
                 t = self._gql(GET, {"id": transcript_id}).get("transcript") or {}
                 silent = (t.get("meeting_info") or {}).get("silent_meeting")
@@ -269,6 +292,7 @@ class FirefliesProvider:
             if max(time.monotonic(), start + waited) + delay > deadline:
                 raise TimeoutError(f"Fireflies transcript for {title} not ready after {self.max_wait_s:.0f}s")
             self.sleep(delay)
+            self._slept += delay
             waited += delay
             delay = min(delay * 1.5, 60.0)
 

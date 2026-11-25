@@ -223,3 +223,17 @@ def test_sweep_ignores_already_deleted():
             {"message": "Transcript not found", "extensions": {"code": "object_not_found"}}]})],
     })
     assert ff.sweep_leftovers(api) == 0
+
+
+@respx.mock
+def test_waiting_jobs_share_one_list_call():
+    _, ff = make()
+    route = respx.post(URL).mock(return_value=httpx.Response(200, json={"data": {"transcripts": [
+        {"id": "t-1", "title": "uic-a"}, {"id": "t-2", "title": "uic-b"}]}}))
+    assert ff._find_id("uic-a", "2026-01-01T00:00:00Z") == "t-1"
+    assert ff._find_id("uic-b", "2026-01-01T00:00:00Z") == "t-2"
+    assert ff._find_id("uic-c", "2026-01-01T00:00:00Z") is None  # not there yet; list is fresh, no new call
+    assert route.call_count == 1
+    ff._slept += 20  # FIND_EVERY_S later the list is refreshed
+    ff._find_id("uic-c", "2026-01-01T00:00:00Z")
+    assert route.call_count == 2
