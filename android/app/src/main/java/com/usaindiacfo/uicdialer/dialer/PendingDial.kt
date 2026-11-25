@@ -41,6 +41,13 @@ class DialPrefs(context: Context) {
         prefs.edit().putString(KEY_DIALS, DialLogic.encodeDials(list)).commit()
     }
 
+    /** The SIM (phone account id) last used to call this number from the app, shown first next time. */
+    fun lastSim(number: String): String? = DialLogic.last10(number.filter(Char::isDigit))?.let { prefs.getString("sim_$it", null) }
+
+    fun setLastSim(number: String, accountId: String) {
+        DialLogic.last10(number.filter(Char::isDigit))?.let { prefs.edit().putString("sim_$it", accountId).apply() }
+    }
+
     private companion object {
         const val KEY_DIALS = "app_dials"
         const val MAX_DIALS = 50
@@ -60,7 +67,7 @@ object Dialer {
      * so its auto-record keeps working); otherwise opens the dialer with the number filled in. Remembers the dial.
      */
     /** Returns the dial's clientId (the outcome activity's id), or null when nothing was dialled. */
-    fun call(context: Context, number: String, callListItemId: String? = null): String? {
+    fun call(context: Context, number: String, callListItemId: String? = null, sim: android.telecom.PhoneAccountHandle? = null): String? {
         val n = DialLogic.cleanNumber(number)
         if (n.isEmpty()) return null
         val prefs = DialPrefs(context)
@@ -72,7 +79,12 @@ object Dialer {
             android.content.pm.PackageManager.PERMISSION_GRANTED
         try {
             val action = if (direct) Intent.ACTION_CALL else Intent.ACTION_DIAL
-            context.startActivity(Intent(action, Uri.fromParts("tel", n, null)))
+            val intent = Intent(action, Uri.fromParts("tel", n, null))
+            if (sim != null) {
+                intent.putExtra(android.telecom.TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, sim)
+                prefs.setLastSim(n, sim.id)
+            }
+            context.startActivity(intent)
             return clientId
         } catch (_: ActivityNotFoundException) {
             prefs.pending = null

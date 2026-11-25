@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -18,6 +19,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
 import com.usaindiacfo.uicdialer.appContainer
 import com.usaindiacfo.uicdialer.data.api.DncInfo
+import com.usaindiacfo.uicdialer.detect.SimInfo
+import com.usaindiacfo.uicdialer.dialer.DialPrefs
 import com.usaindiacfo.uicdialer.dialer.Dialer
 import kotlinx.coroutines.launch
 
@@ -59,6 +62,8 @@ fun rememberCaller(): Caller {
     var waitingNumber by rememberSaveable { mutableStateOf<String?>(null) }
     var waitingItemId by rememberSaveable { mutableStateOf<String?>(null) }
     var warn by remember { mutableStateOf<DialRequest?>(null) }
+    // Two SIMs: the rep picks which number to call from (like the phone's own dialer).
+    var pick by remember { mutableStateOf<Pair<DialRequest, List<SimInfo.CallSim>>?>(null) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         val r = waiting
         if (r != null) Dialer.call(context, r.number, r.callListItemId)?.let(r.onDialed)
@@ -69,7 +74,14 @@ fun rememberCaller(): Caller {
     }
     val place: (DialRequest) -> Unit = { r ->
         if (context.checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED) {
-            Dialer.call(context, r.number, r.callListItemId)?.let(r.onDialed)
+            val sims = SimInfo.callSims(context)
+            if (sims.size >= 2) {
+                // Last SIM used for this number first.
+                val last = DialPrefs(context).lastSim(r.number)
+                pick = r to sims.sortedBy { if (it.handle.id == last) 0 else 1 }
+            } else {
+                Dialer.call(context, r.number, r.callListItemId)?.let(r.onDialed)
+            }
         } else {
             waiting = r
             waitingNumber = r.number
@@ -78,6 +90,25 @@ fun rememberCaller(): Caller {
         }
     }
     val placeNow by rememberUpdatedState(place)
+
+    pick?.let { (r, sims) ->
+        AlertDialog(
+            onDismissRequest = { pick = null },
+            title = { Text("Call from") },
+            text = {
+                androidx.compose.foundation.layout.Column {
+                    sims.forEachIndexed { i, sim ->
+                        TextButton(
+                            onClick = { pick = null; Dialer.call(context, r.number, r.callListItemId, sim.handle)?.let(r.onDialed) },
+                            modifier = androidx.compose.ui.Modifier.fillMaxWidth(),
+                        ) { Text(if (i == 0 && DialPrefs(context).lastSim(r.number) == sim.handle.id) "${sim.label}  (last used)" else sim.label) }
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = { TextButton(onClick = { pick = null }) { Text("Cancel") } },
+        )
+    }
 
     warn?.let { r ->
         AlertDialog(

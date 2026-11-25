@@ -75,6 +75,27 @@ object SimInfo {
         }.getOrDefault(emptyMap())
     }
 
+    /** A SIM the rep can call from: [handle] goes on the call intent; [label] is "SIM 1 · Jio · +91…". */
+    data class CallSim(val handle: android.telecom.PhoneAccountHandle, val label: String, val slot: Int)
+
+    /** SIMs that can place calls, in slot order; empty without READ_PHONE_STATE (then the phone decides). */
+    @SuppressLint("MissingPermission")
+    fun callSims(context: Context): List<CallSim> {
+        if (!hasPermission(context)) return emptyList()
+        val telecom = context.getSystemService(TelecomManager::class.java) ?: return emptyList()
+        val sims = active(context)
+        val toSub = accountToSub(context)
+        return runCatching {
+            telecom.callCapablePhoneAccounts.mapIndexed { i, h ->
+                val sim = match(h.id, sims, toSub)
+                val slot = sim?.slot ?: i
+                val name = runCatching { telecom.getPhoneAccount(h)?.label?.toString() }.getOrNull()
+                val parts = listOfNotNull("SIM ${slot + 1}", (sim?.carrier ?: name)?.takeIf { it.isNotBlank() }, sim?.number)
+                CallSim(h, parts.distinct().joinToString(" · "), slot)
+            }.sortedBy { it.slot }
+        }.getOrDefault(emptyList())
+    }
+
     fun reports(context: Context): List<SimReport> =
         active(context).map { SimReport(key = it.key, slot = it.slot, carrier = it.carrier, number = it.number) }
 }
