@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import type { CSSProperties } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import * as m from "motion/react-m";
+import { FAST } from "@/lib/motion";
 import { api, type OutcomeDto, type OutcomeRule } from "../api";
 
 /** The four seeded outcomes (fixed ids from the migration); used when /api/outcomes can't be loaded. */
@@ -96,6 +98,8 @@ export function OutcomeChip({ label, color }: { label: string; color: string | n
   );
 }
 
+const MotionButton = m.create(Button);
+
 /** Large outcome buttons coloured by `color`; the selected one is filled. Dated outcomes end in "…". */
 export function OutcomeButtons({
   items,
@@ -114,11 +118,11 @@ export function OutcomeButtons({
         const on = o.id === value;
         const style: CSSProperties = on ? { backgroundColor: o.color, borderColor: o.color, color: textOn(o.color) } : { borderColor: o.color };
         return (
-          <Button key={o.id} variant="outline" aria-pressed={on} disabled={disabled} className="h-auto min-h-14 justify-start border-2 px-4 text-base text-foreground hover:opacity-90" style={style} onClick={() => onPick(o)}>
+          <MotionButton key={o.id} whileTap={disabled ? undefined : { scale: 0.97 }} transition={FAST} variant="outline" aria-pressed={on} disabled={disabled} className="h-auto min-h-14 justify-start border-2 px-4 text-base text-foreground hover:opacity-90" style={style} onClick={() => onPick(o)}>
             {!on && <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: o.color }} />}
             {o.label}
             {datePrompt(o) ? " …" : ""}
-          </Button>
+          </MotionButton>
         );
       })}
     </div>

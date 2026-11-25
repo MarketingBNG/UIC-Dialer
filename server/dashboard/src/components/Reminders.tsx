@@ -1,6 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { BellRing, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { AnimatePresence } from "motion/react";
+import * as m from "motion/react-m";
+import { BASE } from "@/lib/motion";
 import { useNavigate } from "react-router";
 import { api, type FollowUpItem, type FollowUpsToday, type Me } from "../api";
 import { Button } from "@/components/ui/button";
@@ -134,7 +137,7 @@ export function Reminders() {
     notify(fresh, navRef.current);
   }, [on, fu.data, tick]);
 
-  if (!signedIn || permission !== "default" || dismissed) return null;
+  const show = signedIn && permission === "default" && !dismissed;
 
   const turnOn = async () => {
     try {
@@ -153,7 +156,9 @@ export function Reminders() {
   };
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] items-center gap-3 rounded-lg border bg-background p-3 shadow-lg">
+    <AnimatePresence>
+      {show && (
+    <m.div key="reminder-banner" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 8 }} transition={BASE} className="fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] items-center gap-3 rounded-lg border bg-background p-3 shadow-lg">
       <BellRing className="size-5 shrink-0 text-primary" />
       <div className="min-w-0 text-sm">
         <div className="font-medium">Get a pop-up when a follow-up is due</div>
@@ -165,6 +170,8 @@ export function Reminders() {
       <Button size="icon" variant="ghost" aria-label="Not now" onClick={dismiss}>
         <X />
       </Button>
-    </div>
+    </m.div>
+      )}
+    </AnimatePresence>
   );
 }

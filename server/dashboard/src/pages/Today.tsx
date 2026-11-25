@@ -1,6 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useDeferredValue, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
+import { AnimatePresence } from "motion/react";
+import * as m from "motion/react-m";
+import { BASE } from "@/lib/motion";
 import { Link, useSearchParams } from "react-router";
 import { ApiError, api, qs, type ContactPage, type FollowUpItem, type FollowUpsToday, type MeToday, type MyList, type NextResponse } from "../api";
 import { useMe } from "../App";
@@ -455,7 +458,9 @@ function UpNext({ entries, onCall, onSkip }: { entries: Entry[]; onCall: (key: s
       </h2>
       <Card className="divide-y overflow-hidden p-0">
         <ul className="divide-y">
+          <AnimatePresence initial={false}>
           {shown.map((e) => (e.kind === "fu" ? <FollowUpRow key={e.key} group={e.group} onCall={() => onCall(e.key)} onSkip={() => onSkip(e.key)} /> : <ListRow key={e.key} list={e.list} />))}
+          </AnimatePresence>
         </ul>
       </Card>
       {entries.length > SHORT_LIST && (
@@ -484,7 +489,7 @@ function FollowUpRow({ group, onCall, onSkip }: { group: Group; onCall: () => vo
   if (item.contactId) actions.push({ label: "Open contact", icon: User, to: `/activity/contacts/${item.contactId}` });
 
   return (
-    <li className="flex items-center gap-3 px-4 py-3">
+    <RowShell>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate font-medium">{label}</span>
@@ -505,13 +510,28 @@ function FollowUpRow({ group, onCall, onSkip }: { group: Group; onCall: () => vo
         <Phone className="text-success" /> Call
       </Button>
       <MoreMenu label={`More for ${label}`} actions={actions} disabled={patch.isPending} />
-    </li>
+    </RowShell>
+  );
+}
+
+/** A queue row that fades/rises in when added and fades + collapses its height when removed (Done, Snooze, Skip). */
+function RowShell({ children }: { children: ReactNode }) {
+  return (
+    <m.li
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: "auto" }}
+      exit={{ opacity: 0, height: 0 }}
+      transition={BASE}
+      className="overflow-hidden"
+    >
+      <div className="flex items-center gap-3 px-4 py-3">{children}</div>
+    </m.li>
   );
 }
 
 function ListRow({ list }: { list: MyList }) {
   return (
-    <li className="flex items-center gap-3 px-4 py-3">
+    <RowShell>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate font-medium">{list.name}</span>
@@ -520,7 +540,7 @@ function ListRow({ list }: { list: MyList }) {
         <div className="text-sm tabular-nums text-muted-foreground">{progressText(list.progress)} done</div>
       </div>
       <MoreMenu label={`More for ${list.name}`} actions={[{ label: "Open this list now", icon: ListChecks, to: `/lists/${list.id}/work` }]} />
-    </li>
+    </RowShell>
   );
 }
 

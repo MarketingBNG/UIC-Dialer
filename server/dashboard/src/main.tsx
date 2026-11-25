@@ -6,6 +6,9 @@ import { ApiError, setUnauthorizedHandler } from "./api";
 import { App } from "./App";
 import { Reminders } from "./components/Reminders";
 import { Toaster } from "@/components/ui/sonner";
+import { LazyMotion, MotionConfig } from "motion/react";
+
+const loadMotionFeatures = () => import("@/lib/motionFeatures").then((r) => r.default);
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./index.css";
 
@@ -28,11 +31,15 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
+        <MotionConfig reducedMotion="user">
+        <LazyMotion features={loadMotionFeatures} strict>
         <TooltipProvider delayDuration={300}>
           <App />
           <Reminders />
           <Toaster />
         </TooltipProvider>
+        </LazyMotion>
+        </MotionConfig>
       </BrowserRouter>
     </QueryClientProvider>
   </StrictMode>,

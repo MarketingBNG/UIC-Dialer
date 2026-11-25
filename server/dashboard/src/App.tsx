@@ -1,5 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { useReducedMotion } from "motion/react";
+import { animate } from "motion/mini";
+import { BASE } from "@/lib/motion";
 import type * as React from "react";
 import { History, LogOut, PhoneCall, Settings2, Smartphone, Users, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -179,6 +182,7 @@ function Shell({ me }: { me: Me }) {
         </header>
         <div id="main" className="mx-auto w-full max-w-6xl px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] md:px-8">
         {isManager(me.role) && <FirefliesBanner />}
+        <PageFade pathname={pathname}>
         <Routes>
           <Route path="/" element={<Navigate to="/today" replace />} />
           <Route path="/today" element={<TodayPage />} />
@@ -200,10 +204,28 @@ function Shell({ me }: { me: Me }) {
           {me.role === "ADMIN" && <Route path="/audit" element={<AuditPage />} />}
           <Route path="*" element={<Navigate to="/today" replace />} />
         </Routes>
+        </PageFade>
         </div>
       </SidebarInset>
     </SidebarProvider>
   );
+}
+
+/** Quick fade + small rise of the page content on each route change (no remount, so page state is kept). */
+function PageFade({ pathname, children }: { pathname: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const reduce = useReducedMotion();
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    if (reduce || !ref.current) return;
+    const a = animate(ref.current, { opacity: [0, 1], transform: ["translateY(6px)", "translateY(0)"] }, BASE);
+    return () => a.stop();
+  }, [pathname, reduce]);
+  return <div ref={ref}>{children}</div>;
 }
 
 function AppSidebar({
