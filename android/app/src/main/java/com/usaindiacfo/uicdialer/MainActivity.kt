@@ -32,6 +32,22 @@ class MainActivity : ComponentActivity() {
         // The app is on screen, so Android allows the backlog's foreground notification: start a waiting backlog
         // run now. Started from the background it would get only ~10 minutes at a time.
         SyncScheduler.kickBacklogFromForeground(applicationContext)
+        startFirstSyncIfReady()
+    }
+
+    /**
+     * Sign-in syncs before setup has asked for permissions, so that run finds nothing. The first time the app sees
+     * the permissions granted (from the guide, the checklist or system settings), run the full sync once.
+     */
+    private fun startFirstSyncIfReady() {
+        val ctx = applicationContext
+        if (ctx.container.tokenStore.user.value == null) return
+        if (!com.usaindiacfo.uicdialer.ui.setup.SetupChecks.requiredGranted(ctx)) return
+        val prefs = com.usaindiacfo.uicdialer.sync.SyncPrefs(ctx)
+        if (prefs.firstSyncWithPermsDone) return
+        prefs.firstSyncWithPermsDone = true
+        prefs.lastBacklogScanAt = 0L // the scan at sign-in had no access: scan old recordings now
+        SyncScheduler.syncNow(ctx)
     }
 
     override fun onNewIntent(intent: Intent) {

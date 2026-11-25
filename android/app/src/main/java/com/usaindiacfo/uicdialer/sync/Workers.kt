@@ -88,7 +88,8 @@ class BacklogWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
             if (now - prefs.lastBacklogScanAt > SCAN_EVERY_MS) {
                 engine.scan(cfg, now - cfg.backlogCutoffDays.coerceAtLeast(1) * DAY_MS)
                 engine.dedup(RecordingSource.BACKLOG) { isStopped }
-                if (!isStopped) prefs.lastBacklogScanAt = now
+                // A scan without access to the files found nothing: don't let it count.
+                if (!isStopped && (com.usaindiacfo.uicdialer.detect.RecorderScanner.hasAudioPermission(ctx) || prefs.safTreeUri != null)) prefs.lastBacklogScanAt = now
             }
             val outcome = kotlinx.coroutines.coroutineScope {
                 val progress = if (!showing) null else launch {

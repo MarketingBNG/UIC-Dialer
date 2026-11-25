@@ -27,6 +27,11 @@ class SyncPrefs(context: Context) {
         get() = prefs.getLong(KEY_LAST, 0)
         set(v) = prefs.edit().putLong(KEY_LAST, v).apply()
 
+    /** True once a full sync ran with the required permissions granted (see MainActivity.startFirstSyncIfReady). */
+    var firstSyncWithPermsDone: Boolean
+        get() = prefs.getBoolean("first_sync_perms", false)
+        set(v) = prefs.edit().putBoolean("first_sync_perms", v).apply()
+
     /** When a backlog run last scanned the recorder folders (epoch millis); 0 = never. */
     var lastBacklogScanAt: Long
         get() = prefs.getLong(KEY_BACKLOG_SCAN, 0)
