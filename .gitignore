@@ -48,3 +48,7 @@ Thumbs.db
 desktop/build/*
 !desktop/build/icon.ico
 !desktop/build/icon.png
+
+# Docs stay local, never in git (user decision 2026-11-25)
+*.md
+docs/
