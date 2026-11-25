@@ -64,7 +64,7 @@ fun Modifier.sharedAvatar(key: String?): Modifier {
     val shared = LocalSharedScope.current ?: return this
     val screen = LocalScreenScope.current ?: return this
     val k = com.usaindiacfo.uicdialer.dialer.DialLogic.last10(key) ?: return this
-    return with(shared) { this@sharedAvatar.sharedElement(rememberSharedContentState("avatar-$k"), screen) }
+    return with(shared) { this@sharedAvatar.sharedElement(rememberSharedContentState("avatar-$k"), screen, boundsTransform = { _, _ -> com.usaindiacfo.uicdialer.ui.theme.Motion.spec() }) }
 }
 
 /** Small rounded label. */

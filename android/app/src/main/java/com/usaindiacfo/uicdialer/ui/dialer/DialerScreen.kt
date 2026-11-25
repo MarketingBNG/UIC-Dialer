@@ -235,7 +235,7 @@ private fun SuggestionRow(s: com.usaindiacfo.uicdialer.phonebook.PhoneBookLogic.
 private fun Key(digit: String, letters: String, onClick: () -> Unit, onLongClick: (() -> Unit)?) {
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
-    val scale by animateFloatAsState(if (pressed) 0.92f else 1f, tween(if (pressed) 60 else 160), label = "key")
+    val scale by animateFloatAsState(if (pressed) 0.92f else 1f, if (pressed) com.usaindiacfo.uicdialer.ui.theme.Motion.fast() else com.usaindiacfo.uicdialer.ui.theme.Motion.spec(), label = "key")
     Column(
         Modifier.size(72.dp).graphicsLayer { scaleX = scale; scaleY = scale }.clip(CircleShape)
             .background(MaterialTheme.colorScheme.surfaceVariant)

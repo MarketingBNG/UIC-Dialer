@@ -182,7 +182,7 @@ fun TodayScreen(
                     targetState = head,
                     contentKey = { h -> if (h is QueueHead.Row) h.row.key else h::class },
                     transitionSpec = {
-                        (fadeIn(tween(200, delayMillis = 60)) + slideInVertically(tween(250)) { it / 12 }) togetherWith fadeOut(tween(120))
+                        (fadeIn(com.usaindiacfo.uicdialer.ui.theme.Motion.spec()) + slideInVertically(com.usaindiacfo.uicdialer.ui.theme.Motion.spec()) { it / 12 }) togetherWith fadeOut(com.usaindiacfo.uicdialer.ui.theme.Motion.fast())
                     },
                     label = "next",
                 ) { head ->
@@ -209,7 +209,7 @@ fun TodayScreen(
                 )
             }
             val shown = if (showAll) upNext else upNext.take(UP_NEXT_SHOWN)
-            items(shown, key = { it.key }) { row -> Box(Modifier.animateItem()) { UpNextRow(row, vm, call, onOpenContact) } }
+            items(shown, key = { it.key }) { row -> Box(Modifier.animateItem(com.usaindiacfo.uicdialer.ui.theme.Motion.spec(), com.usaindiacfo.uicdialer.ui.theme.Motion.spec(), com.usaindiacfo.uicdialer.ui.theme.Motion.fast())) { UpNextRow(row, vm, call, onOpenContact) } }
             if (upNext.size > UP_NEXT_SHOWN) item(key = "more") {
                 TextButton(onClick = { showAll = !showAll }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                     Text(if (showAll) "Show less" else "Show all (${upNext.size})")

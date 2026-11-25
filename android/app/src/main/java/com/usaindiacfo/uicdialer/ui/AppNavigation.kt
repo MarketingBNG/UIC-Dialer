@@ -115,10 +115,10 @@ object OpenTargets {
 // Screen transitions, WhatsApp-style: an opened screen slides in fully from the right while the one under it
 // drifts a quarter to the left; Back reverses it. With the back gesture (Android 16+) it follows the finger.
 // Tabs just cross-fade quickly.
-private val Emphasized = CubicBezierEasing(0.2f, 0f, 0f, 1f)
-private const val PUSH_MS = 300
-private val TAB_IN = fadeIn(tween(150, delayMillis = 40))
-private val TAB_OUT = fadeOut(tween(90))
+private val Emphasized = com.usaindiacfo.uicdialer.ui.theme.Motion.Easing
+private const val PUSH_MS = com.usaindiacfo.uicdialer.ui.theme.Motion.MS
+private val TAB_IN = fadeIn(com.usaindiacfo.uicdialer.ui.theme.Motion.fast())
+private val TAB_OUT = fadeOut(com.usaindiacfo.uicdialer.ui.theme.Motion.fast())
 private val PUSH_IN: EnterTransition = slideInHorizontally(tween(PUSH_MS, easing = Emphasized)) { it }
 private val PUSH_OUT: ExitTransition = slideOutHorizontally(tween(PUSH_MS, easing = Emphasized)) { -it / 4 }
 private val POP_IN: EnterTransition = slideInHorizontally(tween(PUSH_MS, easing = Emphasized)) { -it / 4 }

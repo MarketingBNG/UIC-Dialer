@@ -202,7 +202,7 @@ private fun CrmContactsTab(onOpenContact: (phone: String) -> Unit) {
         LazyColumn(state = listState, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(state.items, key = { it.id }) { contact ->
                 Card(
-                    Modifier.animateItem().fillMaxWidth().clickable { onOpenContact(contact.phoneE164) },
+                    Modifier.animateItem(com.usaindiacfo.uicdialer.ui.theme.Motion.spec(), com.usaindiacfo.uicdialer.ui.theme.Motion.spec(), com.usaindiacfo.uicdialer.ui.theme.Motion.fast()).fillMaxWidth().clickable { onOpenContact(contact.phoneE164) },
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 ) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
