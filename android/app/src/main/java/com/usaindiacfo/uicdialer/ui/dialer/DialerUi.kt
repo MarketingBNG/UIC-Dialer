@@ -1,5 +1,9 @@
 package com.usaindiacfo.uicdialer.ui.dialer
 
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionScope
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -29,10 +33,10 @@ import com.usaindiacfo.uicdialer.ui.theme.UicColors
 
 /** Initials circle. With [onClick] the hit area is at least 48 dp. */
 @Composable
-fun Avatar(name: String?, size: Dp = 40.dp, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null) {
+fun Avatar(name: String?, size: Dp = 40.dp, modifier: Modifier = Modifier, onClick: (() -> Unit)? = null, sharedKey: String? = null) {
     val inner = @Composable {
         Box(
-            Modifier.size(size).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
+            Modifier.sharedAvatar(sharedKey).size(size).clip(CircleShape).background(MaterialTheme.colorScheme.primaryContainer),
             contentAlignment = Alignment.Center,
         ) {
             Text(
@@ -43,6 +47,24 @@ fun Avatar(name: String?, size: Dp = 40.dp, modifier: Modifier = Modifier, onCli
     }
     if (onClick == null) Box(modifier) { inner() }
     else Box(modifier.size(maxOf(size, 48.dp)).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) { inner() }
+}
+
+/** Shared-element scopes, provided by AppNavigation around the NavHost and each screen. */
+@OptIn(ExperimentalSharedTransitionApi::class)
+val LocalSharedScope = staticCompositionLocalOf<SharedTransitionScope?> { null }
+val LocalScreenScope = staticCompositionLocalOf<AnimatedVisibilityScope?> { null }
+
+/**
+ * The same person's avatar on two screens morphs from one to the other when navigating (WhatsApp's chat-photo
+ * animation). [key] is the phone number; avatars without a key, or outside a navigated screen, are unchanged.
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun Modifier.sharedAvatar(key: String?): Modifier {
+    val shared = LocalSharedScope.current ?: return this
+    val screen = LocalScreenScope.current ?: return this
+    val k = com.usaindiacfo.uicdialer.dialer.DialLogic.last10(key) ?: return this
+    return with(shared) { this@sharedAvatar.sharedElement(rememberSharedContentState("avatar-$k"), screen) }
 }
 
 /** Small rounded label. */

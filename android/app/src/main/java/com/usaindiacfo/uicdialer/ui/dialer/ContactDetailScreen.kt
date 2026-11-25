@@ -202,7 +202,7 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Avatar(contact?.name, size = 56.dp)
+                        Avatar(contact?.name, size = 56.dp, sharedKey = phone)
                         Column(Modifier.weight(1f)) {
                             Text(contact?.title ?: phone, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                             val sub = listOfNotNull(

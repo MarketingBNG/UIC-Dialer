@@ -130,8 +130,12 @@ fun TodayScreen(
     var showAll by rememberSaveable { mutableStateOf(false) }
 
     Box(Modifier.fillMaxSize()) {
+        // WhatsApp-style: the Dial button shrinks to just the icon while scrolling down the list.
+        val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+        val fabExpanded by remember { androidx.compose.runtime.derivedStateOf { listState.firstVisibleItemIndex == 0 } }
         LazyColumn(
             Modifier.fillMaxSize(),
+            state = listState,
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -216,6 +220,7 @@ fun TodayScreen(
             onClick = onOpenKeypad,
             icon = { Icon(remember { dialpadIcon() }, contentDescription = null) },
             text = { Text("Dial") },
+            expanded = fabExpanded,
             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
         )
     }
@@ -304,12 +309,12 @@ private fun NextUpFrame(caption: String, menu: @Composable () -> Unit, content: 
 }
 
 @Composable
-private fun ContactHeader(name: String?, title: String, sub: String?, onClick: () -> Unit, label: @Composable () -> Unit) {
+private fun ContactHeader(name: String?, title: String, sub: String?, onClick: () -> Unit, phone: String? = null, label: @Composable () -> Unit) {
     Row(
         Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Avatar(name, size = 52.dp)
+        Avatar(name, size = 52.dp, sharedKey = phone)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             sub?.takeIf { it.isNotBlank() }?.let {
@@ -323,7 +328,7 @@ private fun ContactHeader(name: String?, title: String, sub: String?, onClick: (
 @Composable
 private fun RowNextUp(row: TodayRow, vm: TodayViewModel, call: Caller, onOpenContact: (String) -> Unit) {
     NextUpFrame("NEXT UP", menu = { RowMenu(row, vm, listOf("Details" to { onOpenContact(row.phoneE164) })) }) {
-        ContactHeader(row.name, row.title, row.company, onClick = { onOpenContact(row.phoneE164) }) { QueueLabel(row) }
+        ContactHeader(row.name, row.title, row.company, onClick = { onOpenContact(row.phoneE164) }, phone = row.phoneE164) { QueueLabel(row) }
         row.lastNote?.takeIf { it.isNotBlank() }?.let {
             Text("Last note: $it", style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
         }
@@ -361,7 +366,7 @@ private fun ListNextUp(vm: ListSessionViewModel, call: Caller, onOpenContact: (S
             SessionPhase.ERROR -> ListMessage("Couldn't load the next number.", "Try again") { vm.next() }
             else -> if (item != null) {
                 val ct = item.contact
-                ContactHeader(ct.name, ct.title, ct.company, onClick = { onOpenContact(ct.phoneE164) }) {
+                ContactHeader(ct.name, ct.title, ct.company, onClick = { onOpenContact(ct.phoneE164) }, phone = ct.phoneE164) {
                     val last = item.lastOutcome
                     when {
                         ct.dnc != null -> Chip("Do not call", MaterialTheme.colorScheme.errorContainer, UicColors.overdue)
@@ -439,7 +444,7 @@ private fun UpNextRow(row: TodayRow, vm: TodayViewModel, call: Caller, onOpenCon
             Modifier.padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Avatar(row.name)
+            Avatar(row.name, sharedKey = row.phoneE164)
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 Text(row.title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 row.company?.takeIf { it.isNotBlank() }?.let {

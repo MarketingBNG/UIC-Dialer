@@ -41,6 +41,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -135,9 +136,11 @@ private fun androidx.navigation.NavGraphBuilder.screen(
     arguments: List<androidx.navigation.NamedNavArgument> = emptyList(),
     content: @Composable (NavBackStackEntry) -> Unit,
 ) = composable(route, arguments) { entry ->
-    androidx.compose.foundation.layout.Box(
-        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
-    ) { content(entry) }
+    androidx.compose.runtime.CompositionLocalProvider(com.usaindiacfo.uicdialer.ui.dialer.LocalScreenScope provides this) {
+        androidx.compose.foundation.layout.Box(
+            Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+        ) { content(entry) }
+    }
 }
 
 private data class NavTab(val route: String, val label: String, val icon: ImageVector)
@@ -153,7 +156,7 @@ private val TAB_ROUTES = TABS.map { it.route }.toSet()
 /**
  * [openRequest] is a notification deep link (target, phone); handled once signed in, then [onOpenHandled] clears it.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.animation.ExperimentalSharedTransitionApi::class)
 @Composable
 fun AppNavigation(
     container: AppContainer,
@@ -209,14 +212,21 @@ fun AppNavigation(
         else -> null
     }
 
+    // WhatsApp-style: the top bar takes a tint once the page is scrolled.
+    val barScroll = TopAppBarDefaults.pinnedScrollBehavior()
     Scaffold(
+        modifier = Modifier.nestedScroll(barScroll.nestedScrollConnection),
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             if (route in TAB_ROUTES) TopAppBar(
                 title = { Text(TABS.first { it.route == route }.label, fontWeight = FontWeight.SemiBold) },
                 actions = {
                     Avatar(user?.name ?: user?.email, onClick = { nav.navigate(Routes.SETTINGS) { launchSingleTop = true } }) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                ),
+                scrollBehavior = barScroll,
             )
         },
         bottomBar = {
@@ -237,95 +247,99 @@ fun AppNavigation(
             }
         },
     ) { padding ->
-        NavHost(
-            navController = nav,
-            startDestination = start,
-            modifier = Modifier.padding(padding),
-            enterTransition = { if (isTabSwitch()) TAB_IN else PUSH_IN },
-            exitTransition = { if (isTabSwitch()) TAB_OUT else PUSH_OUT },
-            popEnterTransition = { if (isTabSwitch()) TAB_IN else POP_IN },
-            popExitTransition = { if (isTabSwitch()) TAB_OUT else POP_OUT },
-            // The back gesture follows the finger with the same slide (not the default shrink).
-            predictivePopEnterTransition = { if (isTabSwitch()) TAB_IN else SWIPE_IN },
-            predictivePopExitTransition = { if (isTabSwitch()) TAB_OUT else SWIPE_OUT },
-        ) {
-            screen(Routes.SIGN_IN) {
-                SignInScreen(onSignedIn = {
-                    nav.navigate(Routes.SETUP_GUIDE) { popUpTo(Routes.SIGN_IN) { inclusive = true } }
-                })
-            }
-            screen(Routes.SETUP) {
-                SetupScreen(onDone = {
-                    // From Settings or Today: go back there; after sign-in: start at Today.
-                    if (nav.previousBackStackEntry != null) nav.popBackStack()
-                    else nav.navigate(Routes.TODAY) { popUpTo(Routes.SETUP) { inclusive = true } }
-                })
-            }
-            screen(Routes.SETUP_GUIDE) {
-                SetupGuideScreen(
-                    onFinished = {
-                        if (nav.previousBackStackEntry != null) nav.popBackStack()
-                        else nav.navigate(Routes.TODAY) { popUpTo(Routes.SETUP_GUIDE) { inclusive = true } }
-                    },
-                    onOpenChecks = { nav.navigate(Routes.SETUP) },
-                )
-            }
-            screen(Routes.TODAY) {
-                TodayScreen(
-                    onOpenContact = { nav.navigate(Routes.contact(it)) },
-                    onOpenSetup = { nav.navigate(Routes.SETUP) },
-                    onOpenLists = { nav.navigate(Routes.LISTS) { launchSingleTop = true } },
-                    onOpenKeypad = { nav.navigate(Routes.DIALER) { launchSingleTop = true } },
-                )
-            }
-            screen(Routes.DIALER) {
-                // Opened from the Dial button on Today; no longer a tab.
-                Column(Modifier.fillMaxSize()) {
-                    TopAppBar(
-                        title = { Text("Keypad", fontWeight = FontWeight.SemiBold) },
-                        navigationIcon = {
-                            IconButton(onClick = { if (!nav.popBackStack()) nav.navigateTab(Routes.TODAY) }) {
-                                Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
-                    )
-                    DialerScreen(onOpenContact = { nav.navigate(Routes.contact(it)) })
+        androidx.compose.animation.SharedTransitionLayout {
+            androidx.compose.runtime.CompositionLocalProvider(com.usaindiacfo.uicdialer.ui.dialer.LocalSharedScope provides this) {
+                NavHost(
+                    navController = nav,
+                    startDestination = start,
+                    modifier = Modifier.padding(padding),
+                    enterTransition = { if (isTabSwitch()) TAB_IN else PUSH_IN },
+                    exitTransition = { if (isTabSwitch()) TAB_OUT else PUSH_OUT },
+                    popEnterTransition = { if (isTabSwitch()) TAB_IN else POP_IN },
+                    popExitTransition = { if (isTabSwitch()) TAB_OUT else POP_OUT },
+                    // The back gesture follows the finger with the same slide (not the default shrink).
+                    predictivePopEnterTransition = { if (isTabSwitch()) TAB_IN else SWIPE_IN },
+                    predictivePopExitTransition = { if (isTabSwitch()) TAB_OUT else SWIPE_OUT },
+                ) {
+                    screen(Routes.SIGN_IN) {
+                        SignInScreen(onSignedIn = {
+                            nav.navigate(Routes.SETUP_GUIDE) { popUpTo(Routes.SIGN_IN) { inclusive = true } }
+                        })
+                    }
+                    screen(Routes.SETUP) {
+                        SetupScreen(onDone = {
+                            // From Settings or Today: go back there; after sign-in: start at Today.
+                            if (nav.previousBackStackEntry != null) nav.popBackStack()
+                            else nav.navigate(Routes.TODAY) { popUpTo(Routes.SETUP) { inclusive = true } }
+                        })
+                    }
+                    screen(Routes.SETUP_GUIDE) {
+                        SetupGuideScreen(
+                            onFinished = {
+                                if (nav.previousBackStackEntry != null) nav.popBackStack()
+                                else nav.navigate(Routes.TODAY) { popUpTo(Routes.SETUP_GUIDE) { inclusive = true } }
+                            },
+                            onOpenChecks = { nav.navigate(Routes.SETUP) },
+                        )
+                    }
+                    screen(Routes.TODAY) {
+                        TodayScreen(
+                            onOpenContact = { nav.navigate(Routes.contact(it)) },
+                            onOpenSetup = { nav.navigate(Routes.SETUP) },
+                            onOpenLists = { nav.navigate(Routes.LISTS) { launchSingleTop = true } },
+                            onOpenKeypad = { nav.navigate(Routes.DIALER) { launchSingleTop = true } },
+                        )
+                    }
+                    screen(Routes.DIALER) {
+                        // Opened from the Dial button on Today; no longer a tab.
+                        Column(Modifier.fillMaxSize()) {
+                            TopAppBar(
+                                title = { Text("Keypad", fontWeight = FontWeight.SemiBold) },
+                                navigationIcon = {
+                                    IconButton(onClick = { if (!nav.popBackStack()) nav.navigateTab(Routes.TODAY) }) {
+                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                                    }
+                                },
+                                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                            )
+                            DialerScreen(onOpenContact = { nav.navigate(Routes.contact(it)) })
+                        }
+                    }
+                    screen(Routes.RECENTS) { com.usaindiacfo.uicdialer.ui.recents.RecentsScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
+                    screen(Routes.CONTACTS) { ContactsScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
+                    screen(Routes.CONTACT, arguments = listOf(navArgument("phone") { type = NavType.StringType })) {
+                        ContactDetailScreen(phone = it.arguments?.getString("phone").orEmpty(), onBack = { nav.popBackStack() })
+                    }
+                    screen(Routes.LISTS) {
+                        ListsScreen(onOpenList = { nav.navigate(Routes.listSession(it)) }, onBack = { nav.popBackStack() })
+                    }
+                    screen(Routes.LIST_SESSION, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
+                        ListSessionScreen(
+                            listId = it.arguments?.getString("id").orEmpty(),
+                            onBack = { nav.popBackStack() },
+                            onOpenContact = { phone -> nav.navigate(Routes.contact(phone)) },
+                        )
+                    }
+                    screen(Routes.CALLS) { CallsScreen(onOpenCall = { nav.navigate(Routes.callDetail(it)) }) }
+                    screen(Routes.CALL_DETAIL, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
+                        CallDetailScreen(id = it.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() })
+                    }
+                    screen(Routes.ADMIN_USERS) { AdminTabs(user, route, nav) { UsersScreen() } }
+                    screen(Routes.ADMIN_DEVICES) { AdminTabs(user, route, nav) { DevicesScreen() } }
+                    screen(Routes.ADMIN_SETTINGS) { AdminTabs(user, route, nav) { ServerSettingsScreen() } }
+                    screen(Routes.ADMIN_CLIENTS) { AdminTabs(user, route, nav) { ClientListScreen() } }
+                    screen(Routes.ADMIN_AUDIT) {
+                        AdminTabs(user, route, nav) { AuditScreen(onOpenCall = { id -> nav.navigate(Routes.callDetail(id)) }) }
+                    }
+                    screen(Routes.SETTINGS) {
+                        SettingsScreen(
+                            onOpenSetup = { nav.navigate(Routes.SETUP) },
+                            onOpenGuide = { nav.navigate(Routes.SETUP_GUIDE) },
+                            onOpenAdmin = { nav.navigate(Routes.ADMIN_USERS) { launchSingleTop = true } },
+                            onBack = { if (nav.previousBackStackEntry != null) nav.popBackStack() else nav.navigateTab(Routes.TODAY) },
+                        )
+                    }
                 }
-            }
-            screen(Routes.RECENTS) { com.usaindiacfo.uicdialer.ui.recents.RecentsScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
-            screen(Routes.CONTACTS) { ContactsScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
-            screen(Routes.CONTACT, arguments = listOf(navArgument("phone") { type = NavType.StringType })) {
-                ContactDetailScreen(phone = it.arguments?.getString("phone").orEmpty(), onBack = { nav.popBackStack() })
-            }
-            screen(Routes.LISTS) {
-                ListsScreen(onOpenList = { nav.navigate(Routes.listSession(it)) }, onBack = { nav.popBackStack() })
-            }
-            screen(Routes.LIST_SESSION, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
-                ListSessionScreen(
-                    listId = it.arguments?.getString("id").orEmpty(),
-                    onBack = { nav.popBackStack() },
-                    onOpenContact = { phone -> nav.navigate(Routes.contact(phone)) },
-                )
-            }
-            screen(Routes.CALLS) { CallsScreen(onOpenCall = { nav.navigate(Routes.callDetail(it)) }) }
-            screen(Routes.CALL_DETAIL, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
-                CallDetailScreen(id = it.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() })
-            }
-            screen(Routes.ADMIN_USERS) { AdminTabs(user, route, nav) { UsersScreen() } }
-            screen(Routes.ADMIN_DEVICES) { AdminTabs(user, route, nav) { DevicesScreen() } }
-            screen(Routes.ADMIN_SETTINGS) { AdminTabs(user, route, nav) { ServerSettingsScreen() } }
-            screen(Routes.ADMIN_CLIENTS) { AdminTabs(user, route, nav) { ClientListScreen() } }
-            screen(Routes.ADMIN_AUDIT) {
-                AdminTabs(user, route, nav) { AuditScreen(onOpenCall = { id -> nav.navigate(Routes.callDetail(id)) }) }
-            }
-            screen(Routes.SETTINGS) {
-                SettingsScreen(
-                    onOpenSetup = { nav.navigate(Routes.SETUP) },
-                    onOpenGuide = { nav.navigate(Routes.SETUP_GUIDE) },
-                    onOpenAdmin = { nav.navigate(Routes.ADMIN_USERS) { launchSingleTop = true } },
-                    onBack = { if (nav.previousBackStackEntry != null) nav.popBackStack() else nav.navigateTab(Routes.TODAY) },
-                )
             }
         }
         // Outcome prompt after a call started from the app; shown over whichever screen the rep returns to.
