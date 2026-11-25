@@ -159,7 +159,7 @@ describe("budget reservation", () => {
     await t.app.inject({ method: "POST", url: `/internal/fireflies/reservations/${ra.reservationId}/uploaded`, headers: t.workerHeaders, payload: {} });
     // Recent upload: the retry only polls.
     expect((await reserveHttp(a.jobId)).json()).toMatchObject({ reservationId: ra.reservationId, uploaded: true });
-    const old = new Date(Date.now() - 3 * 3600_000);
+    const old = new Date(Date.now() - 7 * 3600_000);
     await t.db.firefliesReservation.update({ where: { id: ra.reservationId }, data: { uploadedAt: old } });
     const fresh = (await reserveHttp(a.jobId)).json();
     expect(fresh).toMatchObject({ status: "reserved", uploaded: false });

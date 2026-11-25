@@ -56,8 +56,9 @@ async function deferJob(tx: Tx, jobId: string, callId: string, reason: string, u
   await tx.call.update({ where: { id: callId }, data: { status: "UPLOADED" } });
 }
 
-/** An upload with no transcript after this long (two 1-hour waits) is treated as lost by Fireflies. */
-export const REUPLOAD_AFTER_MS = 2 * 3600_000;
+/** An upload with no transcript after this long is treated as lost by Fireflies. Fireflies returns only ~200 calls an hour
+ * and can lag for hours, so this is well past normal slowness: a re-upload is paid for again. */
+export const REUPLOAD_AFTER_MS = 6 * 3600_000;
 /** Re-uploads per call; each one is paid for again. */
 export const MAX_REUPLOADS = 1;
 
