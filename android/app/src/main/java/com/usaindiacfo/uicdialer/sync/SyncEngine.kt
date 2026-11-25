@@ -52,9 +52,9 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
     /** Set by a phone-wide stop (server 429, missing Contacts permission): end this run, WorkManager retries later. */
     @Volatile private var stopRun = false
 
-    /** Files handled (uploaded, already on the server, or skipped) by the last [upload] call. */
-    var uploadedThisRun = 0
-        private set
+    private val uploadedCount = java.util.concurrent.atomic.AtomicInteger()
+    /** Files actually sent to (or already found on) the server by the last [upload] call; skips don't count. */
+    val uploadedThisRun: Int get() = uploadedCount.get()
 
     data class ScanResult(val inserted: Int, val deferred: Boolean)
 
@@ -142,12 +142,12 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
         val tried = HashSet<Long>()
         var outcome = UploadOutcome.DONE
         stopRun = false
-        uploadedThisRun = 0
+        uploadedCount.set(0)
         while (!isStopped() && !stopRun) {
             val batch = dao.nextPending(source, parallel + tried.size).filter { it.id !in tried }.take(parallel)
             if (batch.isEmpty()) break
             val results = coroutineScope { batch.map { async { uploadOne(it, cfg) } }.awaitAll() }
-            batch.zip(results).forEach { (r, res) -> if (res == UploadOutcome.DONE) uploadedThisRun++ else tried += r.id }
+            batch.zip(results).forEach { (r, res) -> if (res != UploadOutcome.DONE) tried += r.id }
             if (UploadOutcome.SIGNED_OUT in results) return@withContext UploadOutcome.SIGNED_OUT
             // One bad file (FILE_FAILED) no longer turns the whole run into a retry: that grew the backoff for hours.
             if (UploadOutcome.RETRY in results) outcome = UploadOutcome.RETRY
@@ -170,7 +170,9 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
             }
             PrivacyDecision.Upload -> Unit
         }
-        val sha = r.sha256 ?: hash(r) ?: return UploadOutcome.DONE
+        // No hash: the file was skipped (missing, no access) or failed to read (attempt counted). FILE_FAILED keeps a
+        // failed one out of the rest of this run instead of burning all its attempts in a few seconds.
+        val sha = r.sha256 ?: hash(r) ?: return UploadOutcome.FILE_FAILED
         val uri = Uri.parse(r.uri)
         // The hash may be from an earlier run: check the file is still there before registering the call, or a
         // deleted recording leaves an empty "waiting for upload" call on the server.
@@ -215,6 +217,7 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
                 }
             }
             dao.markUploaded(r.id, created.callId)
+            uploadedCount.incrementAndGet()
             UploadOutcome.DONE
         } catch (e: ApiException) {
             when {

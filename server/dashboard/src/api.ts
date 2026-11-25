@@ -133,6 +133,8 @@ export interface Device {
   recordings7d?: number | null;
   autostartIntent?: string | null;
   defaultDialer?: string | null;
+  /** Android refused the older-recordings foreground notification; uploads run in short bursts. */
+  backlogFgsError?: string | null;
   throttled?: boolean;
   callsWithoutRecordings?: boolean;
   /** Recorded under half of 10+ calls this week. */

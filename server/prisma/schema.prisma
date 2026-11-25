@@ -135,6 +135,8 @@ model Device {
   recordings7d   Int?      @map("recordings_7d")
   autostartIntent String?  @map("autostart_intent")
   defaultDialer  String?   @map("default_dialer")
+  /// Android refused the older-recordings foreground notification (exception class): background runs are cut to ~10 min.
+  backlogFgsError String?  @map("backlog_fgs_error")
   revokedAt      DateTime? @map("revoked_at")
   /// First heartbeat that listed SIMs; never changes. SIMs reported later than this are "new".
   simsReportedAt DateTime? @map("sims_reported_at")

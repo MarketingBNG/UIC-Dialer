@@ -25,10 +25,12 @@ const Heartbeat = z.object({
   defaultDialer: z.string().max(200).nullable().optional(),
   /** The SIMs in the phone right now; absent from older apps or without phone-state permission. */
   sims: z.array(SimReport).max(8).optional(),
+  /** Exception class when Android refused the backlog foreground notification; absent/null when it worked. */
+  backlogFgsError: z.string().max(80).nullable().optional(),
 });
 
 const SimNumber = z.object({ simKey: z.string().min(1).max(100), number: z.string().max(40).nullish() });
-const M4_FIELDS = ["standbyBucket", "lastStopReason", "calls7d", "recordings7d", "autostartIntent", "defaultDialer"] as const;
+const M4_FIELDS = ["standbyBucket", "lastStopReason", "calls7d", "recordings7d", "autostartIntent", "defaultDialer", "backlogFgsError"] as const;
 
 export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
   const auth = { preHandler: requireDevice(deps) };
@@ -72,6 +74,7 @@ export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
         recordings7d: health(body.recordings7d),
         autostartIntent: health(body.autostartIntent),
         defaultDialer: health(body.defaultDialer),
+        backlogFgsError: health(body.backlogFgsError),
         lastSeenAt: new Date(),
       },
     });

@@ -107,6 +107,9 @@ export function HealthPage() {
                     {!d.revokedAt && d.throttled && <Badge variant="amber">Throttled ({d.standbyBucketName})</Badge>}
                     {!d.revokedAt && d.callsWithoutRecordings && <Badge variant="red">Calls but no recordings</Badge>}
                     {!d.revokedAt && d.fewRecordings && <Badge variant="amber">Missing most recordings</Badge>}
+                    {!d.revokedAt && d.backlogFgsError && d.pendingCount > 0 && (
+                      <Badge variant="amber" title={`Android refused the upload notification (${d.backlogFgsError}). Older recordings upload in short bursts; opening the app speeds them up.`}>Slow background upload</Badge>
+                    )}
                     {!d.revokedAt && d.sims?.some((x) => x.isNew) && <Badge variant="amber">New SIM</Badge>}
                   </div>
                 </div>

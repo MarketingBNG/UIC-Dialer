@@ -91,31 +91,38 @@ class BacklogWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
                 // A scan without access to the files found nothing: don't let it count.
                 if (!isStopped && (com.usaindiacfo.uicdialer.detect.RecorderScanner.hasAudioPermission(ctx) || prefs.safTreeUri != null)) prefs.lastBacklogScanAt = now
             }
-            val outcome = kotlinx.coroutines.coroutineScope {
-                val progress = if (!showing) null else launch {
-                    while (true) {
-                        kotlinx.coroutines.delay(5_000)
-                        runCatching { showProgress(dao) }
+            val outcome = try {
+                kotlinx.coroutines.coroutineScope {
+                    val progress = if (!showing) null else launch {
+                        while (true) {
+                            kotlinx.coroutines.delay(5_000)
+                            runCatching { showProgress(dao) }
+                        }
+                    }
+                    try {
+                        engine.upload(RecordingSource.BACKLOG, cfg) { isStopped }
+                    } finally {
+                        progress?.cancel()
                     }
                 }
-                try {
-                    engine.upload(RecordingSource.BACKLOG, cfg) { isStopped }
-                } finally {
-                    progress?.cancel()
+            } catch (e: CancellationException) {
+                // Android stopped the run (usually the ~10 min limit) mid-upload. WorkManager reschedules this
+                // request itself with a linear backoff that grows every time (1, 2, 3 ... min, never reset across
+                // a multi-day backlog), so later runs waited close to an hour. A separate one-minute kick replaces
+                // the waiting request with a fresh one instead.
+                kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                    recordStop(ctx)
+                    if (engine.uploadedThisRun > 0) SyncScheduler.scheduleBacklogKick(ctx)
                 }
+                throw e
             }
-            if (isStopped) recordStop(ctx)
+            if (isStopped) {
+                recordStop(ctx)
+                if (engine.uploadedThisRun > 0) SyncScheduler.scheduleBacklogKick(ctx)
+            }
             HeartbeatReporter.report(ctx)
-            val more = dao.pendingCount(RecordingSource.BACKLOG) > 0
             when {
                 outcome == UploadOutcome.SIGNED_OUT -> Result.success()
-                // Made progress but stopped (time limit) or hit a hiccup with files left: start a fresh run instead
-                // of retrying. A retry's linear backoff grows with every attempt (1, 2, 3 ... min) and never reset
-                // across a multi-day backlog, so later runs waited close to an hour each.
-                (outcome == UploadOutcome.RETRY || isStopped) && engine.uploadedThisRun > 0 && more -> {
-                    SyncScheduler.enqueueBacklog(ctx, ExistingWorkPolicy.APPEND_OR_REPLACE)
-                    Result.success()
-                }
                 outcome == UploadOutcome.RETRY || isStopped -> Result.retry()
                 else -> Result.success()
             }
@@ -145,6 +152,19 @@ class BacklogWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
     companion object {
         /** How often a backlog run rescans the recorder folders for old files. */
         const val SCAN_EVERY_MS = 6 * 3600_000L
+    }
+}
+
+/** One minute after a backlog run was stopped mid-way: restart it fresh (attempt count 0) if it is only waiting. */
+class BacklogKickWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
+    override suspend fun doWork(): Result {
+        val ctx = applicationContext
+        if (!ctx.signedIn) return Result.success()
+        val c = ctx.container
+        if (c.deviceConfigRepository.current().backlogEnabled && c.db.recordings().pendingCount(RecordingSource.BACKLOG) > 0) {
+            SyncScheduler.restartIfWaiting(ctx, SyncScheduler.BACKLOG) { SyncScheduler.enqueueBacklog(ctx, it) }
+        }
+        return Result.success()
     }
 }
 

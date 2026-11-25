@@ -32,6 +32,7 @@ object SyncScheduler {
     const val RESUME = "uic-resume"
     const val CALL_LOG_TRIGGER = "uic-call-log-trigger"
     const val CALL_LOG = "uic-call-log"
+    const val BACKLOG_KICK = "uic-backlog-kick"
 
     /** Call once from Application.onCreate. Cheap: only registers jobs that aren't already scheduled. */
     fun init(context: Context) {
@@ -149,6 +150,17 @@ object SyncScheduler {
         }.start()
     }
 
+    /**
+     * After Android stops a backlog run: in one minute, replace the backlog request (then waiting out its growing
+     * retry delay) with a fresh one. Unique + REPLACE, so repeated stops keep a single pending kick.
+     */
+    fun scheduleBacklogKick(context: Context) {
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            BACKLOG_KICK, ExistingWorkPolicy.REPLACE,
+            OneTimeWorkRequestBuilder<BacklogKickWorker>().setInitialDelay(1, TimeUnit.MINUTES).build(),
+        )
+    }
+
     /** Re-scan once a file that was still being written has settled. */
     fun scheduleRecheck(context: Context, delaySec: Long = 45) {
         WorkManager.getInstance(context).enqueueUniqueWork(
@@ -203,6 +215,6 @@ object SyncScheduler {
     /** Optional on sign-out; workers no-op while signed out anyway and [init] re-arms at next start. */
     fun cancelSyncWork(context: Context) {
         val wm = WorkManager.getInstance(context)
-        listOf(SCAN_NOW, RECHECK, UPLOAD, BACKLOG, ACTIVITIES, CALL_LOG).forEach(wm::cancelUniqueWork)
+        listOf(SCAN_NOW, RECHECK, UPLOAD, BACKLOG, BACKLOG_KICK, ACTIVITIES, CALL_LOG).forEach(wm::cancelUniqueWork)
     }
 }
