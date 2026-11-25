@@ -109,6 +109,16 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
     }
 
     /** Hash and store it; files that vanished are marked SKIPPED. */
+    /** False (and the row SKIPPED) when the file was deleted or can no longer be read. */
+    private suspend fun stillReadable(r: RecordingEntity, uri: Uri): Boolean = try {
+        context.contentResolver.openFileDescriptor(uri, "r")?.close() ?: throw FileNotFoundException()
+        true
+    } catch (e: FileNotFoundException) {
+        dao.setStatus(r.id, RecordingStatus.SKIPPED, "File missing"); false
+    } catch (e: SecurityException) {
+        dao.setStatus(r.id, RecordingStatus.SKIPPED, "No access"); false
+    }
+
     private suspend fun hash(r: RecordingEntity): String? = try {
         Hasher.sha256(context.contentResolver, Uri.parse(r.uri)).also { dao.setHash(r.id, it) }
     } catch (e: FileNotFoundException) {
@@ -155,6 +165,9 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
         }
         val sha = r.sha256 ?: hash(r) ?: return UploadOutcome.DONE
         val uri = Uri.parse(r.uri)
+        // The hash may be from an earlier run: check the file is still there before registering the call, or a
+        // deleted recording leaves an empty "waiting for upload" call on the server.
+        if (!stillReadable(r, uri)) return UploadOutcome.DONE
         val mime = AudioMime.normalize(r.mimeType, r.displayName)
         val dir = File(context.cacheDir, "upload").apply { mkdirs() }
         val tmp = dir.resolve("${r.id}.m4a")
