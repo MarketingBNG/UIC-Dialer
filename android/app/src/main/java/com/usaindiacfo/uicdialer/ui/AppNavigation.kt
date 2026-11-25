@@ -4,12 +4,14 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.navigation.NavBackStackEntry
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -109,19 +111,34 @@ object OpenTargets {
     const val CONTACT = "contact"
 }
 
-// Screen transitions: quick and calm. Tabs cross-fade; opening a screen slides it in a little from the right
-// (back reverses it). Android's default is a slow 700 ms fade, which made the app feel sluggish.
+// Screen transitions, WhatsApp-style: an opened screen slides in fully from the right while the one under it
+// drifts a quarter to the left; Back reverses it. With the back gesture (Android 16+) it follows the finger.
+// Tabs just cross-fade quickly.
 private val Emphasized = CubicBezierEasing(0.2f, 0f, 0f, 1f)
-private const val SHIFT = 10 // fraction divisor: slide by 1/10 of the width
+private const val PUSH_MS = 300
 private val TAB_IN = fadeIn(tween(150, delayMillis = 40))
 private val TAB_OUT = fadeOut(tween(90))
-private val PUSH_IN: EnterTransition = slideInHorizontally(tween(250, easing = Emphasized)) { it / SHIFT } + fadeIn(tween(200))
-private val PUSH_OUT: ExitTransition = slideOutHorizontally(tween(250, easing = Emphasized)) { -it / SHIFT } + fadeOut(tween(150))
-private val POP_IN: EnterTransition = slideInHorizontally(tween(250, easing = Emphasized)) { -it / SHIFT } + fadeIn(tween(200))
-private val POP_OUT: ExitTransition = slideOutHorizontally(tween(250, easing = Emphasized)) { it / SHIFT } + fadeOut(tween(150))
+private val PUSH_IN: EnterTransition = slideInHorizontally(tween(PUSH_MS, easing = Emphasized)) { it }
+private val PUSH_OUT: ExitTransition = slideOutHorizontally(tween(PUSH_MS, easing = Emphasized)) { -it / 4 }
+private val POP_IN: EnterTransition = slideInHorizontally(tween(PUSH_MS, easing = Emphasized)) { -it / 4 }
+private val POP_OUT: ExitTransition = slideOutHorizontally(tween(PUSH_MS, easing = Emphasized)) { it }
+// During the back gesture the screen tracks the finger 1:1 (linear), then finishes on release.
+private val SWIPE_IN: EnterTransition = slideInHorizontally(tween(PUSH_MS, easing = LinearEasing)) { -it / 4 }
+private val SWIPE_OUT: ExitTransition = slideOutHorizontally(tween(PUSH_MS, easing = LinearEasing)) { it }
 
 private fun AnimatedContentTransitionScope<NavBackStackEntry>.isTabSwitch() =
     initialState.destination.route in TAB_ROUTES && targetState.destination.route in TAB_ROUTES
+
+/** A destination with a solid background, so during Back the screen on top fully covers the one under it. */
+private fun androidx.navigation.NavGraphBuilder.screen(
+    route: String,
+    arguments: List<androidx.navigation.NamedNavArgument> = emptyList(),
+    content: @Composable (NavBackStackEntry) -> Unit,
+) = composable(route, arguments) { entry ->
+    androidx.compose.foundation.layout.Box(
+        Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background),
+    ) { content(entry) }
+}
 
 private data class NavTab(val route: String, val label: String, val icon: ImageVector)
 
@@ -228,20 +245,23 @@ fun AppNavigation(
             exitTransition = { if (isTabSwitch()) TAB_OUT else PUSH_OUT },
             popEnterTransition = { if (isTabSwitch()) TAB_IN else POP_IN },
             popExitTransition = { if (isTabSwitch()) TAB_OUT else POP_OUT },
+            // The back gesture follows the finger with the same slide (not the default shrink).
+            predictivePopEnterTransition = { if (isTabSwitch()) TAB_IN else SWIPE_IN },
+            predictivePopExitTransition = { if (isTabSwitch()) TAB_OUT else SWIPE_OUT },
         ) {
-            composable(Routes.SIGN_IN) {
+            screen(Routes.SIGN_IN) {
                 SignInScreen(onSignedIn = {
                     nav.navigate(Routes.SETUP_GUIDE) { popUpTo(Routes.SIGN_IN) { inclusive = true } }
                 })
             }
-            composable(Routes.SETUP) {
+            screen(Routes.SETUP) {
                 SetupScreen(onDone = {
                     // From Settings or Today: go back there; after sign-in: start at Today.
                     if (nav.previousBackStackEntry != null) nav.popBackStack()
                     else nav.navigate(Routes.TODAY) { popUpTo(Routes.SETUP) { inclusive = true } }
                 })
             }
-            composable(Routes.SETUP_GUIDE) {
+            screen(Routes.SETUP_GUIDE) {
                 SetupGuideScreen(
                     onFinished = {
                         if (nav.previousBackStackEntry != null) nav.popBackStack()
@@ -250,7 +270,7 @@ fun AppNavigation(
                     onOpenChecks = { nav.navigate(Routes.SETUP) },
                 )
             }
-            composable(Routes.TODAY) {
+            screen(Routes.TODAY) {
                 TodayScreen(
                     onOpenContact = { nav.navigate(Routes.contact(it)) },
                     onOpenSetup = { nav.navigate(Routes.SETUP) },
@@ -258,7 +278,7 @@ fun AppNavigation(
                     onOpenKeypad = { nav.navigate(Routes.DIALER) { launchSingleTop = true } },
                 )
             }
-            composable(Routes.DIALER) {
+            screen(Routes.DIALER) {
                 // Opened from the Dial button on Today; no longer a tab.
                 Column(Modifier.fillMaxSize()) {
                     TopAppBar(
@@ -273,33 +293,33 @@ fun AppNavigation(
                     DialerScreen(onOpenContact = { nav.navigate(Routes.contact(it)) })
                 }
             }
-            composable(Routes.RECENTS) { com.usaindiacfo.uicdialer.ui.recents.RecentsScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
-            composable(Routes.CONTACTS) { ContactsScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
-            composable(Routes.CONTACT, arguments = listOf(navArgument("phone") { type = NavType.StringType })) {
+            screen(Routes.RECENTS) { com.usaindiacfo.uicdialer.ui.recents.RecentsScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
+            screen(Routes.CONTACTS) { ContactsScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
+            screen(Routes.CONTACT, arguments = listOf(navArgument("phone") { type = NavType.StringType })) {
                 ContactDetailScreen(phone = it.arguments?.getString("phone").orEmpty(), onBack = { nav.popBackStack() })
             }
-            composable(Routes.LISTS) {
+            screen(Routes.LISTS) {
                 ListsScreen(onOpenList = { nav.navigate(Routes.listSession(it)) }, onBack = { nav.popBackStack() })
             }
-            composable(Routes.LIST_SESSION, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
+            screen(Routes.LIST_SESSION, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
                 ListSessionScreen(
                     listId = it.arguments?.getString("id").orEmpty(),
                     onBack = { nav.popBackStack() },
                     onOpenContact = { phone -> nav.navigate(Routes.contact(phone)) },
                 )
             }
-            composable(Routes.CALLS) { CallsScreen(onOpenCall = { nav.navigate(Routes.callDetail(it)) }) }
-            composable(Routes.CALL_DETAIL, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
+            screen(Routes.CALLS) { CallsScreen(onOpenCall = { nav.navigate(Routes.callDetail(it)) }) }
+            screen(Routes.CALL_DETAIL, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
                 CallDetailScreen(id = it.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() })
             }
-            composable(Routes.ADMIN_USERS) { AdminTabs(user, route, nav) { UsersScreen() } }
-            composable(Routes.ADMIN_DEVICES) { AdminTabs(user, route, nav) { DevicesScreen() } }
-            composable(Routes.ADMIN_SETTINGS) { AdminTabs(user, route, nav) { ServerSettingsScreen() } }
-            composable(Routes.ADMIN_CLIENTS) { AdminTabs(user, route, nav) { ClientListScreen() } }
-            composable(Routes.ADMIN_AUDIT) {
+            screen(Routes.ADMIN_USERS) { AdminTabs(user, route, nav) { UsersScreen() } }
+            screen(Routes.ADMIN_DEVICES) { AdminTabs(user, route, nav) { DevicesScreen() } }
+            screen(Routes.ADMIN_SETTINGS) { AdminTabs(user, route, nav) { ServerSettingsScreen() } }
+            screen(Routes.ADMIN_CLIENTS) { AdminTabs(user, route, nav) { ClientListScreen() } }
+            screen(Routes.ADMIN_AUDIT) {
                 AdminTabs(user, route, nav) { AuditScreen(onOpenCall = { id -> nav.navigate(Routes.callDetail(id)) }) }
             }
-            composable(Routes.SETTINGS) {
+            screen(Routes.SETTINGS) {
                 SettingsScreen(
                     onOpenSetup = { nav.navigate(Routes.SETUP) },
                     onOpenGuide = { nav.navigate(Routes.SETUP_GUIDE) },
