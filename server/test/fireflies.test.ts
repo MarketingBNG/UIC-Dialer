@@ -152,6 +152,26 @@ describe("budget reservation", () => {
     expect(usage).toMatchObject({ usedMinutes: 4, reservedMinutes: 0 });
   });
 
+  it("re-uploads once when Fireflies never returned a transcript for an old upload", async () => {
+    await setCfg({ budgetMinutes: 100 });
+    const a = await runningJob({ durationS: 60 });
+    const ra = (await reserveHttp(a.jobId)).json();
+    await t.app.inject({ method: "POST", url: `/internal/fireflies/reservations/${ra.reservationId}/uploaded`, headers: t.workerHeaders, payload: {} });
+    // Recent upload: the retry only polls.
+    expect((await reserveHttp(a.jobId)).json()).toMatchObject({ reservationId: ra.reservationId, uploaded: true });
+    const old = new Date(Date.now() - 3 * 3600_000);
+    await t.db.firefliesReservation.update({ where: { id: ra.reservationId }, data: { uploadedAt: old } });
+    const fresh = (await reserveHttp(a.jobId)).json();
+    expect(fresh).toMatchObject({ status: "reserved", uploaded: false });
+    expect(fresh.reservationId).not.toBe(ra.reservationId);
+    expect(await t.db.firefliesReservation.findUnique({ where: { id: ra.reservationId } })).toMatchObject({ status: "COMMITTED", uploadedAt: null });
+    // The re-upload is lost too: no third upload.
+    await t.app.inject({ method: "POST", url: `/internal/fireflies/reservations/${fresh.reservationId}/uploaded`, headers: t.workerHeaders, payload: {} });
+    await t.db.firefliesReservation.update({ where: { id: fresh.reservationId }, data: { uploadedAt: old } });
+    expect((await reserveHttp(a.jobId)).json()).toMatchObject({ reservationId: fresh.reservationId, uploaded: true });
+    expect(await t.db.firefliesReservation.count({ where: { callId: a.callId } })).toBe(2);
+  });
+
   it("keeps the live reserve away from backlog calls", async () => {
     await setCfg({ budgetMinutes: 100, liveReservePct: 10 });
     for (let i = 0; i < 9; i++) {

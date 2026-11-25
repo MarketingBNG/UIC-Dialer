@@ -56,6 +56,11 @@ async function deferJob(tx: Tx, jobId: string, callId: string, reason: string, u
   await tx.call.update({ where: { id: callId }, data: { status: "UPLOADED" } });
 }
 
+/** An upload with no transcript after this long (two 1-hour waits) is treated as lost by Fireflies. */
+export const REUPLOAD_AFTER_MS = 2 * 3600_000;
+/** Re-uploads per call; each one is paid for again. */
+export const MAX_REUPLOADS = 1;
+
 export type RefusalReason = "DISABLED" | "BLOCKED" | "BATCH_GATE" | "BUDGET";
 
 export type ReserveResult =
@@ -89,9 +94,18 @@ export async function reserveForJob(db: Db, jobId: string, workerId: string, now
     // A retry of a job that already reserved (maybe already uploaded) reuses that reservation.
     // An already-uploaded call is never uploaded (and paid for) again, even if its row was
     // settled to COMMITTED meanwhile (stale settle, or parked by a hard stop until next month).
-    const existing =
+    let existing =
       (await tx.firefliesReservation.findFirst({ where: { callId: job.callId, uploadedAt: { not: null } }, orderBy: { createdAt: "desc" } })) ??
       (await tx.firefliesReservation.findFirst({ where: { callId: job.callId, status: "RESERVED" } }));
+    if (existing?.uploadedAt && now.getTime() - existing.uploadedAt.getTime() > REUPLOAD_AFTER_MS) {
+      // Uploaded long ago and still no transcript (the job keeps timing out): Fireflies lost it. Send it once
+      // more. The old upload stays counted as used (COMMITTED); uploadedAt is cleared so it no longer blocks.
+      const reuploads = await tx.firefliesReservation.count({ where: { callId: job.callId, status: "COMMITTED", uploadedAt: null } });
+      if (reuploads < MAX_REUPLOADS) {
+        await tx.firefliesReservation.update({ where: { id: existing.id }, data: { status: "COMMITTED", uploadedAt: null } });
+        existing = await tx.firefliesReservation.findFirst({ where: { callId: job.callId, status: "RESERVED" } });
+      }
+    }
     if (existing) {
       if (existing.status === "RESERVED") {
         await tx.firefliesReservation.update({ where: { id: existing.id }, data: { updatedAt: now } });
