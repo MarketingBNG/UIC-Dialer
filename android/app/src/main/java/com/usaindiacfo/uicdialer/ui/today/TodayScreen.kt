@@ -136,7 +136,7 @@ fun TodayScreen(
             }
             if (recordingOff) item(key = "recording-off") {
                 Banner(
-                    "Call recording looks off. " + com.usaindiacfo.uicdialer.sync.RecordingCheck.TEXT, "Open Phone",
+                    "Call recording is off. " + com.usaindiacfo.uicdialer.sync.RecordingCheck.TEXT, "Open Phone",
                     MaterialTheme.colorScheme.errorContainer,
                 ) { runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_DIAL).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }
             }

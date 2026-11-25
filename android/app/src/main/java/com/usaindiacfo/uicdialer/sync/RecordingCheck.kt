@@ -72,7 +72,7 @@ object RecordingCheck {
         }
         val n = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_call)
-            .setContentTitle("Call recording looks off")
+            .setContentTitle("Call recording is off")
             .setContentText(TEXT)
             .setStyle(NotificationCompat.BigTextStyle().bigText(TEXT))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -82,7 +82,7 @@ object RecordingCheck {
         Notifications.notify(context, NOTIF_ID, n)
     }
 
-    const val TEXT = "Your last $CALLS calls weren't recorded. Open the Phone app → ⋮ → Settings → Record calls → turn on Auto record calls."
+    const val TEXT = "Turn on Auto record calls in Phone settings."
 
     private fun prefs(context: Context) = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 }
