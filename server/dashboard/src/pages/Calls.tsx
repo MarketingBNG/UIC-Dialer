@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { api, isManager, qs, type CallPage, type CallStatus, type Direction, type User } from "../api";
+import { api, isManager, qs, type CallItem, type CallPage, type CallStatus, type Direction, type User } from "../api";
 import { useMe } from "../App";
 import { DIRECTION_LABEL, STATUS_LABEL, formatDuration, formatShortWhen, fromLabel, personName } from "../format";
 import { Download, PhoneCall, Search, SlidersHorizontal, X } from "lucide-react";
@@ -13,7 +13,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { DirectionTag, Empty, ErrorBox, PageHeader, ScorePill, Spinner, StatusBadge, ViaTag } from "../ui";
 
-const FILTER_KEYS = ["q", "phone", "userId", "direction", "status", "from", "to"] as const;
+const FILTER_KEYS = ["q", "phone", "userId", "ownerId", "direction", "status", "from", "to"] as const;
 
 /** yyyy-mm-dd from a date input, read in the viewer's time zone. */
 function dayBoundary(day: string, end: boolean) {
@@ -64,6 +64,7 @@ export function CallsPage() {
     q: isPhone ? "" : search,
     phone: isPhone ? search.replace(/[^\d+]/g, "") : get("phone"),
     userId: manager ? get("userId") : "",
+    ownerId: manager ? get("ownerId") : "",
     direction: get("direction"),
     status: get("status"),
     from: dayBoundary(get("from"), false),
@@ -71,7 +72,7 @@ export function CallsPage() {
     // Include call-log-only calls (no recording).
     v: "2",
   };
-  const activeCount = [filters.phone, filters.userId, filters.direction, filters.status, get("from"), get("to")].filter(Boolean).length;
+  const activeCount = [filters.phone, filters.userId, filters.ownerId, filters.direction, filters.status, get("from"), get("to")].filter(Boolean).length;
 
   const users = useQuery({ queryKey: ["users"], queryFn: () => api<User[]>("/api/users"), enabled: manager });
 
@@ -124,6 +125,19 @@ export function CallsPage() {
               <Label htmlFor="f-phone">Phone number</Label>
               <Input id="f-phone" inputMode="tel" placeholder="Any part of the number" value={phone} onChange={(e) => setPhone(e.target.value)} />
             </div>
+            {manager && (
+              <div>
+                <Label htmlFor="f-owner">Lead owner</Label>
+                <NativeSelect id="f-owner" value={get("ownerId")} onChange={(e) => set("ownerId", e.target.value)}>
+                  <option value="">Any owner</option>
+                  {users.data?.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {personName(u)}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </div>
+            )}
             {manager && (
               <div>
                 <Label htmlFor="f-user">Person</Label>
@@ -204,8 +218,8 @@ export function CallsPage() {
                 <Link to={`/calls/${c.id}`} className="block rounded-xl border bg-card p-3 shadow-sm active:bg-muted">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="truncate font-medium">{c.contactName || c.phoneE164 || c.phoneRaw || "Unknown number"}</div>
-                      {c.contactName && <div className="truncate text-sm text-muted-foreground">{c.phoneE164 || c.phoneRaw}</div>}
+                      <div className="truncate font-medium">{leadName(c) || c.phoneE164 || c.phoneRaw || "Unknown number"}</div>
+                      {leadName(c) && <div className="truncate text-sm text-muted-foreground">{c.phoneE164 || c.phoneRaw}</div>}
                     </div>
                     <StatusBadge status={c.status} logType={c.logType} direction={c.direction} durationS={c.durationS} />
                   </div>
@@ -215,6 +229,7 @@ export function CallsPage() {
                     <span>{formatShortWhen(c.startedAt)}</span>
                     <span>{formatDuration(c.durationS)}</span>
                     {manager && <span className="truncate">{personName(c.user)}</span>}
+                    {c.lead?.owner && <span className="truncate">Owner: {personName(c.lead.owner)}</span>}
                     {fromLabel(c) && <span className="truncate">{fromLabel(c)}</span>}
                     {c.score != null && <ScorePill score={c.score} />}
                   </div>
@@ -235,6 +250,7 @@ export function CallsPage() {
                     Duration
                   </TableHead>
                   {manager && <TableHead scope="col">Person</TableHead>}
+                  <TableHead scope="col">Lead owner</TableHead>
                   <TableHead scope="col">Status</TableHead>
                   {hasScores && (
                     <TableHead scope="col" className="text-right">
@@ -248,9 +264,9 @@ export function CallsPage() {
                   <TableRow key={c.id}>
                     <TableCell>
                       <Link to={`/calls/${c.id}`} className="font-medium text-primary hover:underline">
-                        {c.contactName || c.phoneE164 || c.phoneRaw || "Unknown number"}
+                        {leadName(c) || c.phoneE164 || c.phoneRaw || "Unknown number"}
                       </Link>
-                      {c.contactName && <div className="text-xs text-muted-foreground">{c.phoneE164 || c.phoneRaw}</div>}
+                      {leadName(c) && <div className="text-xs text-muted-foreground">{[c.lead?.company, c.phoneE164 || c.phoneRaw].filter(Boolean).join(" · ")}</div>}
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -266,6 +282,9 @@ export function CallsPage() {
                         {fromLabel(c) && <div className="truncate text-xs text-muted-foreground">{fromLabel(c)}</div>}
                       </TableCell>
                     )}
+                    <TableCell className="max-w-40">
+                      <div className="truncate">{c.lead?.owner ? personName(c.lead.owner) : "—"}</div>
+                    </TableCell>
                     <TableCell>
                       <StatusBadge status={c.status} logType={c.logType} direction={c.direction} durationS={c.durationS} />
                     </TableCell>
@@ -292,4 +311,9 @@ export function CallsPage() {
       )}
     </>
   );
+}
+
+/** The lead's name from Contacts, else the name saved on the phone. */
+function leadName(c: CallItem): string | null {
+  return c.lead?.name || c.contactName || null;
 }
