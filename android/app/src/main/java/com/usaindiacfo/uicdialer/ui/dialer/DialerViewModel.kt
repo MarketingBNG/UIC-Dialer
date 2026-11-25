@@ -69,6 +69,10 @@ class DialerViewModel(private val c: AppContainer, private val app: android.cont
         suggest()
     }
 
+    /** The last number dialled from this phone (call log), for Call with nothing typed. */
+    fun lastDialed(): String? = recents.filter { it.kind == com.usaindiacfo.uicdialer.phonebook.CallKind.OUTGOING }
+        .maxByOrNull { it.dateMs }?.number
+
     fun logWhatsApp(phone: String) = viewModelScope.launch { c.activityRepository.log(phone, ActivityType.WHATSAPP) }
 
     private suspend fun lookup(q: String) {

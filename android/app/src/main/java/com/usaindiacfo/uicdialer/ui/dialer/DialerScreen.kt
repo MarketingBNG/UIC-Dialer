@@ -1,6 +1,18 @@
 package com.usaindiacfo.uicdialer.ui.dialer
 
+import android.view.HapticFeedbackConstants
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.ripple
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.path
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -72,83 +84,107 @@ fun DialerScreen(onOpenContact: (phone: String) -> Unit) {
     val state by vm.state.collectAsStateWithLifecycle()
     val call = rememberCaller()
     @Suppress("DEPRECATION") val clipboard = LocalClipboardManager.current
+    val view = LocalView.current
 
     val number = DialLogic.cleanNumber(state.number)
     val canDial = DialLogic.last10(number) != null
-    fun type(k: String) = vm.setNumber((state.number + k).take(40))
+    fun tap() { view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }
+    fun type(k: String) { tap(); vm.setNumber((state.number + k).take(40)) }
 
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 12.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        BasicTextField(
-            value = state.number,
-            onValueChange = { vm.setNumber(it.take(40)) },
-            singleLine = true,
-            textStyle = TextStyle(fontSize = 32.sp, fontWeight = FontWeight.Medium, textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onBackground),
-            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-            decorationBox = { inner ->
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    if (state.number.isEmpty()) Text("Enter a number", fontSize = 20.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    inner()
+    // Fixed layout like a phone's own keypad: suggestions fill the top; the number and keys stay put at the bottom.
+    Column(Modifier.fillMaxSize().padding(horizontal = 24.dp)) {
+        Column(
+            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(top = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.Bottom),
+        ) {
+            val match = state.matches.firstOrNull()
+            if (match != null) MatchCard(match) { onOpenContact(match.phoneE164) }
+            state.suggestions.filter { s -> match == null || !DialLogic.sameNumber(s.number, match.phoneE164) }.take(4).forEach { s ->
+                SuggestionRow(s, onPick = { vm.setNumber(DialLogic.cleanNumber(s.number).take(40)) }, onCall = { call(s.number) })
+            }
+            if (match == null && canDial) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                TextButton(onClick = { onOpenContact(number) }) { Text("Notes") }
+                if (!state.savedOnPhone) {
+                    TextButton(onClick = { com.usaindiacfo.uicdialer.phonebook.PhoneBook.createContact(context, number) }) { Text("New contact") }
+                    TextButton(onClick = { com.usaindiacfo.uicdialer.phonebook.PhoneBook.addToExisting(context, number) }) { Text("Add to contact") }
                 }
-            },
-        )
-        val match = state.matches.firstOrNull()
-        if (match != null) MatchCard(match) { onOpenContact(match.phoneE164) }
-        else if (state.number.isEmpty()) {
-            TextButton(onClick = { clipboard.getText()?.text?.let { vm.setNumber(DialLogic.cleanNumber(it).take(40)) } }) { Text("Paste number") }
-        } else if (canDial) {
-            TextButton(onClick = { onOpenContact(number) }) { Text("Details and notes for this number") }
+            }
         }
-        // Other matches (phone contacts, CRM, recent numbers); tap fills the number.
-        state.suggestions.filter { s -> match == null || !DialLogic.sameNumber(s.number, match.phoneE164) }.take(3).forEach { s ->
-            SuggestionRow(s, onPick = { vm.setNumber(DialLogic.cleanNumber(s.number).take(40)) }, onCall = { call(s.number) })
-        }
-        if (canDial && !state.savedOnPhone) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = { com.usaindiacfo.uicdialer.phonebook.PhoneBook.createContact(context, number) }) { Text("Create new contact") }
-                TextButton(onClick = { com.usaindiacfo.uicdialer.phonebook.PhoneBook.addToExisting(context, number) }) { Text("Add to existing") }
+
+        // Number + delete. Fixed height, so nothing jumps while typing.
+        Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
+            Spacer(Modifier.size(48.dp))
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                if (state.number.isEmpty()) {
+                    TextButton(onClick = { clipboard.getText()?.text?.let { vm.setNumber(DialLogic.cleanNumber(it).take(40)) } }) {
+                        Text("Paste number", fontSize = 16.sp)
+                    }
+                } else {
+                    BasicTextField(
+                        value = state.number,
+                        onValueChange = { vm.setNumber(it.take(40)) },
+                        singleLine = true,
+                        textStyle = TextStyle(
+                            fontSize = if (state.number.length > 13) 26.sp else 34.sp, fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onBackground,
+                        ),
+                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+            Box(
+                Modifier.size(48.dp).clip(CircleShape).combinedClickableCompat(
+                    enabled = state.number.isNotEmpty(),
+                    onClick = { tap(); vm.setNumber(state.number.dropLast(1)) },
+                    onLongClick = { tap(); vm.setNumber("") },
+                ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (state.number.isNotEmpty()) Icon(BackspaceIcon, contentDescription = "Delete (hold to clear)", tint = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
 
         KEYS.chunked(3).forEach { row ->
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
                 row.forEach { (digit, letters) ->
                     Key(digit, letters, onClick = { type(digit) }, onLongClick = if (digit == "0") ({ type("+") }) else null)
                 }
             }
         }
 
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-            OutlinedButton(
-                onClick = { if (Dialer.whatsApp(context, number)) vm.logWhatsApp(number) },
-                enabled = canDial,
-                modifier = Modifier.size(76.dp),
-                shape = CircleShape,
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
-            ) { Text("WA", fontWeight = FontWeight.SemiBold, color = if (canDial) Color(0xFF128C7E) else Color.Unspecified) }
-            FilledIconButton(
-                onClick = { call(number) },
-                enabled = canDial,
-                modifier = Modifier.size(76.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(containerColor = UicColors.callGreen, contentColor = Color.White),
-            ) { Icon(Icons.Filled.Call, contentDescription = "Call", modifier = Modifier.size(32.dp)) }
-            Box(
+        Row(
+            Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 16.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(
                 Modifier.size(76.dp).clip(CircleShape).combinedClickableCompat(
-                    enabled = state.number.isNotEmpty(),
-                    onClick = { vm.setNumber(state.number.dropLast(1)) },
-                    onLongClick = { vm.setNumber("") },
+                    enabled = canDial, onClick = { if (Dialer.whatsApp(context, number)) vm.logWhatsApp(number) }, onLongClick = null,
                 ),
-                contentAlignment = Alignment.Center,
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
             ) {
-                if (state.number.isNotEmpty()) Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Delete", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                val tint = if (canDial) Color(0xFF128C7E) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                Icon(ChatIcon, contentDescription = null, tint = tint)
+                Text("WhatsApp", fontSize = 11.sp, color = tint)
             }
+            // Always green. With nothing typed it fills in the last number dialled (like a phone's own keypad).
+            val lastDialed = vm.lastDialed()
+            val callEnabled = canDial || (state.number.isEmpty() && lastDialed != null)
+            FilledIconButton(
+                onClick = {
+                    tap()
+                    if (canDial) call(number) else lastDialed?.let { vm.setNumber(DialLogic.cleanNumber(it).take(40)) }
+                },
+                enabled = callEnabled,
+                modifier = Modifier.size(76.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = UicColors.callGreen, contentColor = Color.White,
+                    disabledContainerColor = UicColors.callGreen.copy(alpha = 0.45f), disabledContentColor = Color.White,
+                ),
+            ) { Icon(Icons.Filled.Call, contentDescription = "Call", modifier = Modifier.size(32.dp)) }
+            Spacer(Modifier.size(76.dp))
         }
-        Spacer(Modifier.size(8.dp))
     }
 }
 
@@ -197,16 +233,48 @@ private fun SuggestionRow(s: com.usaindiacfo.uicdialer.phonebook.PhoneBookLogic.
 
 @Composable
 private fun Key(digit: String, letters: String, onClick: () -> Unit, onLongClick: (() -> Unit)?) {
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.92f else 1f, tween(if (pressed) 60 else 160), label = "key")
     Column(
-        Modifier.size(76.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant)
-            .combinedClickableCompat(onClick = onClick, onLongClick = onLongClick),
+        Modifier.size(72.dp).graphicsLayer { scaleX = scale; scaleY = scale }.clip(CircleShape)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .combinedClickableWith(source, onClick, onLongClick),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
         Text(digit, fontSize = 28.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurface)
-        Text(letters, fontSize = 10.sp, letterSpacing = 1.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (letters.isNotEmpty()) Text(letters, fontSize = 10.sp, letterSpacing = 1.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun Modifier.combinedClickableWith(source: MutableInteractionSource, onClick: () -> Unit, onLongClick: (() -> Unit)?) =
+    combinedClickable(interactionSource = source, indication = ripple(), onClick = onClick, onLongClick = onLongClick)
+
+/** Material "backspace" (outlined) and "chat" icons; the app ships only the core icon set. */
+private val BackspaceIcon: ImageVector = ImageVector.Builder("Backspace", 24.dp, 24.dp, 24f, 24f).apply {
+    path(fill = SolidColor(Color.Black)) {
+        moveTo(22f, 3f); horizontalLineTo(7f); curveToRelative(-0.69f, 0f, -1.23f, 0.35f, -1.59f, 0.88f)
+        lineTo(0f, 12f); lineToRelative(5.41f, 8.11f); curveToRelative(0.36f, 0.53f, 0.9f, 0.89f, 1.59f, 0.89f)
+        horizontalLineToRelative(15f); curveToRelative(1.1f, 0f, 2f, -0.9f, 2f, -2f); verticalLineTo(5f)
+        curveToRelative(0f, -1.1f, -0.9f, -2f, -2f, -2f); close()
+        moveTo(22f, 19f); horizontalLineTo(7.07f); lineTo(2.4f, 12f); lineToRelative(4.66f, -7f); horizontalLineTo(22f); verticalLineToRelative(14f); close()
+        moveTo(10.41f, 17f); lineTo(14f, 13.41f); lineTo(17.59f, 17f); lineTo(19f, 15.59f); lineTo(15.41f, 12f)
+        lineTo(19f, 8.41f); lineTo(17.59f, 7f); lineTo(14f, 10.59f); lineTo(10.41f, 7f); lineTo(9f, 8.41f)
+        lineTo(12.59f, 12f); lineTo(9f, 15.59f); close()
+    }
+}.build()
+
+private val ChatIcon: ImageVector = ImageVector.Builder("Chat", 24.dp, 24.dp, 24f, 24f).apply {
+    path(fill = SolidColor(Color.Black)) {
+        moveTo(20f, 2f); horizontalLineTo(4f); curveToRelative(-1.1f, 0f, -2f, 0.9f, -2f, 2f); verticalLineToRelative(18f)
+        lineToRelative(4f, -4f); horizontalLineToRelative(14f); curveToRelative(1.1f, 0f, 2f, -0.9f, 2f, -2f); verticalLineTo(4f)
+        curveToRelative(0f, -1.1f, -0.9f, -2f, -2f, -2f); close()
+        moveTo(20f, 16f); horizontalLineTo(5.17f); lineTo(4f, 17.17f); verticalLineTo(4f); horizontalLineToRelative(16f); verticalLineToRelative(12f); close()
+    }
+}.build()
 
 @OptIn(ExperimentalFoundationApi::class)
 private fun Modifier.combinedClickableCompat(enabled: Boolean = true, onClick: () -> Unit, onLongClick: (() -> Unit)?) =
