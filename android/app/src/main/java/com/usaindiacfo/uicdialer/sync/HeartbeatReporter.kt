@@ -45,6 +45,7 @@ object HeartbeatReporter {
                     autostartIntent = SetupChecks.resolvedAutostart(context),
                     defaultDialer = DeviceHealth.defaultDialer(context),
                     sims = SimInfo.reports(context).takeIf { it.isNotEmpty() },
+                    backlogFgsError = prefs.backlogForegroundError,
                 ),
             )
         }.onFailure { lastSent.set(prev) }

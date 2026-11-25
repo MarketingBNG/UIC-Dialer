@@ -14,6 +14,7 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import com.usaindiacfo.uicdialer.container
 import com.usaindiacfo.uicdialer.data.api.DeviceConfig
 import java.util.concurrent.TimeUnit
 
@@ -127,6 +128,25 @@ object SyncScheduler {
         Thread { runCatching { restartIfWaiting(context, BACKLOG) { enqueueBacklog(context, it) } } }.start()
         enqueueCallLogTrigger(context, ExistingWorkPolicy.KEEP)
         enqueueCallLogSync(context, policy = ExistingWorkPolicy.REPLACE)
+    }
+
+    /**
+     * Called while the app is on screen: if older recordings are waiting and the backlog job is only waiting
+     * (retry delay or constraints), start it now so its foreground notification is allowed. Never interrupts a
+     * running job. Off the main thread; signed-out or disabled is a no-op.
+     */
+    fun kickBacklogFromForeground(context: Context) {
+        val ctx = context.applicationContext
+        Thread {
+            runCatching {
+                val c = ctx.container
+                val go = c.tokenStore.user.value != null && kotlinx.coroutines.runBlocking {
+                    c.deviceConfigRepository.current().backlogEnabled &&
+                        c.db.recordings().pendingCount(com.usaindiacfo.uicdialer.data.db.RecordingSource.BACKLOG) > 0
+                }
+                if (go) restartIfWaiting(ctx, BACKLOG) { enqueueBacklog(ctx, it) }
+            }
+        }.start()
     }
 
     /** Re-scan once a file that was still being written has settled. */

@@ -115,6 +115,8 @@ data class HeartbeatRequest(
     /** OEM autostart screen that resolves on this phone (package/class). */
     val autostartIntent: String? = null,
     val defaultDialer: String? = null,
+    /** Why Android refused the older-recordings progress notification (exception class); null when it worked. */
+    val backlogFgsError: String? = null,
     /** SIMs in the phone; null without phone-state permission (server keeps what it has). */
     val sims: List<SimReport>? = null,
 )

@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -96,6 +97,12 @@ fun TodayScreen(
     var resumeTick by remember { mutableIntStateOf(0) }
     val setupOk = remember(resumeTick) { SetupChecks.requiredGranted(context) }
     val notifOk = remember(resumeTick) { com.usaindiacfo.uicdialer.reminders.Notifications.canNotify(context) }
+    var recordingOff by remember { mutableStateOf(com.usaindiacfo.uicdialer.sync.RecordingCheck.isOff(context)) }
+    LaunchedEffect(resumeTick) {
+        recordingOff = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching { com.usaindiacfo.uicdialer.sync.RecordingCheck.run(context) }.getOrDefault(recordingOff)
+        }
+    }
     val call = rememberCaller()
 
     // The active call list is folded into the queue. A new key per start, so a stopped session is never reused.
@@ -126,6 +133,12 @@ fun TodayScreen(
             item(key = "sim") { SimNumberBanner(checkKey = resumeTick / 10) }
             if (!setupOk) item(key = "setup") {
                 Banner("Setup needs attention: calls can't be synced.", "Fix", MaterialTheme.colorScheme.errorContainer, onOpenSetup)
+            }
+            if (recordingOff) item(key = "recording-off") {
+                Banner(
+                    "Call recording looks off. " + com.usaindiacfo.uicdialer.sync.RecordingCheck.TEXT, "Open Phone",
+                    MaterialTheme.colorScheme.errorContainer,
+                ) { runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_DIAL).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }
             }
             if (!notifOk) item(key = "notif") {
                 Banner("Notifications are off, so you won't get follow-up reminders.", "Turn on", MaterialTheme.colorScheme.surface, onOpenSetup)

@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.usaindiacfo.uicdialer.sync.SyncScheduler
 import com.usaindiacfo.uicdialer.ui.AppNavigation
 import com.usaindiacfo.uicdialer.ui.theme.UicTheme
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,6 +25,13 @@ class MainActivity : ComponentActivity() {
             val open by openRequest.collectAsStateWithLifecycle()
             UicTheme { AppNavigation(container, openRequest = open, onOpenHandled = { openRequest.value = null }) }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // The app is on screen, so Android allows the backlog's foreground notification: start a waiting backlog
+        // run now. Started from the background it would get only ~10 minutes at a time.
+        SyncScheduler.kickBacklogFromForeground(applicationContext)
     }
 
     override fun onNewIntent(intent: Intent) {

@@ -169,7 +169,9 @@ class CallLogWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         if (ctx.container.tokenStore.user.value == null) return Result.success()
         val c = ctx.container
         val cfg = c.deviceConfigRepository.refreshIfStale()
-        return when (runCatching { CallLogSync(ctx, c).run(cfg) { isStopped } }.getOrElse { CallLogOutcome.RETRY }) {
+        val outcome = runCatching { CallLogSync(ctx, c).run(cfg) { isStopped } }.getOrElse { CallLogOutcome.RETRY }
+        runCatching { RecordingCheck.run(ctx) } // after each call: warn if recording looks off
+        return when (outcome) {
             CallLogOutcome.RETRY -> Result.retry()
             else -> Result.success()
         }

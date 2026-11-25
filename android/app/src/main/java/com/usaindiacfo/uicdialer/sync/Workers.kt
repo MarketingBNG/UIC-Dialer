@@ -9,6 +9,7 @@ import com.usaindiacfo.uicdialer.data.api.ApiException
 import com.usaindiacfo.uicdialer.data.db.RecordingSource
 import com.usaindiacfo.uicdialer.data.db.toRequest
 import java.io.IOException
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 private val Context.signedIn get() = container.tokenStore.user.value != null
@@ -75,11 +76,20 @@ class BacklogWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         if (!cfg.backlogEnabled) return Result.success()
         val engine = SyncEngine(ctx, c)
         val dao = c.db.recordings()
+        val prefs = SyncPrefs(ctx)
         return try {
-            engine.scan(cfg, System.currentTimeMillis() - cfg.backlogCutoffDays.coerceAtLeast(1) * DAY_MS)
-            engine.dedup(RecordingSource.BACKLOG) { isStopped }
-            // Visible progress notification (foreground): Android doesn't stop the run after ~10 minutes.
-            val showing = dao.pendingCount(RecordingSource.BACKLOG) > 0 && runCatching { showProgress(dao) }.isSuccess
+            // Foreground first (visible progress notification), so Android doesn't stop the run after ~10 minutes,
+            // and before the scan so a long first scan is covered too. Android 12+ refuses this when the run
+            // started with the app in the background; that is recorded and sent with the heartbeat.
+            val showing = (dao.pendingCount(RecordingSource.BACKLOG) > 0 || prefs.lastBacklogScanAt == 0L) && promote(dao, prefs)
+            val now = System.currentTimeMillis()
+            // The full folder scan finds old files, which don't change: once every few hours is enough. Rescanning
+            // on every run used up part of each short window before any upload started.
+            if (now - prefs.lastBacklogScanAt > SCAN_EVERY_MS) {
+                engine.scan(cfg, now - cfg.backlogCutoffDays.coerceAtLeast(1) * DAY_MS)
+                engine.dedup(RecordingSource.BACKLOG) { isStopped }
+                if (!isStopped) prefs.lastBacklogScanAt = now
+            }
             val outcome = kotlinx.coroutines.coroutineScope {
                 val progress = if (!showing) null else launch {
                     while (true) {
@@ -95,8 +105,16 @@ class BacklogWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
             }
             if (isStopped) recordStop(ctx)
             HeartbeatReporter.report(ctx)
+            val more = dao.pendingCount(RecordingSource.BACKLOG) > 0
             when {
                 outcome == UploadOutcome.SIGNED_OUT -> Result.success()
+                // Made progress but stopped (time limit) or hit a hiccup with files left: start a fresh run instead
+                // of retrying. A retry's linear backoff grows with every attempt (1, 2, 3 ... min) and never reset
+                // across a multi-day backlog, so later runs waited close to an hour each.
+                (outcome == UploadOutcome.RETRY || isStopped) && engine.uploadedThisRun > 0 && more -> {
+                    SyncScheduler.enqueueBacklog(ctx, ExistingWorkPolicy.APPEND_OR_REPLACE)
+                    Result.success()
+                }
                 outcome == UploadOutcome.RETRY || isStopped -> Result.retry()
                 else -> Result.success()
             }
@@ -105,10 +123,27 @@ class BacklogWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         }
     }
 
+    /** setForeground; false (and the reason saved) when Android refuses it. */
+    private suspend fun promote(dao: com.usaindiacfo.uicdialer.data.db.RecordingDao, prefs: SyncPrefs): Boolean = try {
+        showProgress(dao)
+        prefs.backlogForegroundError = null
+        true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        prefs.backlogForegroundError = e.javaClass.simpleName.take(80)
+        false
+    }
+
     private suspend fun showProgress(dao: com.usaindiacfo.uicdialer.data.db.RecordingDao) {
         val total = dao.totalCount(RecordingSource.BACKLOG)
         val left = dao.pendingCount(RecordingSource.BACKLOG)
         setForeground(BacklogNotification.foregroundInfo(applicationContext, total - left, total))
+    }
+
+    companion object {
+        /** How often a backlog run rescans the recorder folders for old files. */
+        const val SCAN_EVERY_MS = 6 * 3600_000L
     }
 }
 
@@ -125,6 +160,7 @@ class SweepWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx,
         runCatching { SyncEngine(ctx, c).scan(cfg, System.currentTimeMillis() - 7 * DAY_MS) }
         if (c.db.recordings().pendingCount() > 0) SyncScheduler.enqueueUpload(ctx, cfg)
         if (cfg.backlogEnabled) SyncScheduler.enqueueBacklog(ctx)
+        runCatching { RecordingCheck.run(ctx) }
         HeartbeatReporter.report(ctx, force = true)
         return Result.success()
     }
@@ -207,6 +243,10 @@ class ResumeWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx
         if (c.db.recordings().nextPending(RecordingSource.LIVE, 1).isNotEmpty()) {
             val cfg = c.deviceConfigRepository.current()
             SyncScheduler.restartIfWaiting(ctx, SyncScheduler.UPLOAD) { SyncScheduler.enqueueUpload(ctx, cfg, it) }
+        }
+        // Older recordings sitting in a retry delay: run them now.
+        if (c.deviceConfigRepository.current().backlogEnabled && c.db.recordings().pendingCount(RecordingSource.BACKLOG) > 0) {
+            SyncScheduler.restartIfWaiting(ctx, SyncScheduler.BACKLOG) { SyncScheduler.enqueueBacklog(ctx, it) }
         }
         if (c.db.pendingActivities().pendingCount() > 0) {
             SyncScheduler.restartIfWaiting(ctx, SyncScheduler.ACTIVITIES) { SyncScheduler.enqueueActivities(ctx, it) }

@@ -37,7 +37,8 @@ import java.io.IOException
 import java.time.Instant
 import java.util.TimeZone
 
-enum class UploadOutcome { DONE, RETRY, SIGNED_OUT }
+/** FILE_FAILED: this file failed (attempt counted); skip it this run but keep going with the others. */
+enum class UploadOutcome { DONE, FILE_FAILED, RETRY, SIGNED_OUT }
 
 /** Scan -> match -> dedup -> (compress) -> upload. Used by all sync workers; no Android lifecycle here. */
 class SyncEngine(private val context: Context, private val c: AppContainer) {
@@ -50,6 +51,10 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
 
     /** Set by a phone-wide stop (server 429, missing Contacts permission): end this run, WorkManager retries later. */
     @Volatile private var stopRun = false
+
+    /** Files handled (uploaded, already on the server, or skipped) by the last [upload] call. */
+    var uploadedThisRun = 0
+        private set
 
     data class ScanResult(val inserted: Int, val deferred: Boolean)
 
@@ -137,12 +142,14 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
         val tried = HashSet<Long>()
         var outcome = UploadOutcome.DONE
         stopRun = false
+        uploadedThisRun = 0
         while (!isStopped() && !stopRun) {
             val batch = dao.nextPending(source, parallel + tried.size).filter { it.id !in tried }.take(parallel)
             if (batch.isEmpty()) break
             val results = coroutineScope { batch.map { async { uploadOne(it, cfg) } }.awaitAll() }
-            batch.zip(results).forEach { (r, res) -> if (res != UploadOutcome.DONE) tried += r.id }
+            batch.zip(results).forEach { (r, res) -> if (res == UploadOutcome.DONE) uploadedThisRun++ else tried += r.id }
             if (UploadOutcome.SIGNED_OUT in results) return@withContext UploadOutcome.SIGNED_OUT
+            // One bad file (FILE_FAILED) no longer turns the whole run into a retry: that grew the backoff for hours.
             if (UploadOutcome.RETRY in results) outcome = UploadOutcome.RETRY
         }
         if (outcome == UploadOutcome.DONE && !isStopped()) prefs.lastSyncAt = System.currentTimeMillis()
@@ -219,7 +226,7 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
                 e.isTransient -> { keepTmp = true; dao.setStatus(r.id, RecordingStatus.PENDING, e.message); stopRun = true; UploadOutcome.RETRY }
                 // Resume offset out of step (e.g. two runs raced): the next run asks the server again.
                 e.code == 409 -> { keepTmp = true; dao.setStatus(r.id, RecordingStatus.PENDING, e.message); UploadOutcome.RETRY }
-                else -> { dao.markFailed(r.id, e.message); UploadOutcome.RETRY }
+                else -> { dao.markFailed(r.id, e.message); UploadOutcome.FILE_FAILED }
             }
         } catch (e: FileNotFoundException) {
             dao.setStatus(r.id, RecordingStatus.SKIPPED, "File missing"); UploadOutcome.DONE
@@ -235,7 +242,7 @@ class SyncEngine(private val context: Context, private val c: AppContainer) {
             withContext(NonCancellable) { dao.setStatus(r.id, RecordingStatus.PENDING, null) }
             throw e
         } catch (e: Exception) {
-            dao.markFailed(r.id, e.message ?: e.javaClass.simpleName); UploadOutcome.RETRY
+            dao.markFailed(r.id, e.message ?: e.javaClass.simpleName); UploadOutcome.FILE_FAILED
         } finally {
             if (!keepTmp) { tmp.delete(); tmpSha.delete() }
         }
