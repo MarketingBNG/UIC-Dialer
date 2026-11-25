@@ -61,35 +61,6 @@ export async function claimJobs(
     RETURNING "id", "call_id" AS "callId", "attempts", "kind", "priority", "external_ref" AS "batchId"`;
 }
 
-/**
- * Sarvam overflow: backlog transcribe jobs parked by the Fireflies monthly budget (reason BUDGET only).
- * Never live calls, never calls already uploaded to Fireflies (those minutes are paid for), and only
- * while an admin has switched sarvamOverflow on (checked by the caller).
- */
-export async function claimOverflowJobs(db: Db, workerId: string, limit: number): Promise<ClaimedJob[]> {
-  return db.$queryRaw<ClaimedJob[]>`
-    UPDATE "jobs" SET
-      "status" = 'RUNNING',
-      "locked_at" = now(),
-      "started_at" = now(),
-      "locked_by" = ${workerId},
-      "attempts" = "attempts" + 1,
-      "updated_at" = now()
-    WHERE "id" IN (
-      SELECT j."id" FROM "jobs" j JOIN "calls" c ON c."id" = j."call_id"
-      WHERE j."kind" = 'transcribe'
-        AND j."status" = 'WAITING_BUDGET'
-        AND j."last_error" LIKE 'WAITING_BUDGET: BUDGET%'
-        AND j."attempts" < ${MAX_ATTEMPTS}
-        AND c."source" <> 'LIVE'
-        AND NOT EXISTS (SELECT 1 FROM "fireflies_reservations" r WHERE r."call_id" = j."call_id" AND r."uploaded_at" IS NOT NULL)
-      ORDER BY j."priority" DESC, j."created_at" ASC
-      LIMIT ${limit}
-      FOR UPDATE OF j SKIP LOCKED
-    )
-    RETURNING "id", "call_id" AS "callId", "attempts", "kind", "priority", "external_ref" AS "batchId"`;
-}
-
 /** Stale jobs that already hit MAX_ATTEMPTS (e.g. a file that crashes the worker) stop here. */
 async function failExhaustedStaleJobs(db: Db): Promise<void> {
   await db.$executeRaw`

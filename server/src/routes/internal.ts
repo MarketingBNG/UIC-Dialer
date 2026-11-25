@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
 import { touchWorker } from "../alerts/checks.js";
-import { getCostSettings, translateCapped } from "../translation/cost.js";
+import { translateCapped } from "../translation/cost.js";
 import { getPrivacySettings } from "../privacy/settings.js";
 import { requireWorker } from "../auth/guards.js";
 import { HttpError, type Deps } from "../context.js";
@@ -13,7 +13,6 @@ import {
   SENTIMENTS,
   SPEAKER_ROLES,
   claimJobs,
-  claimOverflowJobs,
   completeJob,
   completeScore,
   completeSummary,
@@ -30,7 +29,7 @@ const Claim = z.object({
   limit: z.number().int().min(1).max(20).default(1),
   // Old workers send no kinds and only get transcription jobs.
   kinds: z.array(z.enum(JOB_KINDS)).min(1).max(JOB_KINDS.length).default(["transcribe"]),
-  // The worker's transcription provider. "sarvam" workers only get Fireflies-budget overflow jobs.
+  // The worker's transcription provider. Accepted for older workers; ignored.
   provider: z.string().max(50).optional(),
 });
 
@@ -94,21 +93,14 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
   const auth = { preHandler: requireWorker(deps), config: { rateLimit: false as const } };
 
   app.post("/internal/jobs/claim", auth, async (req) => {
-    const { workerId, limit, provider, kinds: asked } = Claim.parse(req.body);
+    const { workerId, limit, kinds: asked } = Claim.parse(req.body);
     let kinds = asked;
     await touchWorker(deps.db, workerId);
     // Claude monthly cap: translate and summarize jobs stay QUEUED until next month or a higher cap.
     const claude: readonly string[] = CLAUDE_KINDS;
     if (kinds.some((k) => claude.includes(k)) && (await translateCapped(deps.db))) kinds = kinds.filter((k) => !claude.includes(k));
     let jobs: Awaited<ReturnType<typeof claimJobs>> = [];
-    if (provider === "sarvam") {
-      // Never hand ordinary jobs to the paid overflow provider; translate jobs are still fine.
-      if (kinds.includes("transcribe") && (await getCostSettings(deps.db)).sarvamOverflow) {
-        jobs = await claimOverflowJobs(deps.db, workerId, limit);
-      }
-      const other = kinds.filter((k) => k !== "transcribe");
-      if (other.length > 0 && jobs.length < limit) jobs = jobs.concat(await claimJobs(deps.db, workerId, limit - jobs.length, other));
-    } else if (kinds.length > 0) {
+    if (kinds.length > 0) {
       jobs = await claimJobs(deps.db, workerId, limit, kinds);
     }
     if (jobs.length === 0) return { jobs: [] };

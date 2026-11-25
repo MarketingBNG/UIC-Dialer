@@ -26,12 +26,10 @@ export function claudeCostUsd(model: string, inputTokens: number, outputTokens: 
 export const CostSettings = z.object({
   // Monthly Claude translation cap; translate jobs wait (stay QUEUED) once month-to-date spend reaches it.
   translateBudgetUsd: z.number().min(0).max(1_000_000),
-  // Let a TRANSCRIBE_PROVIDER=sarvam worker take backlog jobs parked by the Fireflies monthly budget.
-  sarvamOverflow: z.boolean(),
 });
 export type CostSettings = z.infer<typeof CostSettings>;
 
-export const DEFAULT_COST_SETTINGS: CostSettings = { translateBudgetUsd: 500, sarvamOverflow: false };
+export const DEFAULT_COST_SETTINGS: CostSettings = { translateBudgetUsd: 500 };
 
 export async function getCostSettings(db: Tx): Promise<CostSettings> {
   const row = await db.setting.findUnique({ where: { id: 1 }, select: { costs: true } });
@@ -93,6 +91,5 @@ export async function translationUsage(db: Db, now = new Date()) {
     summarizedThisMonth: monthSummaries,
     avgCostUsd: monthJobs + monthSummaries > 0 ? Math.round((spent / (monthJobs + monthSummaries)) * 10000) / 10000 : null,
     queuedJobs: queued,
-    sarvamOverflow: s.sarvamOverflow,
   };
 }

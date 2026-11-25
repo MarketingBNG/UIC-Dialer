@@ -8,8 +8,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TranslationCostTest {
-    private fun usage(spent: Double = 12.5, budget: Double = 500.0, capped: Boolean = false, overflow: Boolean = false) =
-        TranslationUsage(month = "2026-11", spentUsd = spent, budgetUsd = budget, pct = spent / budget * 100, capped = capped, sarvamOverflow = overflow)
+    private fun usage(spent: Double = 12.5, budget: Double = 500.0, capped: Boolean = false) =
+        TranslationUsage(month = "2026-11", spentUsd = spent, budgetUsd = budget, pct = spent / budget * 100, capped = capped)
 
     @Test fun summaryShowsCap() {
         assertEquals("$12.50 of $500.00 (2.5%)", translationSummary(usage()))
@@ -22,7 +22,6 @@ class TranslationCostTest {
         assertEquals("500", form.budget)
         assertEquals(CostSettingsPatch(), form.patch(u))
         assertEquals(CostSettingsPatch(translateBudgetUsd = 750.5), form.copy(budget = "750.5").patch(u))
-        assertEquals(CostSettingsPatch(sarvamOverflow = true), form.copy(overflow = true).patch(u))
     }
 
     @Test fun invalidBudgetGivesNoPatch() {

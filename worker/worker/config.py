@@ -34,6 +34,8 @@ class Settings:
     openai_model: str
     fireflies_api_key: str | None = None
     fireflies_max_wait_s: float = 3600
+    # Fireflies jobs mostly wait on Fireflies (no CPU), so many more run at once than local transcription.
+    fireflies_concurrency: int = 20
     # English translation with Claude (off when no key)
     anthropic_api_key: str | None = None
     translate_model: str = "claude-opus-5-5"
@@ -45,10 +47,6 @@ class Settings:
     # AI call scores (score jobs). Off unless SCORE_ENABLED; the model defaults to the summary model.
     score_enabled: bool = False
     score_model: str = "claude-sonnet-5-5"
-    # Sarvam (overflow when the Fireflies budget runs out)
-    sarvam_api_key: str | None = None
-    sarvam_model: str = "saaras:v3"
-    sarvam_language: str = "unknown"
     # Re-encode large transcribed recordings to small AAC (needs ffmpeg on PATH)
     compress_enabled: bool = True
 
@@ -77,6 +75,7 @@ class Settings:
             fireflies_api_key=e.get("FIREFLIES_API_KEY") or None,
             # Give up waiting for one Fireflies transcript after this long (job is retried later).
             fireflies_max_wait_s=float(e.get("FIREFLIES_MAX_WAIT_S", "3600")),
+            fireflies_concurrency=max(1, int(e.get("FIREFLIES_CONCURRENCY", "20"))),
             anthropic_api_key=e.get("ANTHROPIC_API_KEY") or None,
             translate_model=e.get("TRANSLATE_MODEL") or "claude-opus-5-5",
             # Backlog translations: one Message Batch per this many calls, or after this long.
@@ -88,9 +87,5 @@ class Settings:
             # Scores are only queued when the server has SCORE_ENABLED (or an admin backfill); off by default.
             score_enabled=(e.get("SCORE_ENABLED") or "false").lower() in ("true", "1", "yes"),
             score_model=e.get("SCORE_MODEL") or e.get("SUMMARY_MODEL") or "claude-sonnet-5-5",
-            sarvam_api_key=e.get("SARVAM_API_KEY") or None,
-            sarvam_model=e.get("SARVAM_MODEL") or "saaras:v3",
-            # BCP-47 code, or "unknown" to auto-detect per chunk.
-            sarvam_language=e.get("SARVAM_LANGUAGE") or "unknown",
             compress_enabled=(e.get("COMPRESS_ENABLED") or "true").lower() not in ("false", "0", "no"),
         )

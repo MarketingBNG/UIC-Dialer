@@ -349,7 +349,7 @@ model Setting {
   latestApp    Json?    @map("latest_app")
   // Fireflies budget settings + hard-stop state (see src/fireflies/settings.ts).
   fireflies    Json?
-  // Claude translation cap + Sarvam overflow switch (see src/translation/cost.ts).
+  // Claude translation cap (see src/translation/cost.ts).
   costs        Json?
   // Retention + PII masking (see src/privacy/settings.ts).
   privacy      Json?

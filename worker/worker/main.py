@@ -43,7 +43,7 @@ class Api:
 
     def __init__(self, settings: Settings, transport: httpx.BaseTransport | None = None) -> None:
         self.worker_id = settings.worker_id
-        # Sent with claims so the API can route: a "sarvam" worker only gets Fireflies-budget overflow jobs.
+        # Sent with claims for the server logs (the server ignores it).
         self.provider = settings.provider
         self.http = httpx.Client(
             base_url=settings.api_url,
@@ -236,7 +236,7 @@ def process_job(api: Api, provider: Provider, job: dict, language: str | None) -
         if job.get("maskPii"):
             # Admin privacy setting: Aadhaar / card numbers never reach the database.
             text, segments = mask_text(text), mask_segments(segments)
-            # Word-level timings (Sarvam) split a number across words, so masking each word misses it:
+            # Word-level timings split a number across words, so masking each word misses it:
             # drop the word list wherever the segment text needed masking.
             segments = [{k: v for k, v in m.items() if k != "words"}
                         if isinstance(m, dict) and isinstance(o, dict) and m.get("text") != o.get("text") else m
@@ -247,6 +247,9 @@ def process_job(api: Api, provider: Provider, job: dict, language: str | None) -
         api.post_result(job_id, payload)
     log.info("job done", job_id=job_id, call_id=job["callId"], seconds=round(time.monotonic() - started, 1),
              chars=len(text))
+
+
+CLAIM_MAX = 20  # the API accepts at most 20 jobs per claim
 
 
 def run(settings: Settings) -> None:
@@ -262,7 +265,8 @@ def run(settings: Settings) -> None:
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     log.info("worker started", worker_id=settings.worker_id, provider=provider.name, api=settings.api_url,
-             concurrency=settings.concurrency, translate=bool(settings.anthropic_api_key))
+             concurrency=settings.fireflies_concurrency if getattr(provider, "remote", False) else settings.concurrency,
+             translate=bool(settings.anthropic_api_key))
     translator = None
     if settings.anthropic_api_key:
         from .translator import Translator
@@ -294,11 +298,14 @@ def run(settings: Settings) -> None:
 
     # Up to `concurrency` jobs run at once; we only claim as many as we have free slots,
     # so other workers can take the rest of the queue.
+    # A remote provider (Fireflies) spends each job waiting on the remote side, holding a slot for up to an
+    # hour, so it gets its own, larger limit; otherwise 4 slow transcripts stall the whole queue.
+    slots = settings.fireflies_concurrency if getattr(provider, "remote", False) else settings.concurrency
     running: set[Future] = set()
     idle = 1.0
-    with ThreadPoolExecutor(max_workers=settings.concurrency, thread_name_prefix="job") as pool:
+    with ThreadPoolExecutor(max_workers=slots, thread_name_prefix="job") as pool:
         while not stopping or running:
-            free = settings.concurrency - len(running)
+            free = min(slots - len(running), CLAIM_MAX)
             jobs: list[dict] = []
             if free > 0 and not stopping:
                 try:

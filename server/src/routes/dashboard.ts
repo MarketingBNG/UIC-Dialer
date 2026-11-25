@@ -33,6 +33,8 @@ const ListQuery = z.object({
   q: z.string().trim().max(200).optional(),
   phone: z.string().trim().max(40).optional(),
   userId: z.uuid().optional(),
+  /** Calls with leads (contacts) owned by this user. */
+  ownerId: z.uuid().optional(),
   direction: z.enum(["INCOMING", "OUTGOING", "MISSED", "UNKNOWN"]).optional(),
   status: z.enum(["PENDING_UPLOAD", "UPLOADED", "TRANSCRIBING", "TRANSCRIBED", "FAILED", "NO_RECORDING"]).optional(),
   // v=2: include call-log-only calls (status NO_RECORDING); old apps' Kotlin enum can't decode that status.
@@ -109,6 +111,10 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     const where: Prisma.CallWhereInput = { AND: [callScope(currentUser(req))] };
     const and = where.AND as Prisma.CallWhereInput[];
     if (q.userId) and.push({ userId: q.userId });
+    if (q.ownerId) {
+      const leads = await deps.db.contact.findMany({ where: { ownerId: q.ownerId }, select: { phoneE164: true } });
+      and.push({ phoneE164: { in: leads.map((l) => l.phoneE164) } });
+    }
     if (q.direction) and.push({ direction: q.direction });
     if (q.status) and.push({ status: q.status });
     if (Number(q.v ?? "1") < 2) and.push({ status: { not: "NO_RECORDING" } });
@@ -155,7 +161,18 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     const more = rows.length > q.limit;
     const page = more ? rows.slice(0, q.limit) : rows;
     const from = await fromNumbers(deps.db, page);
-    const items = page.map(({ score, deviceId: _d, simKey: _k, ...c }, i) => ({ ...c, ...from[i], score: score?.overall ?? null }));
+    // The lead (CRM contact) each call belongs to, by number: its real name and owner.
+    const phones = [...new Set(page.map((c) => c.phoneE164).filter((p): p is string => !!p))];
+    const leads = phones.length
+      ? await deps.db.contact.findMany({
+          where: { phoneE164: { in: phones } },
+          select: { id: true, phoneE164: true, name: true, company: true, owner: { select: { id: true, name: true, email: true } } },
+        })
+      : [];
+    const leadBy = new Map(leads.map(({ phoneE164, ...l }) => [phoneE164, l]));
+    const items = page.map(({ score, deviceId: _d, simKey: _k, ...c }, i) => ({
+      ...c, ...from[i], score: score?.overall ?? null, lead: (c.phoneE164 && leadBy.get(c.phoneE164)) || null,
+    }));
     return { items, nextCursor: more ? items.at(-1)?.id : null };
   });
 
@@ -495,7 +512,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
 
   app.get("/api/translation/usage", managers, async () => translationUsage(deps.db));
 
-  /** Claude monthly cap + Sarvam overflow switch. Raising the cap lets QUEUED translate jobs run on the next claim. */
+  /** Claude monthly cap. Raising the cap lets QUEUED translate jobs run on the next claim. */
   app.put("/api/settings/costs", admins, async (req) => {
     const patch = CostSettings.partial().parse(req.body);
     const current = await getCostSettings(deps.db);

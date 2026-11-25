@@ -120,7 +120,7 @@ describe("monthly cap", () => {
 
   it("defaults to a 500 USD cap; usage readable by managers, writable only by admins", async () => {
     const u = await translationUsage(t.db);
-    expect(u).toMatchObject({ budgetUsd: 500, capped: false, sarvamOverflow: false });
+    expect(u).toMatchObject({ budgetUsd: 500, capped: false });
     const m = await t.sessionFor(managerEmail);
     expect((await t.app.inject({ method: "GET", url: "/api/translation/usage", headers: m })).statusCode).toBe(200);
     expect((await t.app.inject({ method: "PUT", url: "/api/settings/costs", headers: m, payload: { translateBudgetUsd: 1 } })).statusCode).toBe(403);
@@ -131,36 +131,21 @@ describe("monthly cap", () => {
   });
 });
 
-describe("Sarvam overflow claim", () => {
-  async function parked(source: "LIVE" | "BACKLOG", reason: string) {
-    const call = await newCall("UPLOADED", source);
-    return t.db.job.create({
-      data: { callId: call.id, status: "WAITING_BUDGET", lastError: `WAITING_BUDGET: ${reason}`, runAfter: new Date(Date.now() + 86400_000) },
-    });
-  }
+describe("removed overflow provider", () => {
+  it("old stored settings still parse; a worker sending a provider gets ordinary jobs only", async () => {
+    await setCosts({ translateBudgetUsd: 500, sarvamOverflow: true });
+    const u = await translationUsage(t.db);
+    expect(u.budgetUsd).toBe(500);
+    expect(u).not.toHaveProperty("sarvamOverflow");
 
-  it("only budget-parked backlog jobs, only when switched on, never already-uploaded calls", async () => {
-    const ok = await parked("BACKLOG", "BUDGET 900+3 min would exceed");
-    await parked("LIVE", "BUDGET 900+3 min would exceed");
-    await parked("BACKLOG", "BLOCKED Fireflies hard stop");
-    await parked("BACKLOG", "BATCH_GATE 20/20 approved");
-    const uploaded = await parked("BACKLOG", "BUDGET x");
-    await t.db.firefliesReservation.create({
-      data: { callId: uploaded.callId, month: "2026-11", minutes: 3, live: false, status: "COMMITTED", uploadedAt: new Date() },
+    const call = await newCall("UPLOADED", "BACKLOG");
+    const parked = await t.db.job.create({
+      data: { callId: call.id, status: "WAITING_BUDGET", lastError: "WAITING_BUDGET: BUDGET x", runAfter: new Date(Date.now() + 86400_000) },
     });
     const ordinary = await t.db.job.create({ data: { callId: (await newCall()).id } });
-
-    // Off by default: a sarvam worker gets nothing, not even ordinary QUEUED jobs.
-    expect((await claim({ workerId: "s1", limit: 10, provider: "sarvam" })).json().jobs).toEqual([]);
-
-    await setCosts({ sarvamOverflow: true });
     const got = (await claim({ workerId: "s1", limit: 10, provider: "sarvam" })).json().jobs;
-    expect(got.map((j: { jobId: string }) => j.jobId)).toEqual([ok.id]);
-    expect((await t.db.job.findUniqueOrThrow({ where: { id: ordinary.id } })).status).toBe("QUEUED");
-
-    // Workers without a provider behave as before.
-    const plain = (await claim({ workerId: "w1", limit: 10 })).json().jobs;
-    expect(plain.map((j: { jobId: string }) => j.jobId)).toEqual([ordinary.id]);
+    expect(got.map((j: { jobId: string }) => j.jobId)).toEqual([ordinary.id]);
+    expect((await t.db.job.findUniqueOrThrow({ where: { id: parked.id } })).status).toBe("WAITING_BUDGET");
   });
 });
 

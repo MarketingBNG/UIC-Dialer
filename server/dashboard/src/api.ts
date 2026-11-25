@@ -37,6 +37,8 @@ export interface CallItem {
   transcript: { language: string | null } | null;
   /** Overall AI score (0..100); absent on older servers. */
   score?: number | null;
+  /** The lead (CRM contact) with this number: its name and owner; null when the number isn't a lead. */
+  lead?: { id: string; name: string | null; company: string | null; owner: UserRef | null } | null;
 }
 export interface CallPage {
   items: CallItem[];
@@ -168,11 +170,9 @@ export interface TranslationUsage extends TranslationAlert {
   summarizedThisMonth?: number;
   avgCostUsd: number | null;
   queuedJobs: number;
-  sarvamOverflow: boolean;
 }
 export interface CostSettingsPatch {
   translateBudgetUsd?: number;
-  sarvamOverflow?: boolean;
 }
 export interface Throughput {
   jobsPerHour: number;

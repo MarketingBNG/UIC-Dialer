@@ -1,6 +1,6 @@
-"""Scored transcription eval: Fireflies vs Sarvam (and any cached provider) against hand-checked references.
+"""Scored transcription eval: Fireflies (and any cached provider) against hand-checked references.
 
-uv run python scripts/eval_transcripts.py --refs REFS_DIR --audio AUDIO_DIR --out OUT_DIR [--run sarvam] [--judge]
+uv run python scripts/eval_transcripts.py --refs REFS_DIR --out OUT_DIR [--judge]
 
 REFS_DIR holds one <id>.json per call, checked by a person:
     {"id": "...", "audio": "file.m4a", "text": "<original-language transcript>", "en": "<English>",
@@ -8,14 +8,12 @@ REFS_DIR holds one <id>.json per call, checked by a person:
 The reference `text` must be in the SAME script the providers output (e.g. both Devanagari, or both
 romanized). Otherwise WER is meaningless; CER is printed too, but compare like with like.
 
---run sarvam   transcribe each call with Sarvam (PAID: needs SARVAM_API_KEY and spend approval).
 --judge        score each provider's English with Claude against `en` (PAID: needs ANTHROPIC_API_KEY).
-Results are cached in OUT_DIR (<id>.<provider>.json), so re-runs only do missing work. Writes OUT_DIR/scores.json.
+Other providers' output is read from OUT_DIR (<id>.<provider>.json). Writes OUT_DIR/scores.json.
 """
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -67,37 +65,14 @@ def score(refs: list[dict], out: Path, judge=None) -> dict:
     return {"summary": summary, "rows": rows}
 
 
-def run_sarvam(refs: list[dict], audio_dir: Path, out: Path) -> None:
-    from worker.config import Settings
-    from worker.providers.sarvam import SarvamProvider
-
-    env = dict(os.environ)
-    env.setdefault("WORKER_TOKEN", "x" * 32)  # not used: the eval never talks to the API server
-    provider = SarvamProvider(Settings.from_env(env))
-    for ref in refs:
-        dest = out / f"{ref['id']}.sarvam.json"
-        if dest.exists():
-            continue
-        t = provider.transcribe(audio_dir / ref["audio"], None, None)
-        dest.write_text(json.dumps({"text": t.text, "segments": t.segments, "language": t.language},
-                                   ensure_ascii=False, indent=1), encoding="utf-8")
-        print("sarvam", ref["id"], len(t.text), "chars", flush=True)
-
-
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--refs", type=Path, required=True)
-    ap.add_argument("--audio", type=Path)
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--run", choices=["sarvam"], action="append", default=[])
     ap.add_argument("--judge", action="store_true")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     refs = load_refs(a.refs)
-    if "sarvam" in a.run:
-        if not a.audio:
-            ap.error("--run sarvam needs --audio")
-        run_sarvam(refs, a.audio, a.out)
     judge = None
     if a.judge:
         import anthropic

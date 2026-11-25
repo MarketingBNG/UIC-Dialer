@@ -363,14 +363,12 @@ data class TranslationUsage(
     val summarizedThisMonth: Int? = null,
     val avgCostUsd: Double? = null,
     val queuedJobs: Int = 0,
-    val sarvamOverflow: Boolean = false,
 )
 
 /** Null fields are not sent; the server applies only what is present. */
 @Serializable
 data class CostSettingsPatch(
     val translateBudgetUsd: Double? = null,
-    val sarvamOverflow: Boolean? = null,
 )
 
 /** Transcription throughput and backlog ETA from GET /api/stats. */

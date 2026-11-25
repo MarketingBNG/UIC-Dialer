@@ -12,7 +12,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,21 +38,19 @@ internal fun translationSummary(u: TranslationUsage): String =
         if (u.capped) " - cap reached, translations paused" else ""
 
 /** Text-backed form; ranges match the server's zod schema. Only changed fields go in the patch. */
-internal data class CostForm(val budget: String, val overflow: Boolean) {
+internal data class CostForm(val budget: String) {
     val budgetN get() = budget.trim().takeIf { Regex("""^\d+(\.\d{1,2})?$""").matches(it) }?.toDouble()?.takeIf { it <= 1_000_000 }
 
     fun patch(u: TranslationUsage): CostSettingsPatch? {
         val b = budgetN ?: return null
         return CostSettingsPatch(
             translateBudgetUsd = b.takeIf { it != u.budgetUsd },
-            sarvamOverflow = overflow.takeIf { it != u.sarvamOverflow },
         )
     }
 
     companion object {
         fun of(u: TranslationUsage) = CostForm(
             budget = if (u.budgetUsd % 1.0 == 0.0) u.budgetUsd.toLong().toString() else u.budgetUsd.toString(),
-            overflow = u.sarvamOverflow,
         )
     }
 }
@@ -82,7 +79,7 @@ internal class TranslationPanelState {
     }
 }
 
-/** "Translation spend this month" card, next to the Fireflies one; cap + overflow form for admins. */
+/** "Translation spend this month" card, next to the Fireflies one; cap form for admins. */
 @Composable
 internal fun TranslationPanel(isAdmin: Boolean, state: TranslationPanelState, onSave: (CostSettingsPatch) -> Unit) {
     Card(Modifier.fillMaxWidth()) {
@@ -113,7 +110,6 @@ internal fun TranslationPanel(isAdmin: Boolean, state: TranslationPanelState, on
                     Text("${u.translatedThisMonth} call(s) translated$avg", style = MaterialTheme.typography.bodySmall)
                     u.summarizedThisMonth?.let { Text("$it call(s) summarized", style = MaterialTheme.typography.bodySmall) }
                     if (u.queuedJobs > 0) Text("${u.queuedJobs} waiting", style = MaterialTheme.typography.bodySmall)
-                    Text("Sarvam overflow: ${if (u.sarvamOverflow) "On" else "Off"}", style = MaterialTheme.typography.bodySmall)
                     if (isAdmin) {
                         HorizontalDivider()
                         CostFormView(u, state, onSave)
@@ -142,10 +138,6 @@ private fun CostFormView(u: TranslationUsage, state: TranslationPanelState, onSa
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
         modifier = Modifier.fillMaxWidth(),
     )
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("Send overflow backlog to Sarvam", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        Switch(checked = form.overflow, onCheckedChange = { setForm(form.copy(overflow = it)) })
-    }
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         Button(onClick = { patch?.let(onSave) }, enabled = dirty && !state.busy) { Text("Save") }
         TextButton(onClick = { state.edit = null }, enabled = form != current) { Text("Discard") }
