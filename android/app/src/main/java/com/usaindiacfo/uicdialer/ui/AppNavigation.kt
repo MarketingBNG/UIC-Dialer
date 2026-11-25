@@ -1,5 +1,15 @@
 package com.usaindiacfo.uicdialer.ui
 
+import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.navigation.NavBackStackEntry
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -98,6 +108,20 @@ object OpenTargets {
     const val TODAY = "today"
     const val CONTACT = "contact"
 }
+
+// Screen transitions: quick and calm. Tabs cross-fade; opening a screen slides it in a little from the right
+// (back reverses it). Android's default is a slow 700 ms fade, which made the app feel sluggish.
+private val Emphasized = CubicBezierEasing(0.2f, 0f, 0f, 1f)
+private const val SHIFT = 10 // fraction divisor: slide by 1/10 of the width
+private val TAB_IN = fadeIn(tween(150, delayMillis = 40))
+private val TAB_OUT = fadeOut(tween(90))
+private val PUSH_IN: EnterTransition = slideInHorizontally(tween(250, easing = Emphasized)) { it / SHIFT } + fadeIn(tween(200))
+private val PUSH_OUT: ExitTransition = slideOutHorizontally(tween(250, easing = Emphasized)) { -it / SHIFT } + fadeOut(tween(150))
+private val POP_IN: EnterTransition = slideInHorizontally(tween(250, easing = Emphasized)) { -it / SHIFT } + fadeIn(tween(200))
+private val POP_OUT: ExitTransition = slideOutHorizontally(tween(250, easing = Emphasized)) { it / SHIFT } + fadeOut(tween(150))
+
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.isTabSwitch() =
+    initialState.destination.route in TAB_ROUTES && targetState.destination.route in TAB_ROUTES
 
 private data class NavTab(val route: String, val label: String, val icon: ImageVector)
 
@@ -200,6 +224,10 @@ fun AppNavigation(
             navController = nav,
             startDestination = start,
             modifier = Modifier.padding(padding),
+            enterTransition = { if (isTabSwitch()) TAB_IN else PUSH_IN },
+            exitTransition = { if (isTabSwitch()) TAB_OUT else PUSH_OUT },
+            popEnterTransition = { if (isTabSwitch()) TAB_IN else POP_IN },
+            popExitTransition = { if (isTabSwitch()) TAB_OUT else POP_OUT },
         ) {
             composable(Routes.SIGN_IN) {
                 SignInScreen(onSignedIn = {

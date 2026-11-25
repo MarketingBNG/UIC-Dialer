@@ -2,6 +2,12 @@ package com.usaindiacfo.uicdialer.ui.today
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -167,10 +173,20 @@ fun TodayScreen(
             state.error?.let { item(key = "error") { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) } }
 
             item(key = "next") {
+                // Next call changes (Done, Snooze, called): the new card rises in as the old one fades.
+                AnimatedContent(
+                    targetState = head,
+                    contentKey = { h -> if (h is QueueHead.Row) h.row.key else h::class },
+                    transitionSpec = {
+                        (fadeIn(tween(200, delayMillis = 60)) + slideInVertically(tween(250)) { it / 12 }) togetherWith fadeOut(tween(120))
+                    },
+                    label = "next",
+                ) { head ->
                 when (head) {
                     is QueueHead.Row -> RowNextUp(head.row, vm, call, onOpenContact)
                     QueueHead.ListItem -> listVm?.let { ListNextUp(it, call, onOpenContact, onStop = stopList) }
                     QueueHead.Empty -> if (!state.loading) EmptyCard()
+                }
                 }
             }
             if (head is QueueHead.Row && listVm != null) item(key = "list-later") {
@@ -189,7 +205,7 @@ fun TodayScreen(
                 )
             }
             val shown = if (showAll) upNext else upNext.take(UP_NEXT_SHOWN)
-            items(shown, key = { it.key }) { row -> UpNextRow(row, vm, call, onOpenContact) }
+            items(shown, key = { it.key }) { row -> Box(Modifier.animateItem()) { UpNextRow(row, vm, call, onOpenContact) } }
             if (upNext.size > UP_NEXT_SHOWN) item(key = "more") {
                 TextButton(onClick = { showAll = !showAll }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) {
                     Text(if (showAll) "Show less" else "Show all (${upNext.size})")
