@@ -85,17 +85,16 @@ fun SyncStatus(onOpenSetup: () -> Unit) {
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Stat(CallStatusText.of(RecordingStatus.UPLOADED).label, uploaded, MaterialTheme.colorScheme.primary, Modifier.weight(1f))
-            Stat(CallStatusText.of(RecordingStatus.PENDING).label, pending, MaterialTheme.colorScheme.tertiary, Modifier.weight(1f))
-            Stat(CallStatusText.of(RecordingStatus.FAILED).label, failed, MaterialTheme.colorScheme.error, Modifier.weight(1f))
-        }
-
+        Text(
+            "$uploaded uploaded" + (if (pending > 0) " · $pending waiting" else "") + (if (failed > 0) " · $failed failed" else ""),
+            style = MaterialTheme.typography.titleSmall,
+        )
         Text(
             "Last upload: " + (lastUpload?.let {
                 DateUtils.getRelativeTimeSpanString(it, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS)
             } ?: "never"),
-            style = MaterialTheme.typography.bodyMedium,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
         if (backlogLeft > 0 && total > 0) {
@@ -105,10 +104,6 @@ fun SyncStatus(onOpenSetup: () -> Unit) {
                     LinearProgressIndicator(
                         progress = { (total - backlogLeft).toFloat() / total },
                         modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text(
-                        "These upload in the background.",
-                        style = MaterialTheme.typography.bodySmall,
                     )
                 }
             }

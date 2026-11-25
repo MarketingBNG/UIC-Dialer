@@ -83,46 +83,27 @@ fun SettingsScreen(onOpenSetup: () -> Unit, onOpenGuide: () -> Unit, onOpenAdmin
                         user?.let { Text(it.email, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                     }
                 }
-                user?.let { Text("Role: ${it.role.name.lowercase().replaceFirstChar(Char::uppercase)}") }
-                me?.team?.let { Text("Team: $it") }
-                OutlinedButton(
-                    onClick = { confirmSignOut = true },
-                    enabled = !signingOut,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
-                ) { Text(if (signingOut) "Signing out..." else "Sign out") }
             }
 
             Section("Sync") { SyncStatus(onOpenSetup) }
 
-            NavRow("Guided setup", "Step-by-step: permissions, recording, battery", onOpenGuide)
-            NavRow("Setup checks", "Permissions and phone settings the app needs", onOpenSetup)
+            Section("Morning summary") { RemindersSettings() }
+
+            NavRow("Phone setup", "Fix permissions and phone settings", onOpenSetup)
             if (user?.canManage == true) NavRow("Admin", "Users, devices, server settings", onOpenAdmin)
 
-            Section("Reminders") { RemindersSettings() }
+            OutlinedButton(
+                onClick = { confirmSignOut = true },
+                enabled = !signingOut,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            ) { Text(if (signingOut) "Signing out..." else "Sign out") }
 
-            Section("My excluded numbers") {
-                if (config.excludedNumbers.isEmpty()) Text("None. All calls are synced.")
-                else config.excludedNumbers.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                Text(
-                    "Calls with these numbers are never uploaded. Managed by your admin on the dashboard.",
-                    style = MaterialTheme.typography.bodySmall,
-                )
-            }
-
-            Section("Network") {
-                Text("New calls: " + if (config.liveNetwork == "wifi") "Wi-Fi only" else "Wi-Fi or mobile data")
-                Text(
-                    if (config.backlogEnabled) "Older recordings (last ${config.backlogCutoffDays} days): upload in the background"
-                    else "Older recordings: not synced",
-                )
-                if (config.compressAudio) Text("Audio is compressed before upload to save data.")
-                if (config.businessOnly) Text("Business calls only: calls with numbers saved in your contacts are not synced, unless the number is on the company's client list.")
-                Text("Set by your admin.", style = MaterialTheme.typography.bodySmall)
-            }
-
-            Section("About") {
-                Text("UIC Dialer ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-            }
+            Text(
+                "UIC Dialer ${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            )
         }
     }
 
@@ -155,11 +136,9 @@ private fun RemindersSettings() {
         store.summaryHour = hour
         com.usaindiacfo.uicdialer.reminders.Reminders.scheduleMorning(context, androidx.work.ExistingWorkPolicy.REPLACE)
     }
-    Text("You get a notification when it's time to call a client back.", style = MaterialTheme.typography.bodyMedium)
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text("Morning summary", style = MaterialTheme.typography.titleSmall)
-            Text("\"You have 5 follow-ups today\"", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Today's follow-ups, each morning", style = MaterialTheme.typography.bodyMedium)
         }
         androidx.compose.material3.Switch(checked = enabled, onCheckedChange = { enabled = it; save() })
     }
