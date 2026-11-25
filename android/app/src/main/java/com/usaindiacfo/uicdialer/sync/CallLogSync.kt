@@ -171,6 +171,7 @@ class CallLogWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         val cfg = c.deviceConfigRepository.refreshIfStale()
         val outcome = runCatching { CallLogSync(ctx, c).run(cfg) { isStopped } }.getOrElse { CallLogOutcome.RETRY }
         runCatching { RecordingCheck.run(ctx) } // after each call: warn if recording looks off
+        runCatching { com.usaindiacfo.uicdialer.dialer.ExternalCallPrompt.run(ctx) } // outcome for phone-app calls
         return when (outcome) {
             CallLogOutcome.RETRY -> Result.retry()
             else -> Result.success()

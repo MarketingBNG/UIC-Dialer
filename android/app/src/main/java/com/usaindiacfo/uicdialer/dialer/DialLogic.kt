@@ -29,7 +29,8 @@ object DialLogic {
     /** The outgoing call the rep made after tapping Call: same number, at or after the dial (earliest first). */
     fun matchDial(entries: List<CallLogEntry>, number: String, dialedAtMs: Long): CallLogEntry? =
         entries.asSequence()
-            .filter { it.type == CallLog.Calls.OUTGOING_TYPE }
+            // Incoming too: a call answered in the phone app becomes a pending dial at its exact start time.
+            .filter { it.type == CallLog.Calls.OUTGOING_TYPE || (it.type == CallLog.Calls.INCOMING_TYPE && it.dateMs == dialedAtMs) }
             .filter { it.dateMs >= dialedAtMs - DIAL_SLACK_MS }
             .filter { sameNumber(it.number, number) }
             .minByOrNull { it.dateMs }
