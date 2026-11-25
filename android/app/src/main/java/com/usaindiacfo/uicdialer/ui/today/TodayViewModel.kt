@@ -19,6 +19,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import java.io.IOException
 import java.time.Instant
@@ -98,13 +101,17 @@ internal fun FollowUpItem.toTodayRow(): TodayRow? {
 class TodayViewModel(private val c: AppContainer) : ViewModel() {
     private val _state = MutableStateFlow(TodayState())
     val state: StateFlow<TodayState> = _state.asStateFlow()
+    private var job: Job? = null
 
     init {
+        // Show the saved list at once; the screen's refresh() then updates it from the server.
+        val (overdue, today) = splitToday(cachedRows())
+        _state.value = TodayState(overdue = overdue, today = today)
         // Outcomes are queued on the phone; reload once one reaches the server so the list updates.
         viewModelScope.launch {
-            var last = Int.MAX_VALUE
+            var last: Int? = null
             c.db.pendingActivities().observePendingCount().collect { n ->
-                if (n < last) refresh()
+                if (last != null && n < last!!) refresh()
                 last = n
             }
         }
@@ -122,8 +129,18 @@ class TodayViewModel(private val c: AppContainer) : ViewModel() {
         c.contactCache.today?.items?.mapNotNull { it.toTodayRow() }
             ?: c.contactCache.followUps.mapNotNull { it.toTodayRow() }
 
-    fun refresh() = viewModelScope.launch {
+    /** Reloads from the server. A newer call replaces one still running, so bursts of refreshes cost one load. */
+    fun refresh() {
+        job?.cancel()
+        job = viewModelScope.launch { load() }
+    }
+
+    private suspend fun load() = coroutineScope {
         _state.update { it.copy(loading = true) }
+        // The three requests run at the same time.
+        // Targets and call lists are extras: older servers (404) or offline just hide them.
+        val meAsync = async { runCatching { c.apiClient.meToday() }.getOrNull() }
+        val listsAsync = async { runCatching { c.apiClient.myCallLists().items }.getOrNull() }
         val (rows, error) = try {
             fetchRows() to null
         } catch (e: IOException) {
@@ -131,9 +148,8 @@ class TodayViewModel(private val c: AppContainer) : ViewModel() {
             shown.ifEmpty { cachedRows() } to friendlyError(e)
         }
         val (overdue, today) = splitToday(rows)
-        // Targets and call lists are extras: older servers (404) or offline just hide them.
-        val me = runCatching { c.apiClient.meToday() }.getOrNull()
-        val lists = runCatching { c.apiClient.myCallLists().items }.getOrElse { _state.value.lists }
+        val me = meAsync.await()
+        val lists = listsAsync.await() ?: _state.value.lists
         _state.update { TodayState(overdue = overdue, today = today, loading = false, error = error, me = me ?: it.me, lists = lists, called = it.called) }
     }
 
