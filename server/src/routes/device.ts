@@ -123,4 +123,47 @@ export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
   };
   app.get("/v1/app/download", auth, sendApk);
   app.get("/app.apk", sendApk);
+
+  // Public downloads page (/download): latest Android and Windows versions, no sign-in.
+  app.get("/api/downloads", async (_req, reply) => {
+    const { latestApp } = await getSettings(deps.db);
+    const apk = latestApp ? await stat(path.join(deps.storage.root, "apk", latestApp.fileName)).catch(() => null) : null;
+    const win = await latestWindows();
+    reply.header("cache-control", "no-store");
+    return {
+      android: latestApp && apk?.isFile() ? { version: latestApp.versionName, sizeBytes: apk.size, url: "/app.apk" } : null,
+      windows: win ? { version: win.version, sizeBytes: win.sizeBytes, url: "/download/windows" } : null,
+    };
+  });
+
+  app.get("/download/windows", async (_req, reply) => {
+    const win = await latestWindows();
+    if (!win) throw new HttpError(503, "The Windows app isn't available right now. Try again in a minute.");
+    reply.header("cache-control", "no-store");
+    return reply.redirect(win.url, 302);
+  });
+}
+
+/** The newest Windows installer on GitHub Releases (CI publishes it there); cached for 10 minutes. */
+const RELEASES_URL = "https://api.github.com/repos/MarketingBNG/UIC-Dialer/releases/latest";
+type WinRelease = { version: string; url: string; sizeBytes: number };
+let winCache: { at: number; value: WinRelease | null } | null = null;
+
+async function latestWindows(): Promise<WinRelease | null> {
+  if (winCache && Date.now() - winCache.at < 10 * 60_000) return winCache.value;
+  let value: WinRelease | null = null;
+  try {
+    const res = await fetch(RELEASES_URL, { headers: { accept: "application/vnd.github+json", "user-agent": "uic-dialer-server" }, signal: AbortSignal.timeout(5000) });
+    if (res.ok) {
+      const body = (await res.json()) as { tag_name?: string; assets?: { name: string; browser_download_url: string; size: number }[] };
+      const exe = body.assets?.find((a) => /^UIC-Dialer-Setup-.*\.exe$/.test(a.name));
+      if (exe) value = { version: (body.tag_name ?? "").replace(/^v/, ""), url: exe.browser_download_url, sizeBytes: exe.size };
+    }
+  } catch {
+    // GitHub unreachable: keep the last known version if there is one.
+    if (winCache?.value) return winCache.value;
+  }
+  // Remember a failure only briefly, so the page recovers within a minute.
+  winCache = { at: value ? Date.now() : Date.now() - 9 * 60_000, value };
+  return value;
 }

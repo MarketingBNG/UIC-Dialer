@@ -38,6 +38,7 @@ import { ListDetailPage, ListSessionPage, ListsPage } from "./pages/Lists";
 import { SettingsPage } from "./pages/Settings";
 import { DncTab } from "./pages/settings/Dnc";
 import { TeamPage } from "./pages/Team";
+import { DownloadsPage } from "./pages/Downloads";
 import { SignInPage } from "./pages/SignIn";
 import { TodayPage } from "./pages/Today";
 import { UsersPage } from "./pages/Users";
@@ -65,6 +66,10 @@ export function App() {
     staleTime: 5 * 60_000,
   });
 
+  // Public downloads page: works signed in or out.
+  if (window.location.pathname.replace(/\/+$/, "") === "/download") {
+    return me.isPending ? <Spinner /> : <DownloadsPage signedIn={!!me.data} />;
+  }
   if (me.isPending) return <Spinner />;
   if (me.isError)
     return (

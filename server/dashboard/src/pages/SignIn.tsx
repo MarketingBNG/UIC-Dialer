@@ -38,6 +38,11 @@ export function SignInPage() {
           Sign in with Google
         </a>
         </Button>
+        <p className="mt-4 text-sm">
+          <a href="/download" className="text-primary hover:underline">
+            Download the Android or Windows app
+          </a>
+        </p>
       </Card>
     </main>
   );
