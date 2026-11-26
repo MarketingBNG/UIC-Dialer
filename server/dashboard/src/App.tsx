@@ -151,9 +151,11 @@ function Shell({ me }: { me: Me }) {
   const logout = useMutation({
     mutationFn: () => api<void>("/auth/logout", { method: "POST" }),
     // Only drop the local session once the server has cleared the cookie.
+    // A fresh page load lands on the sign-in page. (qc.clear() left the mounted screens holding the old user,
+    // so the app stayed on "Your session has ended" instead.)
     onSuccess: () => {
       qc.clear();
-      qc.setQueryData(["me"], null);
+      window.location.replace("/");
     },
     onError: (e) => toast.error(`Sign out failed: ${e.message}`),
   });
