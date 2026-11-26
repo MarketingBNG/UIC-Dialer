@@ -14,6 +14,9 @@ export class AccessDeniedError extends Error {}
  */
 export async function resolveUser(db: Db, config: Config, id: GoogleIdentity): Promise<User> {
   if (!id.emailVerified) throw new AccessDeniedError("Google email is not verified");
+  if (await db.blockedEmail.findUnique({ where: { email: id.email }, select: { email: true } })) {
+    throw new AccessDeniedError("This account is blocked. Ask an admin.");
+  }
 
   const existing = await db.user.findUnique({ where: { email: id.email } });
   if (existing) {

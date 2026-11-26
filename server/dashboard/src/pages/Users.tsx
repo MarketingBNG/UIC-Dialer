@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
+import { BlockedEmails } from "../components/BlockedEmails";
 
 const ROLES: Role[] = ["AGENT", "MANAGER", "ADMIN"];
 const roleLabel = (r: Role) => r.charAt(0) + r.slice(1).toLowerCase();
@@ -112,6 +113,7 @@ export function UsersPage() {
           </Table>
         </Card>
       )}
+      {isAdmin && <BlockedEmails />}
       {isAdmin && <AddUserDialog open={adding} onClose={() => setAdding(false)} />}
       {isAdmin && editing && <EditUserDialog key={editing.id} user={editing} isSelf={editing.id === me.id} onClose={() => setEditing(null)} />}
     </>

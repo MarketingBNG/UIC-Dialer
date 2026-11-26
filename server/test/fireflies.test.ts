@@ -213,9 +213,11 @@ describe("budget reservation", () => {
 
   it("stops new uploads while MAX_IN_FLIGHT calls are with Fireflies, but still checks uploaded ones", async () => {
     await setCfg({ budgetMinutes: 100_000 });
+    // Parked far in the future so other test files' claims never pick these up.
+    const later = new Date(Date.now() + 86_400_000);
     const parked = await runningJob({ durationS: 60 });
-    await t.db.job.update({ where: { id: parked.jobId }, data: { status: "WAITING_BUDGET", lastError: `${WAIT_PREFIX}: x`, lockedBy: null } });
-    const extra = Array.from({ length: MAX_IN_FLIGHT - 1 }, () => ({ callId: parked.callId, kind: "transcribe", status: "WAITING_BUDGET" as const, lastError: `${WAIT_PREFIX}: x` }));
+    await t.db.job.update({ where: { id: parked.jobId }, data: { status: "WAITING_BUDGET", lastError: `${WAIT_PREFIX}: x`, lockedBy: null, runAfter: later } });
+    const extra = Array.from({ length: MAX_IN_FLIGHT - 1 }, () => ({ callId: parked.callId, kind: "transcribe", status: "WAITING_BUDGET" as const, lastError: `${WAIT_PREFIX}: x`, runAfter: later }));
     await t.db.job.createMany({ data: extra });
     const b = await runningJob({ durationS: 60 });
     expect((await reserveHttp(b.jobId)).json()).toMatchObject({ status: "refused", reason: "IN_FLIGHT" });

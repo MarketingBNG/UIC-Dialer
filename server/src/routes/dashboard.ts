@@ -354,6 +354,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     const body = UserBody.parse(req.body);
     const exists = await deps.db.user.findUnique({ where: { email: body.email } });
     if (exists) throw new HttpError(409, "User already exists");
+    if (await deps.db.blockedEmail.findUnique({ where: { email: body.email } })) throw new HttpError(409, "This email is blocked; unblock it first");
     const user = await deps.db.user.create({ data: { ...body, name: body.name ?? null, team: body.team ?? null } });
     await audit(req, "USER_CHANGE", undefined, { created: user.email, role: user.role });
     return reply.code(201).send(user);
@@ -378,6 +379,55 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     }
     if (Object.keys(rest).length > 0) await audit(req, "USER_CHANGE", undefined, { userId: id, ...rest });
     return user;
+  });
+
+  // ---- Blocked emails (admin): never allowed to sign in, account or not --------------------------------------
+
+  app.get("/api/blocked-emails", admins, async () => {
+    const rows = await deps.db.blockedEmail.findMany({ orderBy: { createdAt: "desc" } });
+    const by = await deps.db.user.findMany({
+      where: { id: { in: rows.map((r) => r.blockedById).filter((x): x is string => !!x) } },
+      select: { id: true, name: true, email: true },
+    });
+    const users = await deps.db.user.findMany({ where: { email: { in: rows.map((r) => r.email) } }, select: { id: true, email: true, name: true } });
+    return rows.map((r) => ({
+      email: r.email,
+      reason: r.reason,
+      createdAt: r.createdAt,
+      blockedBy: by.find((u) => u.id === r.blockedById) ?? null,
+      user: users.find((u) => u.email === r.email) ?? null,
+    }));
+  });
+
+  app.post("/api/blocked-emails", admins, async (req, reply) => {
+    const body = z
+      .object({ email: z.email().transform((e) => e.trim().toLowerCase()), reason: z.string().trim().max(300).optional() })
+      .parse(req.body);
+    if (body.email === currentUser(req).email) throw new HttpError(400, "You can't block yourself");
+    await deps.db.blockedEmail.upsert({
+      where: { email: body.email },
+      create: { email: body.email, reason: body.reason || null, blockedById: currentUser(req).id },
+      update: { reason: body.reason || null },
+    });
+    // An existing account is deactivated too: signed out of every phone and the dashboard right away.
+    const user = await deps.db.user.findUnique({ where: { email: body.email }, select: { id: true, active: true } });
+    if (user?.active) {
+      await deps.db.user.update({ where: { id: user.id }, data: { active: false } });
+      const devices = await deps.db.device.findMany({ where: { userId: user.id, revokedAt: null } });
+      for (const d of devices) await deps.tokens.revokeDevice(d.id);
+    }
+    await audit(req, "USER_CHANGE", undefined, { blocked: body.email, reason: body.reason ?? null });
+    return reply.code(201).send({ email: body.email });
+  });
+
+  app.delete<{ Params: { email: string } }>("/api/blocked-emails/:email", admins, async (req, reply) => {
+    const email = z.email().parse(decodeURIComponent(req.params.email).trim().toLowerCase());
+    const { count } = await deps.db.blockedEmail.deleteMany({ where: { email } });
+    if (count === 0) throw new HttpError(404, "Not blocked");
+    // Unblocking lets an existing account sign in again.
+    await deps.db.user.updateMany({ where: { email }, data: { active: true } });
+    await audit(req, "USER_CHANGE", undefined, { unblocked: email });
+    return reply.code(204).send();
   });
 
   app.get("/api/devices", managers, async () => {

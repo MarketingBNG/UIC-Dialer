@@ -78,6 +78,16 @@ enum AuditAction {
   TARGET_CHANGE
 }
 
+// Emails that may never sign in (admin "Blocked" list), whether or not they have an account yet.
+model BlockedEmail {
+  email       String   @id
+  reason      String?
+  blockedById String?  @map("blocked_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("blocked_emails")
+}
+
 model User {
   id              String    @id @default(uuid(7)) @db.Uuid
   email           String    @unique
