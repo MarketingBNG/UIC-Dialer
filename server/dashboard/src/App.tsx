@@ -1,3 +1,4 @@
+import { PhoneLinkSetup } from "./components/PhoneLinkSetup";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
@@ -253,6 +254,7 @@ function AppSidebar({
       <SidebarHeader>
         {logo}
         <PhoneStatusBox />
+        <PhoneLinkSetup />
         <QuickSearchButton
           onOpen={() => {
             setOpenMobile(false);

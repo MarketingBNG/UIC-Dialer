@@ -229,6 +229,9 @@ class ApiClient(
     suspend fun features(): Features = get("/api/features")
 
     /** Up to 50 missed calls; idempotent by clientId, each item reports its own result. */
+    /** Incoming call state for the rep's desktop: "ringing" (with number), "answered" or "ended". */
+    suspend fun postRinging(state: String, phone: String? = null): RingResponse = post("/v1/ringing", RingRequest(state, phone))
+
     suspend fun postMissed(items: List<MissedCallItem>): MissedCallResponse =
         post("/v1/followups/missed", MissedCallBatch(items))
 

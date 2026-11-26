@@ -1,3 +1,4 @@
+import { IncomingCall } from "./components/IncomingCall";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
@@ -36,6 +37,7 @@ createRoot(document.getElementById("root")!).render(
         <TooltipProvider delayDuration={300}>
           <App />
           <Reminders />
+          <IncomingCall />
           <Toaster />
         </TooltipProvider>
         </LazyMotion>

@@ -42,9 +42,13 @@ class PhoneStateReceiver : BroadcastReceiver() {
                     }
                 }
             }
-            TelephonyManager.EXTRA_STATE_OFFHOOK -> CallerCard.hideAfter(app, ANSWERED_HIDE_MS)
+            TelephonyManager.EXTRA_STATE_OFFHOOK -> {
+                CallerCard.hideAfter(app, ANSWERED_HIDE_MS)
+                if (ringSent(app)) sendRing(app, "answered")
+            }
             TelephonyManager.EXTRA_STATE_IDLE -> {
                 CallerCard.hide(app)
+                if (ringSent(app)) { setRingSent(app, false); sendRing(app, "ended") }
                 // Any call just ended: send its call-log entry once the dialer has written it.
                 if (app.container.tokenStore.user.value != null) com.usaindiacfo.uicdialer.sync.SyncScheduler.enqueueCallLogSync(app, delaySec = 3)
                 if (rang(app)) {
@@ -66,6 +70,9 @@ class PhoneStateReceiver : BroadcastReceiver() {
         val local = CallerLookup.local(number, c.contactCache.recent + c.contactCache.followUps, c.contactCache.today?.let { it.items + it.upcoming }.orEmpty())
         // Undecided numbers (business-only, no Contacts permission) are not sent to the server.
         if (decision !is PrivacyDecision.Upload) return local ?: CallerInfo(number, known = false)
+        // Tell the rep's desktop who is calling (its caller card). Same privacy rule as the lookup below.
+        setRingSent(context, true)
+        sendRing(context, "ringing", number)
         val server = withTimeoutOrNull(LOOKUP_TIMEOUT_MS) { runCatching { c.apiClient.contactByPhone(number) }.getOrNull() }
         return CallerLookup.merge(number, server, local)
     }
@@ -74,6 +81,17 @@ class PhoneStateReceiver : BroadcastReceiver() {
         const val LOOKUP_TIMEOUT_MS = 3_000L
         const val ANSWERED_HIDE_MS = 8_000L
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+        /** Best effort, off the main thread; a lost report only means no desktop card. */
+        fun sendRing(context: Context, state: String, phone: String? = null) {
+            val c = context.container
+            if (c.tokenStore.user.value == null) return
+            scope.launch { withTimeoutOrNull(LOOKUP_TIMEOUT_MS) { runCatching { c.apiClient.postRinging(state, phone) } } }
+        }
+        private const val KEY_RING_SENT = "ring_sent"
+        fun ringSent(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_RING_SENT, false)
+        fun setRingSent(context: Context, v: Boolean) =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_RING_SENT, v).apply()
 
         // Persisted: the process can die between RINGING and IDLE, and IDLE then arrives in a fresh one.
         private const val PREFS = "phone_state"

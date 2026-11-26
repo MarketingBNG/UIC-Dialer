@@ -8,7 +8,8 @@
 // The link and sign-in rules are in rules.js, tested by test/rules.test.js.
 "use strict";
 
-const { app, BrowserWindow, Menu, Tray, dialog, nativeImage, powerSaveBlocker, screen, session, shell } = require("electron");
+const { execFile, spawn } = require("node:child_process");
+const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage, powerSaveBlocker, screen, session, shell } = require("electron");
 const fs = require("node:fs");
 const path = require("node:path");
 const rules = require("./rules.js");
@@ -21,6 +22,36 @@ const SCHEME = rules.SCHEME;
 const APP_ID = "com.usaindiacfo.uicdialer";
 /** Started by "Start with Windows": come up in the tray without a window. */
 const startHidden = process.argv.includes("--hidden");
+
+const PHONE_LINK_APP = "Microsoft.YourPhone_8wekyb3d8bbwe!App";
+
+/** Phone Link helpers for the dashboard's setup check; answered only for the app's own pages. */
+function registerPhoneLinkIpc() {
+  const fromApp = (e) => rules.sameOrigin(e.senderFrame?.url || "", APP_URL);
+  let cached = null;
+  ipcMain.handle("phone-link:status", (e) => {
+    if (!fromApp(e)) return null;
+    if (process.platform !== "win32") return { installed: false };
+    if (cached) return cached;
+    return new Promise((resolve) => {
+      execFile(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-Command", "(Get-AppxPackage -Name Microsoft.YourPhone).Version"],
+        { timeout: 8000, windowsHide: true },
+        (err, stdout) => {
+          const installed = !err && String(stdout).trim().length > 0;
+          if (installed) cached = { installed }; // re-check while missing (the rep may be installing it)
+          resolve({ installed });
+        },
+      );
+    });
+  });
+  ipcMain.handle("phone-link:open", (e) => {
+    if (!fromApp(e) || process.platform !== "win32") return false;
+    spawn("explorer.exe", [`shell:AppsFolder\\${PHONE_LINK_APP}`], { detached: true, stdio: "ignore", windowsHide: true }).unref();
+    return true;
+  });
+}
 
 let win = null;
 let tray = null;
@@ -196,6 +227,8 @@ function createWindow() {
       spellcheck: true,
       // Lives in the tray: keep timers (follow-up reminders, live updates) running at full speed while hidden.
       backgroundThrottling: false,
+      // Phone Link setup check (see preload.js and registerPhoneLinkIpc).
+      preload: path.join(__dirname, "preload.js"),
     },
   });
   mark("window");
@@ -400,6 +433,7 @@ function main() {
 
   app.whenReady().then(() => {
     mark("ready");
+    registerPhoneLinkIpc();
     // Don't let Windows suspend the app in the tray (reminders and live updates keep working).
     powerSaveBlocker.start("prevent-app-suspension");
     // Taskbar grouping and notifications under "UIC Dialer", not "electron.app.Electron".

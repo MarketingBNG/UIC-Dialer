@@ -22,6 +22,7 @@ const randomMobile = () => `9${String(Math.floor(Math.random() * 1e9)).padStart(
 /** Opens /api/events and collects "change" events. */
 function listen(headers: Record<string, string>) {
   const events: { topic: string; userId: string | null }[] = [];
+  const rings: { state: string; phone: string | null }[] = [];
   let status = 0;
   let req!: http.ClientRequest;
   const ready = new Promise<void>((resolve, reject) => {
@@ -38,13 +39,15 @@ function listen(headers: Record<string, string>) {
           if (block.includes("event: ready")) resolve();
           const data = /^event: change\ndata: (.*)$/m.exec(block);
           if (data) events.push(JSON.parse(data[1]!));
+          const ring = /^event: ringing\ndata: (.*)$/m.exec(block);
+          if (ring) rings.push(JSON.parse(ring[1]!));
         }
       });
       if (status !== 200) resolve();
     });
     req.on("error", reject);
   });
-  return { events, ready, status: () => status, close: () => req.destroy() };
+  return { events, rings, ready, status: () => status, close: () => req.destroy() };
 }
 
 const waitFor = async (cond: () => boolean, ms = 3000) => {
@@ -104,6 +107,35 @@ describe("GET /api/events", () => {
     expect(otherPhone.events.some((e) => e.topic === "activity")).toBe(false);
 
     for (const s of [desk, otherPhone, boss]) s.close();
+  });
+
+  it("shows an incoming call on the rep's own desktop only (not other reps or managers)", async () => {
+    const repEmail = uniqueEmail("rep");
+    const rep = await t.loginDevice(repEmail);
+    const other = await t.loginDevice(uniqueEmail("rep"));
+    const admin = await t.loginDevice(uniqueEmail("admin"), "ADMIN");
+    const desk = listen(await t.sessionFor(repEmail));
+    const otherDesk = listen(other.headers);
+    const boss = listen(admin.headers);
+    await Promise.all([desk.ready, otherDesk.ready, boss.ready]);
+
+    const res = await t.app.inject({ method: "POST", url: "/v1/ringing", headers: rep.headers, payload: { state: "ringing", phone: "98765 43210" } });
+    expect(res.statusCode).toBe(200);
+    await waitFor(() => desk.rings.length > 0);
+    expect(desk.rings[0]).toEqual({ state: "ringing", phone: "+919876543210" });
+    await t.app.inject({ method: "POST", url: "/v1/ringing", headers: rep.headers, payload: { state: "ended" } });
+    await waitFor(() => desk.rings.length > 1);
+    expect(desk.rings[1]).toEqual({ state: "ended", phone: null });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(otherDesk.rings).toEqual([]);
+    expect(boss.rings).toEqual([]);
+    for (const s of [desk, otherDesk, boss]) s.close();
+  });
+
+  it("rejects ringing reports without a phone sign-in or with a bad state", async () => {
+    expect((await t.app.inject({ method: "POST", url: "/v1/ringing", payload: { state: "ringing" } })).statusCode).toBe(401);
+    const rep = await t.loginDevice(uniqueEmail("rep"));
+    expect((await t.app.inject({ method: "POST", url: "/v1/ringing", headers: rep.headers, payload: { state: "boom" } })).statusCode).toBe(400);
   });
 
   it("does not notify on failed writes", async () => {

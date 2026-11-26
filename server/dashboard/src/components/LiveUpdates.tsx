@@ -1,5 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
+import { RING_EVENT } from "./IncomingCall";
 
 /**
  * Keeps the dashboard / Windows app in step with the phone: the server sends a small
@@ -24,6 +25,14 @@ export function LiveUpdates() {
       connectedOnce = true;
     });
     es.addEventListener("change", refresh);
+    // The rep's phone is ringing / answered / done: the caller card (IncomingCall) shows who it is.
+    es.addEventListener("ringing", (e) => {
+      try {
+        window.dispatchEvent(new CustomEvent(RING_EVENT, { detail: JSON.parse((e as MessageEvent<string>).data) }));
+      } catch {
+        /* ignore malformed */
+      }
+    });
     // Back from sleep / another tab: catch up straight away.
     const onVisible = () => {
       if (document.visibilityState === "visible" && es.readyState !== EventSource.OPEN) refresh();

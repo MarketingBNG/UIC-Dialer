@@ -1,7 +1,9 @@
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 import pg from "pg";
-import { requireSession } from "./auth/guards.js";
+import { z } from "zod";
+import { requireDevice, requireSession } from "./auth/guards.js";
+import { toE164 } from "./phone.js";
 import { currentUser, type Deps } from "./context.js";
 
 /**
@@ -14,12 +16,27 @@ import { currentUser, type Deps } from "./context.js";
  * Postgres LISTEN/NOTIFY.
  */
 
-export type Topic = "activity" | "contacts" | "followups" | "calls" | "lists" | "settings";
+export type Topic = "activity" | "contacts" | "followups" | "calls" | "lists" | "settings" | "ringing";
 export interface ChangeEvent {
   topic: Topic;
   /** Owner of the change; null = relevant to everyone. */
   userId: string | null;
+  /**
+   * Only for "ringing": the rep's own phone reports an incoming call, so their desktop can show who is calling.
+   * Delivered to that rep's streams only (not to managers), since it carries the caller's number.
+   */
+  ring?: RingState;
 }
+
+export interface RingState {
+  state: "ringing" | "answered" | "ended";
+  phone: string | null;
+}
+
+export const RingBody = z.object({
+  state: z.enum(["ringing", "answered", "ended"]),
+  phone: z.string().trim().min(1).max(40).optional(),
+});
 
 const CHANNEL = "uic_changes";
 const HEARTBEAT_MS = 25_000;
@@ -89,6 +106,10 @@ export class Realtime {
   }
 
   private deliver(e: ChangeEvent): void {
+    if (e.topic === "ringing") {
+      for (const s of this.streams) if (e.userId !== null && s.userId === e.userId) s.send(e);
+      return;
+    }
     const scoped = SCOPED.has(e.topic) && e.userId !== null;
     for (const s of this.streams) {
       if (!scoped || s.seesAll || s.userId === e.userId) s.send(e);
@@ -116,7 +137,7 @@ export class Realtime {
     client.on("notification", (msg) => {
       try {
         const e = JSON.parse(msg.payload ?? "") as ChangeEvent & { from?: string };
-        if (e.from !== this.instance) this.deliver({ topic: e.topic, userId: e.userId ?? null });
+        if (e.from !== this.instance) this.deliver({ topic: e.topic, userId: e.userId ?? null, ...(e.ring ? { ring: e.ring } : {}) });
       } catch {
         /* ignore malformed */
       }
@@ -169,6 +190,15 @@ export async function realtimeRoutes(app: FastifyInstance, deps: Deps) {
     await rt.publish({ topic, userId: SCOPED.has(topic) ? userId : null });
   });
 
+  // The rep's phone: an incoming call is ringing / was answered / ended. Shown on that rep's desktop only.
+  const device = { preHandler: requireDevice(deps), config: { rateLimit: { max: 60, timeWindow: "1 minute" } } };
+  app.post("/v1/ringing", device, async (req) => {
+    const body = RingBody.parse(req.body);
+    const phone = (body.phone ? toE164(body.phone, deps.config.DEFAULT_PHONE_REGION) : null) ?? null;
+    await rt.publish({ topic: "ringing", userId: currentUser(req).id, ring: { state: body.state, phone } });
+    return { ok: true };
+  });
+
   const anyone = { preHandler: requireSession(deps), config: { rateLimit: { max: 30, timeWindow: "1 minute" } } };
   app.get("/api/events", anyone, async (req, reply) => {
     const user = currentUser(req);
@@ -191,7 +221,7 @@ export async function realtimeRoutes(app: FastifyInstance, deps: Deps) {
     const unsubscribe = rt.subscribe({
       userId: user.id,
       seesAll: user.role !== "AGENT",
-      send: (e) => write(`event: change\ndata: ${JSON.stringify(e)}\n\n`),
+      send: (e) => write(e.topic === "ringing" ? `event: ringing\ndata: ${JSON.stringify(e.ring)}\n\n` : `event: change\ndata: ${JSON.stringify(e)}\n\n`),
       end: () => {
         done();
         res.end();
