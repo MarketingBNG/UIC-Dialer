@@ -5,7 +5,7 @@ import { useReducedMotion } from "motion/react";
 import { animate } from "motion/mini";
 import { BASE } from "@/lib/motion";
 import type * as React from "react";
-import { History, LogOut, PhoneCall, Settings2, Smartphone, Users, type LucideIcon } from "lucide-react";
+import { Download, History, LogOut, PhoneCall, Settings2, Smartphone, Users, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import {
   Sidebar,
@@ -296,6 +296,12 @@ function AppSidebar({
             {me.team ? ` · ${me.team}` : ""}
           </div>
         </div>
+        <SidebarMenuButton asChild>
+          <a href="/download">
+            <Download aria-hidden />
+            Download apps
+          </a>
+        </SidebarMenuButton>
         <SidebarMenuButton disabled={loggingOut} onClick={logout}>
           <LogOut aria-hidden />
           Sign out
