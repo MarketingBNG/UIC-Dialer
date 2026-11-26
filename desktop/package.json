@@ -37,6 +37,10 @@
       }
     ],
     "win": {
+      "verifyUpdateCodeSignature": false,
+      "signtoolOptions": {
+        "publisherName": "USA India CFO"
+      },
       "target": [
         {
           "target": "nsis",

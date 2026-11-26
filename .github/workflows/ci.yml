@@ -102,7 +102,7 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run dist
-      # Unsigned for now (Windows SmartScreen warns on first run). Download it from the run's artifacts.
+      # Unsigned test build (the signed one is built by desktop-release). Download it from the run's artifacts.
       - uses: actions/upload-artifact@v4
         with:
           name: uic-dialer-windows
@@ -148,6 +148,10 @@ jobs:
         if: steps.changed.outputs.app == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          # Company code-signing certificate (self-signed "USA India CFO"; staff laptops trust it via
+          # desktop/signing/Install-UIC-Certificate.cmd). Unsigned if the secrets are missing.
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
         run: |
           npm ci --no-fund
           # Always higher than any earlier build: 1.2.<run number>.
