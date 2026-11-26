@@ -5,7 +5,8 @@ import { requireSession, requireWorker } from "../auth/guards.js";
 import { HttpError, type Deps } from "../context.js";
 import { blockFireflies, finalizeReservation, firefliesUsage, markUploaded, reserveForJob } from "../fireflies/budget.js";
 import { FirefliesConfig, getFirefliesState, saveFirefliesState } from "../fireflies/settings.js";
-import { signAudioPath, verifyAudioSignature } from "../fireflies/signed-url.js";
+import { signAudioPath, signWebhookPath, verifyAudioSignature, verifyWebhookSignature } from "../fireflies/signed-url.js";
+import { transcriptReady, waitForFireflies } from "../fireflies/waiting.js";
 
 const WorkerBody = z.object({ workerId: z.string().min(1).max(100) });
 const SettingsPatch = FirefliesConfig.partial().extend({ clearBlock: z.boolean().optional() });
@@ -61,7 +62,20 @@ export async function firefliesRoutes(app: FastifyInstance, deps: Deps) {
     const call = await deps.db.call.findUnique({ where: { id: callId }, select: { filePath: true } });
     if (!call?.filePath) throw new HttpError(404, "No audio");
     const { path: p, expiresAt } = signAudioPath(secret, callId, path.extname(call.filePath).toLowerCase());
-    return { url: new URL(p, deps.config.PUBLIC_URL).toString(), expiresAt };
+    return {
+      url: new URL(p, deps.config.PUBLIC_URL).toString(),
+      expiresAt,
+      webhookUrl: new URL(signWebhookPath(secret, callId), deps.config.PUBLIC_URL).toString(),
+    };
+  });
+
+  // Uploaded (or checked and not ready yet): the job waits without holding the worker.
+  app.post<{ Params: { jobId: string } }>("/internal/fireflies/jobs/:jobId/wait", worker, async (req) => {
+    const jobId = z.uuid().parse(req.params.jobId);
+    const { workerId } = WorkerBody.parse(req.body);
+    const status = await waitForFireflies(deps.db, jobId, workerId);
+    if (status === "lost") throw new HttpError(409, "Job is not locked by this worker");
+    return { status };
   });
 
   // ---- Public (signed) ----------------------------------------------------
@@ -94,6 +108,20 @@ export async function firefliesRoutes(app: FastifyInstance, deps: Deps) {
       }
       reply.header("content-length", size);
       return reply.send(deps.storage.read(call.filePath));
+    },
+  );
+
+  // Fireflies calls this when a transcript is ready (link given per upload). Always 200 quickly: Fireflies retries
+  // failures, and a bad or stale link must not tell anyone anything.
+  app.post<{ Params: { callId: string }; Querystring: { sig?: string } }>(
+    "/public/fireflies/webhook/:callId",
+    { logLevel: "warn", config: { rateLimit: false as const } },
+    async (req, reply) => {
+      const callId = z.uuid().safeParse(req.params.callId);
+      if (callId.success && verifyWebhookSignature(secret, callId.data, req.query.sig)) {
+        await transcriptReady(deps.db, callId.data);
+      }
+      return reply.code(200).send({ ok: true });
     },
   );
 

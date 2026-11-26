@@ -29,8 +29,7 @@ class Settings:
     openai_api_key: str | None
     openai_model: str
     fireflies_api_key: str | None = None
-    fireflies_max_wait_s: float = 3600
-    # Fireflies jobs mostly wait on Fireflies (no CPU), so many more run at once than local transcription.
+    # Fireflies jobs are short now (upload, or one check), so this mostly bounds upload bursts.
     fireflies_concurrency: int = 20
     # English translation with Claude (off when no key)
     anthropic_api_key: str | None = None
@@ -64,8 +63,6 @@ class Settings:
             openai_api_key=e.get("OPENAI_API_KEY") or None,
             openai_model=e.get("OPENAI_TRANSCRIBE_MODEL", "whisper-1"),
             fireflies_api_key=e.get("FIREFLIES_API_KEY") or None,
-            # Give up waiting for one Fireflies transcript after this long (job is retried later).
-            fireflies_max_wait_s=float(e.get("FIREFLIES_MAX_WAIT_S", "3600")),
             fireflies_concurrency=max(1, int(e.get("FIREFLIES_CONCURRENCY", "20"))),
             anthropic_api_key=e.get("ANTHROPIC_API_KEY") or None,
             translate_model=e.get("TRANSLATE_MODEL") or "claude-opus-5-5",

@@ -1,6 +1,7 @@
 import type { Db } from "../db.js";
 import type { Prisma } from "../generated/prisma/client.js";
 import { getFirefliesState, isBlocked, saveFirefliesState, type FirefliesState } from "./settings.js";
+import { MAX_IN_FLIGHT, RECHECK_MS, inFlight } from "./waiting.js";
 
 type Tx = Prisma.TransactionClient;
 
@@ -62,7 +63,7 @@ export const REUPLOAD_AFTER_MS = 6 * 3600_000;
 /** Re-uploads per call; each one is paid for again. */
 export const MAX_REUPLOADS = 1;
 
-export type RefusalReason = "DISABLED" | "BLOCKED" | "BATCH_GATE" | "BUDGET";
+export type RefusalReason = "DISABLED" | "BLOCKED" | "BATCH_GATE" | "BUDGET" | "IN_FLIGHT";
 
 export type ReserveResult =
   | { status: "lost" }
@@ -131,6 +132,11 @@ export async function reserveForJob(db: Db, jobId: string, workerId: string, now
         return refuse("BATCH_GATE", new Date(now.getTime() + GATE_RETRY_MS),
           `${sent}/${state.approvedBacklogCount} approved backlog calls sent; raise approvedBacklogCount`);
       }
+    }
+
+    const waiting = await inFlight(tx);
+    if (waiting >= MAX_IN_FLIGHT) {
+      return refuse("IN_FLIGHT", new Date(now.getTime() + RECHECK_MS), `${waiting} calls already with Fireflies; waiting for them first`);
     }
 
     const minutes = estimateMinutes(job.call.durationS, job.call.fileSize);

@@ -1,9 +1,10 @@
 """Fireflies.ai transcription over its GraphQL API.
 
 Flow per job (all coordination goes through our API, never the DB):
-  reserve minutes (server-side budget) -> signed public audio URL -> uploadAudio
-  -> poll transcripts until the sentences are ready -> report actual minutes
-  -> optionally deleteTranscript (privacy).
+  reserve minutes (server-side budget) -> signed public audio URL -> uploadAudio (with a webhook link)
+  -> hand the job back to wait (Fireflies can take hours; nothing holds a worker meanwhile).
+  The job comes back when the webhook fires, or every ~15 min regardless: one quick check, then either the
+  transcript (report actual minutes, optionally deleteTranscript for privacy) or hand it back again.
 
 Docs: https://docs.fireflies.ai/graphql-api/mutation/upload-audio
       https://docs.fireflies.ai/graphql-api/query/transcripts
@@ -95,12 +96,11 @@ class FirefliesProvider:
     def __init__(self, settings: Settings, transport: httpx.BaseTransport | None = None, sleep=time.sleep) -> None:
         if not settings.fireflies_api_key:
             raise SystemExit("FIREFLIES_API_KEY is required for TRANSCRIBE_PROVIDER=fireflies")
-        self.max_wait_s = settings.fireflies_max_wait_s
         self.sleep = sleep
         self._find_lock = threading.Lock()
         self._found: dict[str, str] = {}  # title -> transcript id, from the last shared list
         self._found_at: float | None = None
-        self._slept = 0.0  # time slept by waiting jobs; with a stubbed sleep it stands in for the clock
+        self._slept = 0.0  # added to the clock by tests
         self.client = httpx.Client(
             headers={"Authorization": f"Bearer {settings.fireflies_api_key}"},
             timeout=httpx.Timeout(60, connect=10),
@@ -183,6 +183,8 @@ class FirefliesProvider:
                 }
                 if language:
                     inp["custom_language"] = language
+                if signed.get("webhookUrl"):
+                    inp["webhook"] = signed["webhookUrl"]
                 try:
                     # No transport retry: a dropped connection may mean Fireflies already
                     # queued the file. Treat it as uploaded so the retry only polls.
@@ -197,7 +199,10 @@ class FirefliesProvider:
                 api.fireflies_uploaded(reservation)
                 uploaded = True
                 log.info("fireflies upload queued", job_id=job_id, call_id=call_id)
-            t = self._wait_for_transcript(title)
+                self._hand_back(api, job_id)  # just uploaded: never ready yet
+            t = self._check_once(title)
+            if t is None:
+                self._hand_back(api, job_id)
         except HardStop as e:
             log.error("fireflies hard stop", error=str(e))
             if not uploaded:
@@ -273,28 +278,22 @@ class FirefliesProvider:
                 self._found, self._found_at = found, now
             return self._found.get(title)
 
-    def _wait_for_transcript(self, title: str) -> dict:
-        start = time.monotonic()
-        deadline = start + self.max_wait_s
-        waited = 0.0
-        since = (datetime.now(UTC) - timedelta(days=2)).isoformat().replace("+00:00", "Z")
-        delay = 15.0
-        transcript_id: str | None = None
-        while True:
-            if transcript_id is None:
-                transcript_id = self._find_id(title, since)
-            if transcript_id is not None:
-                t = self._gql(GET, {"id": transcript_id}).get("transcript") or {}
-                silent = (t.get("meeting_info") or {}).get("silent_meeting")
-                if t.get("sentences") or silent:
-                    return t
-            # Counts slept time as well as the clock, so a stubbed sleep still ends the loop.
-            if max(time.monotonic(), start + waited) + delay > deadline:
-                raise TimeoutError(f"Fireflies transcript for {title} not ready after {self.max_wait_s:.0f}s")
-            self.sleep(delay)
-            self._slept += delay
-            waited += delay
-            delay = min(delay * 1.5, 60.0)
+    def _check_once(self, title: str) -> dict | None:
+        """The transcript if Fireflies has finished it, else None. One look, no waiting."""
+        since = (datetime.now(UTC) - timedelta(days=3)).isoformat().replace("+00:00", "Z")
+        transcript_id = self._find_id(title, since)
+        if transcript_id is None:
+            return None
+        t = self._gql(GET, {"id": transcript_id}).get("transcript") or {}
+        silent = (t.get("meeting_info") or {}).get("silent_meeting")
+        return t if t.get("sentences") or silent else None
+
+    @staticmethod
+    def _hand_back(api: Api, job_id: str) -> None:
+        """The job waits on the server (not counted as an attempt) until the webhook or the next recheck."""
+        status = api.fireflies_wait(job_id)
+        raise Deferred("Fireflies gave no transcript in 24h; job failed" if status == "failed"
+                       else "waiting for Fireflies")
 
 
 def _code(e: dict) -> str | None:

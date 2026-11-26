@@ -3,6 +3,8 @@ import { Readable } from "node:stream";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { estimateMinutes, nextMonthStart, reserveForJob } from "../src/fireflies/budget.js";
 import { DEFAULT_FIREFLIES_CONFIG, saveFirefliesState } from "../src/fireflies/settings.js";
+import { MAX_IN_FLIGHT, WAIT_PREFIX } from "../src/fireflies/waiting.js";
+import { signWebhookPath } from "../src/fireflies/signed-url.js";
 import { signAudioPath, verifyAudioSignature } from "../src/fireflies/signed-url.js";
 import { setupTestApp, sha256, uniqueEmail } from "./helpers.js";
 
@@ -170,6 +172,54 @@ describe("budget reservation", () => {
     await t.db.firefliesReservation.update({ where: { id: fresh.reservationId }, data: { uploadedAt: old } });
     expect((await reserveHttp(a.jobId)).json()).toMatchObject({ reservationId: fresh.reservationId, uploaded: true });
     expect(await t.db.firefliesReservation.count({ where: { callId: a.callId } })).toBe(2);
+  });
+
+  it("hands an uploaded job back to wait, and the webhook makes it runnable at once", async () => {
+    await setCfg({ budgetMinutes: 100 });
+    const a = await runningJob({ durationS: 60 });
+    const ra = (await reserveHttp(a.jobId)).json();
+    await t.app.inject({ method: "POST", url: `/internal/fireflies/reservations/${ra.reservationId}/uploaded`, headers: t.workerHeaders, payload: {} });
+    const wait = await t.app.inject({ method: "POST", url: `/internal/fireflies/jobs/${a.jobId}/wait`, headers: t.workerHeaders, payload: { workerId: "w1" } });
+    expect(wait.json()).toEqual({ status: "waiting" });
+    let job = await t.db.job.findUniqueOrThrow({ where: { id: a.jobId } });
+    expect(job).toMatchObject({ status: "WAITING_BUDGET", lockedBy: null, attempts: 0 });
+    expect(job.lastError?.startsWith(WAIT_PREFIX)).toBe(true);
+    expect(job.runAfter.getTime()).toBeGreaterThan(Date.now() + 10 * 60_000);
+    // Wrong worker / not held: 409.
+    expect((await t.app.inject({ method: "POST", url: `/internal/fireflies/jobs/${a.jobId}/wait`, headers: t.workerHeaders, payload: { workerId: "w1" } })).statusCode).toBe(409);
+
+    // A bad signature changes nothing but still answers 200.
+    const bad = await t.app.inject({ method: "POST", url: `/public/fireflies/webhook/${a.callId}?sig=nope`, payload: {} });
+    expect(bad.statusCode).toBe(200);
+    expect((await t.db.job.findUniqueOrThrow({ where: { id: a.jobId } })).runAfter.getTime()).toBeGreaterThan(Date.now());
+    const good = await t.app.inject({ method: "POST", url: signWebhookPath(t.config.JWT_SECRET, a.callId), payload: { meetingId: "m1" } });
+    expect(good.statusCode).toBe(200);
+    job = await t.db.job.findUniqueOrThrow({ where: { id: a.jobId } });
+    expect(job.runAfter.getTime()).toBeLessThanOrEqual(Date.now());
+    expect(job.status).toBe("WAITING_BUDGET");
+  });
+
+  it("gives up a day after the upload", async () => {
+    await setCfg({ budgetMinutes: 100 });
+    const a = await runningJob({ durationS: 60 });
+    const ra = (await reserveHttp(a.jobId)).json();
+    await t.app.inject({ method: "POST", url: `/internal/fireflies/reservations/${ra.reservationId}/uploaded`, headers: t.workerHeaders, payload: {} });
+    await t.db.firefliesReservation.update({ where: { id: ra.reservationId }, data: { uploadedAt: new Date(Date.now() - 25 * 3600_000) } });
+    const wait = await t.app.inject({ method: "POST", url: `/internal/fireflies/jobs/${a.jobId}/wait`, headers: t.workerHeaders, payload: { workerId: "w1" } });
+    expect(wait.json()).toEqual({ status: "failed" });
+    expect(await t.db.job.findUniqueOrThrow({ where: { id: a.jobId } })).toMatchObject({ status: "FAILED", lockedBy: null });
+    expect((await t.db.call.findUniqueOrThrow({ where: { id: a.callId } })).status).toBe("FAILED");
+  });
+
+  it("stops new uploads while MAX_IN_FLIGHT calls are with Fireflies, but still checks uploaded ones", async () => {
+    await setCfg({ budgetMinutes: 100_000 });
+    const parked = await runningJob({ durationS: 60 });
+    await t.db.job.update({ where: { id: parked.jobId }, data: { status: "WAITING_BUDGET", lastError: `${WAIT_PREFIX}: x`, lockedBy: null } });
+    const extra = Array.from({ length: MAX_IN_FLIGHT - 1 }, () => ({ callId: parked.callId, kind: "transcribe", status: "WAITING_BUDGET" as const, lastError: `${WAIT_PREFIX}: x` }));
+    await t.db.job.createMany({ data: extra });
+    const b = await runningJob({ durationS: 60 });
+    expect((await reserveHttp(b.jobId)).json()).toMatchObject({ status: "refused", reason: "IN_FLIGHT" });
+    await t.db.job.deleteMany({ where: { callId: parked.callId } });
   });
 
   it("keeps the live reserve away from backlog calls", async () => {

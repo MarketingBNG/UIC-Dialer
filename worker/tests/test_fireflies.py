@@ -8,7 +8,7 @@ from worker.main import Api, process_job
 from worker.providers.fireflies import URL, FirefliesProvider
 
 ENV = {"WORKER_TOKEN": "w" * 40, "API_URL": "http://api.test", "WORKER_ID": "t1",
-       "TRANSCRIBE_PROVIDER": "fireflies", "FIREFLIES_API_KEY": "ff-key", "FIREFLIES_MAX_WAIT_S": "600"}
+       "TRANSCRIBE_PROVIDER": "fireflies", "FIREFLIES_API_KEY": "ff-key"}
 JOB = {"jobId": "j1", "callId": "c1", "audioPath": "/internal/audio/c1", "mimeType": "audio/mp4"}
 TRANSCRIPT = {
     "id": "t-1", "title": "uic-c1", "duration": 2.4,
@@ -32,7 +32,10 @@ def mock_api(reserve: dict | None = None):
     routes = {
         "reserve": respx.post("http://api.test/internal/fireflies/jobs/j1/reserve").mock(return_value=httpx.Response(200, json=r)),
         "url": respx.get("http://api.test/internal/fireflies/audio-url/c1").mock(
-            return_value=httpx.Response(200, json={"url": "https://calls.example/public/audio/c1.m4a?exp=1&sig=x"})),
+            return_value=httpx.Response(200, json={"url": "https://calls.example/public/audio/c1.m4a?exp=1&sig=x",
+                                          "webhookUrl": "https://calls.example/public/fireflies/webhook/c1?sig=y"})),
+        "wait": respx.post("http://api.test/internal/fireflies/jobs/j1/wait").mock(
+            return_value=httpx.Response(200, json={"status": "waiting"})),
         "uploaded": respx.post("http://api.test/internal/fireflies/reservations/r1/uploaded").mock(return_value=httpx.Response(204)),
         "finalize": respx.post("http://api.test/internal/fireflies/reservations/r1/finalize").mock(return_value=httpx.Response(204)),
         "block": respx.post("http://api.test/internal/fireflies/block").mock(return_value=httpx.Response(200, json={})),
@@ -62,22 +65,34 @@ ok = lambda data: httpx.Response(200, json={"data": data})  # noqa: E731
 
 
 @respx.mock
-def test_happy_path_maps_segments_and_deletes():
+def test_upload_hands_the_job_back_with_a_webhook():
     api, ff = make()
     routes = mock_api()
-    seen = graphql({
-        "uploadAudio": [ok({"uploadAudio": {"success": True, "title": "uic-c1", "message": "queued"}})],
-        "transcripts(": [ok({"transcripts": []}), ok({"transcripts": [{"id": "t-1", "title": "uic-c1"}]})],
-        "transcript(id": [ok({"transcript": TRANSCRIPT})],
-        "deleteTranscript": [ok({"deleteTranscript": {"id": "t-1"}})],
-    })
+    seen = graphql({"uploadAudio": [ok({"uploadAudio": {"success": True, "title": "uic-c1", "message": "queued"}})]})
     process_job(api, ff, JOB, None)
 
     upload = next(b for b in seen if "uploadAudio" in b["query"])["variables"]["input"]
     assert upload["url"].startswith("https://") and upload["title"] == "uic-c1" and upload["client_reference_id"] == "c1"
+    assert upload["webhook"] == "https://calls.example/public/fireflies/webhook/c1?sig=y"
+    assert routes["uploaded"].called and routes["wait"].called
+    assert not routes["result"].called and not routes["finalize"].called  # waits on the server, not in the worker
+    assert len(seen) == 1  # no polling at all
+
+
+@respx.mock
+def test_ready_transcript_maps_segments_and_deletes():
+    api, ff = make()
+    routes = mock_api({"status": "reserved", "reservationId": "r1", "minutes": 3, "uploaded": True, "deleteAfterFetch": True})
+    seen = graphql({
+        "transcripts(": [ok({"transcripts": [{"id": "t-1", "title": "uic-c1"}]})],
+        "transcript(id": [ok({"transcript": TRANSCRIPT})],
+        "deleteTranscript": [ok({"deleteTranscript": {"id": "t-1"}})],
+    })
+    process_job(api, ff, JOB, None)
+    assert not any("uploadAudio" in b["query"] for b in seen)
     assert any("deleteTranscript" in b["query"] for b in seen)
-    assert routes["uploaded"].called
     assert json.loads(routes["finalize"].calls.last.request.content) == {"actualMinutes": 3}
+    assert not routes["wait"].called
     body = json.loads(routes["result"].calls.last.request.content)
     assert body["ok"] is True and body["provider"] == "fireflies"
     assert body["text"] == "Hello\nWorld"
@@ -95,13 +110,10 @@ def test_rate_limit_respects_retry_after():
                            json={"errors": [{"message": "slow down", "code": "too_many_requests"}]}),
             ok({"uploadAudio": {"success": True}}),
         ],
-        "transcripts(": [ok({"transcripts": [{"id": "t-1", "title": "uic-c1"}]})],
-        "transcript(id": [ok({"transcript": TRANSCRIPT})],
     })
     process_job(api, ff, JOB, None)
     assert sleeps[0] == 7.0
     assert sum("uploadAudio" in b["query"] for b in seen) == 2
-    assert not any("deleteTranscript" in b["query"] for b in seen)  # deleteAfterFetch false
 
 
 @respx.mock
@@ -155,17 +167,25 @@ def test_retry_after_upload_only_polls():
 
 
 @respx.mock
-def test_poll_timeout_is_retryable_and_keeps_reservation():
+def test_not_ready_check_hands_back_again_and_keeps_reservation():
     api, ff = make()
-    routes = mock_api()
-    graphql({
-        "uploadAudio": [ok({"uploadAudio": {"success": True}})],
-        "transcripts(": [ok({"transcripts": []})],
-    })
+    routes = mock_api({"status": "reserved", "reservationId": "r1", "minutes": 3, "uploaded": True, "deleteAfterFetch": True})
+    seen = graphql({"transcripts(": [ok({"transcripts": []})]})
     process_job(api, ff, JOB, None)
-    body = json.loads(routes["result"].calls.last.request.content)
-    assert body["ok"] is False and body["retryable"] is True and "TimeoutError" in body["error"]
-    assert not routes["finalize"].called  # uploaded: retry polls instead of uploading again
+    assert routes["wait"].called
+    assert not routes["result"].called  # no failed attempt
+    assert not routes["finalize"].called  # uploaded: never uploaded or released again
+    assert len(seen) == 1  # one look, no waiting
+
+
+@respx.mock
+def test_gave_up_after_a_day_posts_nothing():
+    api, ff = make()
+    routes = mock_api({"status": "reserved", "reservationId": "r1", "minutes": 3, "uploaded": True, "deleteAfterFetch": True})
+    routes["wait"].mock(return_value=httpx.Response(200, json={"status": "failed"}))
+    graphql({"transcripts(": [ok({"transcripts": []})]})
+    process_job(api, ff, JOB, None)
+    assert not routes["result"].called  # the server already failed the job
 
 
 @respx.mock

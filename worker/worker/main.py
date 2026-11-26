@@ -173,6 +173,15 @@ class Api:
             res.raise_for_status()
 
     @_network_retry
+    def fireflies_wait(self, job_id: str) -> str:
+        """Hands a Fireflies job back to wait for its transcript: "waiting", or "failed" (gave up after 24h)."""
+        res = self.http.post(f"/internal/fireflies/jobs/{job_id}/wait", json={"workerId": self.worker_id})
+        if res.status_code == 409:
+            raise Deferred("lost job lock")
+        res.raise_for_status()
+        return res.json().get("status", "waiting")
+
+    @_network_retry
     def fireflies_finalize(self, reservation_id: str, actual_minutes: int | None = None) -> None:
         body = {"actualMinutes": actual_minutes} if actual_minutes is not None else {}
         res = self.http.post(f"/internal/fireflies/reservations/{reservation_id}/finalize", json=body)

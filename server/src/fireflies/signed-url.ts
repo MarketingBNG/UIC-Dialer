@@ -26,3 +26,20 @@ export function verifyAudioSignature(secret: string, callId: string, exp: string
   const given = Buffer.from(sig);
   return given.length === expected.length && timingSafeEqual(given, expected);
 }
+
+// Webhook links: Fireflies calls one when a transcript is ready, which can be many hours after upload, so these
+// don't expire. A valid one only makes the job check Fireflies again sooner; nothing is read or written from it.
+const webhookKey = (secret: string) => createHmac("sha256", secret).update("uic:fireflies-webhook:v1").digest();
+const webhookSig = (secret: string, callId: string) => createHmac("sha256", webhookKey(secret)).update(callId).digest("base64url");
+
+/** Path + query of the webhook Fireflies calls when this call's transcript is ready. */
+export function signWebhookPath(secret: string, callId: string): string {
+  return `/public/fireflies/webhook/${callId}?sig=${webhookSig(secret, callId)}`;
+}
+
+export function verifyWebhookSignature(secret: string, callId: string, sig: string | undefined): boolean {
+  if (!sig) return false;
+  const expected = Buffer.from(webhookSig(secret, callId));
+  const given = Buffer.from(sig);
+  return given.length === expected.length && timingSafeEqual(given, expected);
+}
