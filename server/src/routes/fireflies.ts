@@ -28,7 +28,7 @@ export async function firefliesRoutes(app: FastifyInstance, deps: Deps) {
   app.post<{ Params: { jobId: string } }>("/internal/fireflies/jobs/:jobId/reserve", worker, async (req) => {
     const jobId = z.uuid().parse(req.params.jobId);
     const { workerId } = WorkerBody.parse(req.body);
-    const r = await reserveForJob(deps.db, jobId, workerId);
+    const r = await reserveForJob(deps.db, jobId, workerId, new Date(), deps.config.FIREFLIES_MAX_IN_FLIGHT);
     if (r.status === "lost") throw new HttpError(409, "Job is not locked by this worker");
     return r;
   });

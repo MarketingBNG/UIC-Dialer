@@ -82,7 +82,9 @@ export type ReserveResult =
  * Serialized with an advisory lock so concurrent workers can't overspend.
  * On refusal the job is deferred (WAITING_BUDGET) and keeps its attempts.
  */
-export async function reserveForJob(db: Db, jobId: string, workerId: string, now = new Date()): Promise<ReserveResult> {
+export async function reserveForJob(
+  db: Db, jobId: string, workerId: string, now = new Date(), maxInFlight = MAX_IN_FLIGHT,
+): Promise<ReserveResult> {
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('uic:fireflies-budget'))`;
     const job = await tx.job.findFirst({
@@ -135,7 +137,7 @@ export async function reserveForJob(db: Db, jobId: string, workerId: string, now
     }
 
     const waiting = await inFlight(tx);
-    if (waiting >= MAX_IN_FLIGHT) {
+    if (waiting >= maxInFlight) {
       return refuse("IN_FLIGHT", new Date(now.getTime() + RECHECK_MS), `${waiting} calls already with Fireflies; waiting for them first`);
     }
 

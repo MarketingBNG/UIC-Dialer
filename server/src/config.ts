@@ -83,6 +83,9 @@ const schema = z.object({
 
   // Audio uploads (PUT /v1/calls/:id/audio) allowed per phone per hour; extra ones get 429 and retry later.
   UPLOAD_RATE_PER_HOUR: z.coerce.number().int().positive().default(2000),
+  // Calls uploaded to Fireflies and still waiting for a transcript at once. Fireflies slows to a crawl when handed
+  // hundreds at a time; 20-40 gave ~200 an hour.
+  FIREFLIES_MAX_IN_FLIGHT: z.coerce.number().int().positive().default(40),
 });
 
 export type Config = z.infer<typeof schema>;

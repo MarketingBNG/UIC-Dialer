@@ -3,7 +3,7 @@ import { Readable } from "node:stream";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { estimateMinutes, nextMonthStart, reserveForJob } from "../src/fireflies/budget.js";
 import { DEFAULT_FIREFLIES_CONFIG, saveFirefliesState } from "../src/fireflies/settings.js";
-import { MAX_IN_FLIGHT, WAIT_PREFIX } from "../src/fireflies/waiting.js";
+import { MAX_IN_FLIGHT, SLOW_PREFIX, WAIT_PREFIX } from "../src/fireflies/waiting.js";
 import { signWebhookPath } from "../src/fireflies/signed-url.js";
 import { signAudioPath, verifyAudioSignature } from "../src/fireflies/signed-url.js";
 import { setupTestApp, sha256, uniqueEmail } from "./helpers.js";
@@ -89,7 +89,7 @@ describe("signed audio URL", () => {
 
   it("rejects expired signatures", async () => {
     const callId = randomUUID();
-    const past = Date.now() - 4 * 3600_000;
+    const past = Date.now() - 25 * 3600_000;
     const { path } = signAudioPath(SECRET, callId, ".m4a", past);
     const q = new URL(path, "http://x").searchParams;
     expect(verifyAudioSignature(SECRET, callId, q.get("exp")!, q.get("sig")!, past)).toBe(true);
@@ -199,16 +199,23 @@ describe("budget reservation", () => {
     expect(job.status).toBe("WAITING_BUDGET");
   });
 
-  it("gives up a day after the upload", async () => {
+  it("never times out: a day after the upload it keeps waiting hourly, outside the in-flight limit", async () => {
     await setCfg({ budgetMinutes: 100 });
     const a = await runningJob({ durationS: 60 });
     const ra = (await reserveHttp(a.jobId)).json();
     await t.app.inject({ method: "POST", url: `/internal/fireflies/reservations/${ra.reservationId}/uploaded`, headers: t.workerHeaders, payload: {} });
     await t.db.firefliesReservation.update({ where: { id: ra.reservationId }, data: { uploadedAt: new Date(Date.now() - 25 * 3600_000) } });
     const wait = await t.app.inject({ method: "POST", url: `/internal/fireflies/jobs/${a.jobId}/wait`, headers: t.workerHeaders, payload: { workerId: "w1" } });
-    expect(wait.json()).toEqual({ status: "failed" });
-    expect(await t.db.job.findUniqueOrThrow({ where: { id: a.jobId } })).toMatchObject({ status: "FAILED", lockedBy: null });
-    expect((await t.db.call.findUniqueOrThrow({ where: { id: a.callId } })).status).toBe("FAILED");
+    expect(wait.json()).toEqual({ status: "waiting" });
+    const job = await t.db.job.findUniqueOrThrow({ where: { id: a.jobId } });
+    expect(job.status).toBe("WAITING_BUDGET");
+    expect(job.lastError?.startsWith(SLOW_PREFIX)).toBe(true);
+    expect(job.runAfter.getTime()).toBeGreaterThan(Date.now() + 50 * 60_000);
+    expect(await t.db.job.count({ where: { callId: a.callId, lastError: { startsWith: WAIT_PREFIX } } })).toBe(0); // not counted
+    // The webhook still brings it back at once.
+    await t.app.inject({ method: "POST", url: signWebhookPath(t.config.JWT_SECRET, a.callId), payload: {} });
+    expect((await t.db.job.findUniqueOrThrow({ where: { id: a.jobId } })).runAfter.getTime()).toBeLessThanOrEqual(Date.now());
+    await t.db.job.update({ where: { id: a.jobId }, data: { status: "DONE" } });
   });
 
   it("stops new uploads while MAX_IN_FLIGHT calls are with Fireflies, but still checks uploaded ones", async () => {

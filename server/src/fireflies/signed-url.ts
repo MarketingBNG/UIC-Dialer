@@ -1,7 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 /** How long a public audio link handed to Fireflies stays valid. */
-export const AUDIO_URL_TTL_S = 3 * 3600;
+export const AUDIO_URL_TTL_S = 24 * 3600; // Fireflies can take many hours to fetch a queued upload
 
 // A key derived from the server secret, so the raw JWT secret is never used for two purposes.
 const keyFor = (secret: string) => createHmac("sha256", secret).update("uic:public-audio-url:v1").digest();
