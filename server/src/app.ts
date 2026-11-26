@@ -97,7 +97,18 @@ export async function buildApp(deps: Deps, opts: FastifyServerOptions = {}) {
   await app.register(async (s) => teamRoutes(s, deps));
 
   if (publicDir) {
-    await app.register(fastifyStatic, { root: publicDir, wildcard: false });
+    await app.register(fastifyStatic, {
+      root: publicDir,
+      wildcard: false,
+      // Built files under /assets/ have a content hash in the name, so they never change: the browser and the
+      // Windows app keep them for good and start without downloading them again. index.html is always re-checked
+      // so a new release (new file names) shows up on the next load.
+      cacheControl: false,
+      setHeaders: (res, filePath) => {
+        const immutable = /[\\/]assets[\\/]/.test(filePath);
+        res.header("cache-control", immutable ? "public, max-age=31536000, immutable" : "no-cache");
+      },
+    });
     app.setNotFoundHandler((req, reply) => {
       const isApi = /^\/(api|v1|internal|auth)\b/.test(req.url);
       if (req.method === "GET" && !isApi) return reply.sendFile("index.html");
