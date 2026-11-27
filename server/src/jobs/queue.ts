@@ -369,6 +369,9 @@ const EMPTY_SUMMARY = {
 
 /** Queues a summarize job for a call unless one is already queued (a running one is superseded by the caller). */
 async function queueSummary(tx: Tx, callId: string, priority: number): Promise<void> {
+  // Nothing said (empty transcript): no summary to make, so don't queue a job that can only fail.
+  const t = await tx.transcript.findUnique({ where: { callId }, select: { text: true, textEn: true } });
+  if (!t || !(t.textEn ?? t.text ?? "").trim()) return;
   const open = await tx.job.findFirst({ where: { callId, kind: "summarize", status: "QUEUED" }, select: { id: true } });
   if (!open) await tx.job.create({ data: { callId, kind: "summarize", priority } });
 }

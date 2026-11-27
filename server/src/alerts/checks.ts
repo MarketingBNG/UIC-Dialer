@@ -3,6 +3,7 @@ import { firefliesUsage } from "../fireflies/budget.js";
 import type { LocalStorage } from "../storage/local.js";
 import { type AlertSender, resolveAlert, sendAlert } from "./cliq.js";
 import { jobStats } from "./metrics.js";
+import { dailyPhoneReport } from "./dailyReport.js";
 import { CALLS_NO_REC_MIN, HEALTH_FRESH_MS, LOW_REC_MIN_CALLS, fewRecordings } from "../devices/health.js";
 import { translationUsage } from "../translation/cost.js";
 
@@ -222,6 +223,7 @@ export async function runChecks(db: Db, storage: LocalStorage, send: AlertSender
     if (c.firing) await sendAlert(db, send, c.key, c.text, now, { repeat: c.repeat ?? true });
     else await resolveAlert(db, send, c.key, c.text, now);
   }
+  await dailyPhoneReport(db, send, now).catch(() => false);
   // Prune old worker IDs but always keep the newest, so a long outage keeps alerting.
   await db.$executeRaw`
     DELETE FROM "worker_seen" WHERE "last_seen_at" < ${new Date(now.getTime() - WORKER_SEEN_KEEP_MS)}
