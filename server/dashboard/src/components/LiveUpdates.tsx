@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
 import { RING_EVENT } from "./IncomingCall";
+import { DIAL_ACK_EVENT } from "../remoteDial";
 
 /**
  * Keeps the dashboard / Windows app in step with the phone: the server sends a small
@@ -29,6 +30,14 @@ export function LiveUpdates() {
     es.addEventListener("ringing", (e) => {
       try {
         window.dispatchEvent(new CustomEvent(RING_EVENT, { detail: JSON.parse((e as MessageEvent<string>).data) }));
+      } catch {
+        /* ignore malformed */
+      }
+    });
+    // The rep's phone answered a "dial this" request from this laptop (see dialer.tsx).
+    es.addEventListener("dialack", (e) => {
+      try {
+        window.dispatchEvent(new CustomEvent(DIAL_ACK_EVENT, { detail: JSON.parse((e as MessageEvent<string>).data) }));
       } catch {
         /* ignore malformed */
       }

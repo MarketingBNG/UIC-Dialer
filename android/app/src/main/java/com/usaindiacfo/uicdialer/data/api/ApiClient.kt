@@ -232,6 +232,10 @@ class ApiClient(
     /** Incoming call state for the rep's desktop: "ringing" (with number), "answered" or "ended". */
     suspend fun postRinging(state: String, phone: String? = null): RingResponse = post("/v1/ringing", RingRequest(state, phone))
 
+    /** Tells the rep's laptop whether this phone dialled the number it asked for ("Calls from PC"). */
+    suspend fun postDialAck(id: String, ok: Boolean, error: String? = null): RingResponse =
+        post("/v1/remote-dial/ack", DialAckRequest(id, ok, error))
+
     suspend fun postMissed(items: List<MissedCallItem>): MissedCallResponse =
         post("/v1/followups/missed", MissedCallBatch(items))
 

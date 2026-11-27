@@ -54,6 +54,7 @@ class BootReceiver : BroadcastReceiver() {
                 ReminderScheduler.rearm(context)
                 Reminders.enqueueSync(context)
                 Reminders.scheduleMorning(context)
+                com.usaindiacfo.uicdialer.dialer.RemoteDialService.startIfEnabled(context)
             }
         }
     }

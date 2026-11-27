@@ -87,6 +87,8 @@ fun SettingsScreen(onOpenSetup: () -> Unit, onOpenGuide: () -> Unit, onOpenAdmin
 
             Section("Sync") { SyncStatus(onOpenSetup) }
 
+            Section("Calls from PC") { CallsFromPcSetting() }
+
             Section("Morning summary") { RemindersSettings() }
 
             NavRow("Phone setup", "Fix permissions and phone settings", onOpenSetup)
@@ -121,6 +123,27 @@ fun SettingsScreen(onOpenSetup: () -> Unit, onOpenGuide: () -> Unit, onOpenAdmin
             },
             dismissButton = { TextButton(onClick = { confirmSignOut = false }) { Text("Cancel") } },
         )
+    }
+}
+
+/** "Calls from PC": the laptop's Call button makes this phone dial (see RemoteDialService). */
+@Composable
+private fun CallsFromPcSetting() {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var on by remember { mutableStateOf(com.usaindiacfo.uicdialer.dialer.RemoteDialService.isEnabled(context)) }
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text("Dial from my laptop", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                "Click Call in UIC Dialer on your PC and this phone dials by itself. Shows a small notification while on.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        androidx.compose.material3.Switch(checked = on, onCheckedChange = {
+            on = it
+            com.usaindiacfo.uicdialer.dialer.RemoteDialService.set(context, it)
+        })
     }
 }
 

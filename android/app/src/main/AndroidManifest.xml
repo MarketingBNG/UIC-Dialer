@@ -21,6 +21,8 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Old-recording uploads run as a visible "Uploading…" notification (like WhatsApp backup) so Android doesn't stop them. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- "Calls from PC": a small ongoing notification keeps the phone ready to dial for the rep's laptop. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
@@ -114,6 +116,14 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/update_file_paths" />
         </provider>
+        <service
+            android:name=".dialer.RemoteDialService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps a live connection so the user's own laptop can ask this phone to place a call (click-to-call from PC)." />
+        </service>
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             android:foregroundServiceType="dataSync"

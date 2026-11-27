@@ -2,6 +2,7 @@ import { toast } from "sonner";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { ApiError, api, type OutcomeDto } from "./api";
+import { dialOnPhone } from "./remoteDial";
 import { fromLocalInput } from "./format";
 import { OutcomeButtons, datePrompt, quickPicks, useOutcomes } from "./components/Outcomes";
 import { AlertTriangle, CalendarClock, Check, ClipboardCheck, Phone, PhoneCall, ShieldAlert } from "lucide-react";
@@ -122,13 +123,26 @@ export function DialerProvider({ children }: { children: ReactNode }) {
     setPending(p);
   };
 
-  const dial = useCallback((p: PendingCall) => {
+  const dial = useCallback(async (p: PendingCall, viaPhone = true) => {
     update({ ...p, at: Date.now() });
     left.current = false;
     setAsking(false);
-    // The desktop shell hands window.open'd tel: links to Windows (Phone Link); a browser follows the link itself.
-    if (isDesktopApp()) window.open(`tel:${p.phone}`);
-    else window.location.href = `tel:${p.phone}`;
+    // One click: the UIC app on the rep's phone dials by itself (Phone Link still brings the audio here).
+    // Needs the dial intent, which only exists when the check above went through.
+    const onPhone = viaPhone ? await dialOnPhone(p.clientId) : { result: "unavailable" as const };
+    if (onPhone.result === "failed") {
+      toast.error(`Your phone couldn't dial${onPhone.error ? `: ${onPhone.error}` : ""}.`);
+      update(null);
+      return;
+    }
+    if (onPhone.result === "unavailable") {
+      // No phone listening: the desktop shell hands window.open'd tel: links to Windows (Phone Link); a browser
+      // follows the link itself.
+      if (isDesktopApp()) window.open(`tel:${p.phone}`);
+      else window.location.href = `tel:${p.phone}`;
+    } else {
+      toast.success("Calling on your phone…");
+    }
     // Legal: the other person must be told the call is recorded (India DPDP notice; US all-party-consent states).
     toast("Tell the caller: “This call is recorded for quality and records.”", { duration: 8000 });
   }, []);
@@ -160,7 +174,7 @@ export function DialerProvider({ children }: { children: ReactNode }) {
           return;
         }
       }
-      dial(p);
+      void dial(p);
     },
     [dial],
   );
@@ -246,7 +260,8 @@ export function DialerProvider({ children }: { children: ReactNode }) {
                 const p = dnc.call;
                 setDnc(null);
                 // Dial right away (inside the click), then record the override; the call record arrives much later.
-                dial(p);
+                // Straight to Phone Link: the phone path needs the intent, which is only recorded after this.
+                void dial(p, false);
                 api("/api/dial-intents", { method: "POST", body: { clientId: p.clientId, phone: p.phone, override: true } }).catch(() => {});
               }}
             >

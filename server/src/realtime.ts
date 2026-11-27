@@ -4,7 +4,7 @@ import pg from "pg";
 import { z } from "zod";
 import { requireDevice, requireSession } from "./auth/guards.js";
 import { toE164 } from "./phone.js";
-import { currentUser, type Deps } from "./context.js";
+import { currentUser, HttpError, type Deps } from "./context.js";
 
 /**
  * Live "something changed" notices for the dashboard / Windows app and the phone app.
@@ -16,7 +16,7 @@ import { currentUser, type Deps } from "./context.js";
  * Postgres LISTEN/NOTIFY.
  */
 
-export type Topic = "activity" | "contacts" | "followups" | "calls" | "lists" | "settings" | "ringing";
+export type Topic = "activity" | "contacts" | "followups" | "calls" | "lists" | "settings" | "ringing" | "dial" | "dialack";
 export interface ChangeEvent {
   topic: Topic;
   /** Owner of the change; null = relevant to everyone. */
@@ -26,7 +26,30 @@ export interface ChangeEvent {
    * Delivered to that rep's streams only (not to managers), since it carries the caller's number.
    */
   ring?: RingState;
+  /** Only for "dial": the rep's laptop asks their phone to place this call (sent to one phone stream). */
+  dial?: RemoteDial;
+  /** Only for "dialack": the phone's answer, sent to the rep's laptop / browser streams. */
+  ack?: DialAck;
 }
+
+export interface RemoteDial {
+  id: string;
+  phone: string;
+  /** Epoch ms when the laptop asked; the phone ignores requests older than a few seconds. */
+  at: number;
+}
+
+export interface DialAck {
+  id: string;
+  ok: boolean;
+  error?: string;
+}
+
+export const DialAckBody = z.object({
+  id: z.string().uuid(),
+  ok: z.boolean(),
+  error: z.string().max(200).optional(),
+});
 
 export interface RingState {
   state: "ringing" | "answered" | "ended";
@@ -61,6 +84,10 @@ const SCOPED: ReadonlySet<Topic> = new Set(["activity", "followups", "calls"]);
 
 interface Stream {
   userId: string;
+  /** Set for the phone app's stream (bearer sign-in); absent for the laptop / browser. */
+  deviceId?: string;
+  /** When the stream connected (the newest phone stream gets remote dials). */
+  since?: number;
   seesAll: boolean;
   send: (e: ChangeEvent) => void;
   end: () => void;
@@ -105,7 +132,27 @@ export class Realtime {
     return this.streams.size;
   }
 
+  /** Phone streams of [userId] connected to this instance. */
+  phonesFor(userId: string): number {
+    let n = 0;
+    for (const s of this.streams) if (s.userId === userId && s.deviceId) n++;
+    return n;
+  }
+
   private deliver(e: ChangeEvent): void {
+    if (e.topic === "dial") {
+      // One phone only: two signed-in phones must not both dial. The newest connection is the phone in use.
+      let target: Stream | undefined;
+      for (const s of this.streams) {
+        if (s.userId === e.userId && s.deviceId && (!target || (s.since ?? 0) > (target.since ?? 0))) target = s;
+      }
+      target?.send(e);
+      return;
+    }
+    if (e.topic === "dialack") {
+      for (const s of this.streams) if (s.userId === e.userId && !s.deviceId) s.send(e);
+      return;
+    }
     if (e.topic === "ringing") {
       for (const s of this.streams) if (e.userId !== null && s.userId === e.userId) s.send(e);
       return;
@@ -137,7 +184,7 @@ export class Realtime {
     client.on("notification", (msg) => {
       try {
         const e = JSON.parse(msg.payload ?? "") as ChangeEvent & { from?: string };
-        if (e.from !== this.instance) this.deliver({ topic: e.topic, userId: e.userId ?? null, ...(e.ring ? { ring: e.ring } : {}) });
+        if (e.from !== this.instance) this.deliver({ topic: e.topic, userId: e.userId ?? null, ...(e.ring ? { ring: e.ring } : {}), ...(e.dial ? { dial: e.dial } : {}), ...(e.ack ? { ack: e.ack } : {}) });
       } catch {
         /* ignore malformed */
       }
@@ -199,6 +246,27 @@ export async function realtimeRoutes(app: FastifyInstance, deps: Deps) {
     return { ok: true };
   });
 
+  // The phone answers a remote dial: placed (ok) or not (error). Shown on the rep's laptop.
+  app.post("/v1/remote-dial/ack", device, async (req) => {
+    const body = DialAckBody.parse(req.body);
+    await rt.publish({ topic: "dialack", userId: currentUser(req).id, ack: { id: body.id, ok: body.ok, ...(body.error ? { error: body.error } : {}) } });
+    return { ok: true };
+  });
+
+  // The laptop asks the rep's phone to dial. The number comes from the rep's own dial intent (made just before,
+  // with the do-not-call check), so this can only dial what the rep was allowed to dial.
+  const sessionOnly = { preHandler: requireSession(deps), config: { rateLimit: { max: 30, timeWindow: "1 minute" } } };
+  app.post("/api/remote-dial", sessionOnly, async (req) => {
+    const user = currentUser(req);
+    const { clientId } = RemoteDialBody.parse(req.body);
+    const intent = await deps.db.dialIntent.findUnique({ where: { clientId } });
+    if (!intent || intent.userId !== user.id) throw new HttpError(404, "Dial not found");
+    if (Date.now() - intent.createdAt.getTime() > 60_000) throw new HttpError(409, "Dial request expired");
+    const phones = rt.phonesFor(user.id);
+    if (phones > 0) await rt.publish({ topic: "dial", userId: user.id, dial: { id: clientId, phone: intent.phoneE164, at: Date.now() } });
+    return { phones };
+  });
+
   const anyone = { preHandler: requireSession(deps), config: { rateLimit: { max: 30, timeWindow: "1 minute" } } };
   app.get("/api/events", anyone, async (req, reply) => {
     const user = currentUser(req);
@@ -220,8 +288,10 @@ export async function realtimeRoutes(app: FastifyInstance, deps: Deps) {
     write(`retry: 3000\nevent: ready\ndata: {}\n\n`);
     const unsubscribe = rt.subscribe({
       userId: user.id,
+      ...(req.device ? { deviceId: req.device.id } : {}),
+      since: Date.now(),
       seesAll: user.role !== "AGENT",
-      send: (e) => write(e.topic === "ringing" ? `event: ringing\ndata: ${JSON.stringify(e.ring)}\n\n` : `event: change\ndata: ${JSON.stringify(e)}\n\n`),
+      send: (e) => write(sseFor(e)),
       end: () => {
         done();
         res.end();
@@ -239,6 +309,16 @@ export async function realtimeRoutes(app: FastifyInstance, deps: Deps) {
     }, MAX_STREAM_MS);
     req.raw.on("close", done);
   });
+}
+
+const RemoteDialBody = z.object({ clientId: z.string().uuid() });
+
+/** One server-sent event for [e]. */
+function sseFor(e: ChangeEvent): string {
+  if (e.topic === "ringing") return `event: ringing\ndata: ${JSON.stringify(e.ring)}\n\n`;
+  if (e.topic === "dial") return `event: dial\ndata: ${JSON.stringify(e.dial)}\n\n`;
+  if (e.topic === "dialack") return `event: dialack\ndata: ${JSON.stringify(e.ack)}\n\n`;
+  return `event: change\ndata: ${JSON.stringify(e)}\n\n`;
 }
 
 declare module "fastify" {

@@ -32,6 +32,8 @@ class MainActivity : ComponentActivity() {
         // The app is on screen, so Android allows the backlog's foreground notification: start a waiting backlog
         // run now. Started from the background it would get only ~10 minutes at a time.
         SyncScheduler.kickBacklogFromForeground(applicationContext)
+        // "Calls from PC" (if on): restart it if Android or a battery saver stopped it.
+        com.usaindiacfo.uicdialer.dialer.RemoteDialService.startIfEnabled(applicationContext)
         startFirstSyncIfReady()
     }
 

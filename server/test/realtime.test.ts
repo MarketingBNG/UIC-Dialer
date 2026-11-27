@@ -23,6 +23,8 @@ const randomMobile = () => `9${String(Math.floor(Math.random() * 1e9)).padStart(
 function listen(headers: Record<string, string>) {
   const events: { topic: string; userId: string | null }[] = [];
   const rings: { state: string; phone: string | null }[] = [];
+  const dials: { id: string; phone: string; at: number }[] = [];
+  const acks: { id: string; ok: boolean; error?: string }[] = [];
   let status = 0;
   let req!: http.ClientRequest;
   const ready = new Promise<void>((resolve, reject) => {
@@ -41,13 +43,17 @@ function listen(headers: Record<string, string>) {
           if (data) events.push(JSON.parse(data[1]!));
           const ring = /^event: ringing\ndata: (.*)$/m.exec(block);
           if (ring) rings.push(JSON.parse(ring[1]!));
+          const dial = /^event: dial\ndata: (.*)$/m.exec(block);
+          if (dial) dials.push(JSON.parse(dial[1]!));
+          const ack = /^event: dialack\ndata: (.*)$/m.exec(block);
+          if (ack) acks.push(JSON.parse(ack[1]!));
         }
       });
       if (status !== 200) resolve();
     });
     req.on("error", reject);
   });
-  return { events, rings, ready, status: () => status, close: () => req.destroy() };
+  return { events, rings, dials, acks, ready, status: () => status, close: () => req.destroy() };
 }
 
 const waitFor = async (cond: () => boolean, ms = 3000) => {
@@ -136,6 +142,55 @@ describe("GET /api/events", () => {
     expect((await t.app.inject({ method: "POST", url: "/v1/ringing", payload: { state: "ringing" } })).statusCode).toBe(401);
     const rep = await t.loginDevice(uniqueEmail("rep"));
     expect((await t.app.inject({ method: "POST", url: "/v1/ringing", headers: rep.headers, payload: { state: "boom" } })).statusCode).toBe(400);
+  });
+
+  it("dials on the rep's phone from the laptop (one phone only) and tells the laptop it did", async () => {
+    const repEmail = uniqueEmail("rep");
+    const phone = await t.loginDevice(repEmail);
+    const cookie = await t.sessionFor(repEmail);
+    const other = await t.loginDevice(uniqueEmail("rep"));
+    const desk = listen(cookie);
+    const ph = listen(phone.headers);
+    const otherPhone = listen(other.headers);
+    await Promise.all([desk.ready, ph.ready, otherPhone.ready]);
+
+    const clientId = randomUUID();
+    const origin = { origin: new URL(t.config.PUBLIC_URL).origin };
+    const intent = await t.app.inject({ method: "POST", url: "/api/dial-intents", headers: { ...cookie, ...origin }, payload: { clientId, phone: "98765 43210" } });
+    expect(intent.statusCode).toBe(200);
+    const res = await t.app.inject({ method: "POST", url: "/api/remote-dial", headers: { ...cookie, ...origin }, payload: { clientId } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ phones: 1 });
+    await waitFor(() => ph.dials.length > 0);
+    expect(ph.dials[0]).toMatchObject({ id: clientId, phone: "+919876543210" });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(desk.dials).toEqual([]);
+    expect(otherPhone.dials).toEqual([]);
+
+    const ack = await t.app.inject({ method: "POST", url: "/v1/remote-dial/ack", headers: phone.headers, payload: { id: clientId, ok: true } });
+    expect(ack.statusCode).toBe(200);
+    await waitFor(() => desk.acks.length > 0);
+    expect(desk.acks[0]).toEqual({ id: clientId, ok: true });
+    expect(ph.acks).toEqual([]);
+    for (const s of [desk, ph, otherPhone]) s.close();
+  });
+
+  it("refuses a remote dial without the rep's own dial intent, and reports no phone online", async () => {
+    const repEmail = uniqueEmail("rep");
+    await t.loginDevice(repEmail);
+    const cookie = await t.sessionFor(repEmail);
+    const origin = { origin: new URL(t.config.PUBLIC_URL).origin };
+    const missing = await t.app.inject({ method: "POST", url: "/api/remote-dial", headers: { ...cookie, ...origin }, payload: { clientId: randomUUID() } });
+    expect(missing.statusCode).toBe(404);
+    const clientId = randomUUID();
+    await t.app.inject({ method: "POST", url: "/api/dial-intents", headers: { ...cookie, ...origin }, payload: { clientId, phone: "98765 43211" } });
+    const otherEmail = uniqueEmail("rep");
+    await t.loginDevice(otherEmail);
+    const otherCookie = await t.sessionFor(otherEmail);
+    const notMine = await t.app.inject({ method: "POST", url: "/api/remote-dial", headers: { ...otherCookie, ...origin }, payload: { clientId } });
+    expect(notMine.statusCode).toBe(404);
+    const none = await t.app.inject({ method: "POST", url: "/api/remote-dial", headers: { ...cookie, ...origin }, payload: { clientId } });
+    expect(none.json()).toEqual({ phones: 0 });
   });
 
   it("does not notify on failed writes", async () => {
