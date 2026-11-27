@@ -253,6 +253,8 @@ def process_job(api: Api, provider: Provider, job: dict, language: str | None) -
         payload = {"ok": True, "text": text, "provider": t.provider, "segments": segments}
         if t.language:
             payload["language"] = t.language
+        if t.tag:
+            payload["tag"] = t.tag
         api.post_result(job_id, payload)
     log.info("job done", job_id=job_id, call_id=job["callId"], seconds=round(time.monotonic() - started, 1),
              chars=len(text))

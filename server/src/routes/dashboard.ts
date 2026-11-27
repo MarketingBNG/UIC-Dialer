@@ -43,6 +43,8 @@ const ListQuery = z.object({
   to: z.iso.datetime({ offset: true }).optional(),
   cursor: z.uuid().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
+  /** Calls the transcriber tagged (no real talk): VOICEMAIL, NO_SPEECH, or ANY of them. */
+  tag: z.enum(["VOICEMAIL", "NO_SPEECH", "ANY"]).optional(),
 });
 
 const UserBody = z.object({
@@ -117,6 +119,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     }
     if (q.direction) and.push({ direction: q.direction });
     if (q.status) and.push({ status: q.status });
+    if (q.tag) and.push({ transcript: { tag: q.tag === "ANY" ? { not: null } : q.tag } });
     if (Number(q.v ?? "1") < 2) and.push({ status: { not: "NO_RECORDING" } });
     if (q.phone) and.push({ phoneE164: { contains: q.phone.replace(/[^\d+]/g, "") } });
     if (q.from || q.to) {
@@ -154,7 +157,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
         simSlot: true,
         simCarrier: true,
         user: { select: { id: true, name: true, email: true } },
-        transcript: { select: { language: true } },
+        transcript: { select: { language: true, tag: true } },
         score: { select: { overall: true } },
       },
     });
@@ -240,6 +243,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
             text: true,
             language: true,
             provider: true,
+            tag: true,
             segments: true,
             textEn: true,
             translationModel: true,

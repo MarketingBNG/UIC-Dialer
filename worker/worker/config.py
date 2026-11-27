@@ -31,6 +31,10 @@ class Settings:
     fireflies_api_key: str | None = None
     # Fireflies jobs are short now (upload, or one check), so this mostly bounds upload bursts.
     fireflies_concurrency: int = 20
+    # ElevenLabs Scribe (TRANSCRIBE_PROVIDER=elevenlabs; Fireflies is the fallback when its key is set)
+    elevenlabs_api_key: str | None = None
+    elevenlabs_model: str = "scribe_v1"
+    elevenlabs_concurrency: int = 4
     # English translation with Claude (off when no key)
     anthropic_api_key: str | None = None
     translate_model: str = "claude-opus-5-5"
@@ -64,6 +68,9 @@ class Settings:
             openai_model=e.get("OPENAI_TRANSCRIBE_MODEL", "whisper-1"),
             fireflies_api_key=e.get("FIREFLIES_API_KEY") or None,
             fireflies_concurrency=max(1, int(e.get("FIREFLIES_CONCURRENCY", "20"))),
+            elevenlabs_api_key=e.get("ELEVENLABS_API_KEY") or None,
+            elevenlabs_model=e.get("ELEVENLABS_MODEL") or "scribe_v1",
+            elevenlabs_concurrency=max(1, int(e.get("ELEVENLABS_CONCURRENCY", "4"))),
             anthropic_api_key=e.get("ANTHROPIC_API_KEY") or None,
             translate_model=e.get("TRANSLATE_MODEL") or "claude-opus-5-5",
             # Backlog translations: one Message Batch per this many calls, or after this long.

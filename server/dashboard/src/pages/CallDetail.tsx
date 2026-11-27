@@ -22,7 +22,7 @@ import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import { callRowStatusText } from "../callStatus";
-import { DirectionTag, ErrorBox, FormError, Spinner, StatusBadge, ViaTag } from "../ui";
+import { DirectionTag, ErrorBox, FormError, Spinner, StatusBadge, TalkTag, ViaTag } from "../ui";
 
 const SPEEDS = [1, 1.25, 1.5, 2];
 
@@ -233,8 +233,8 @@ export function CallDetailPage() {
 
           <Card role="region" aria-labelledby="transcript-h" className="p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
-              <h2 id="transcript-h" className="font-semibold">
-                Transcript
+              <h2 id="transcript-h" className="flex items-center gap-2 font-semibold">
+                Transcript <TalkTag tag={c.transcript?.tag} />
               </h2>
               <div className="flex flex-wrap items-center gap-2">
                 {hasEnglish && (

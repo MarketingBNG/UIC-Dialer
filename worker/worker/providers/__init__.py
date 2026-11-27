@@ -11,6 +11,8 @@ class Transcript:
     provider: str
     language: str | None = None
     segments: list[dict] = field(default_factory=list)
+    # NO_SPEECH / VOICEMAIL: stored, but no translation or summary is made.
+    tag: str | None = None
 
 
 class PermanentError(Exception):
@@ -41,5 +43,14 @@ def load_provider(settings: Settings) -> Provider:
             from .fireflies import FirefliesProvider
 
             return FirefliesProvider(settings)
+        case "elevenlabs":
+            from .elevenlabs import ElevenLabsProvider
+
+            fallback = None
+            if settings.fireflies_api_key:
+                from .fireflies import FirefliesProvider
+
+                fallback = FirefliesProvider(settings)
+            return ElevenLabsProvider(settings, fallback=fallback)
         case other:
             raise SystemExit(f"Unknown TRANSCRIBE_PROVIDER: {other}")

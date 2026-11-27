@@ -11,9 +11,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { DirectionTag, Empty, ErrorBox, PageHeader, ScorePill, Spinner, StatusBadge, ViaTag } from "../ui";
+import { DirectionTag, Empty, ErrorBox, PageHeader, ScorePill, Spinner, StatusBadge, TalkTag, ViaTag } from "../ui";
 
-const FILTER_KEYS = ["q", "phone", "userId", "ownerId", "direction", "status", "from", "to"] as const;
+const FILTER_KEYS = ["q", "phone", "userId", "ownerId", "direction", "status", "tag", "from", "to"] as const;
 
 /** yyyy-mm-dd from a date input, read in the viewer's time zone. */
 function dayBoundary(day: string, end: boolean) {
@@ -67,12 +67,13 @@ export function CallsPage() {
     ownerId: manager ? get("ownerId") : "",
     direction: get("direction"),
     status: get("status"),
+    tag: get("tag"),
     from: dayBoundary(get("from"), false),
     to: dayBoundary(get("to"), true),
     // Include call-log-only calls (no recording).
     v: "2",
   };
-  const activeCount = [filters.phone, filters.userId, filters.ownerId, filters.direction, filters.status, get("from"), get("to")].filter(Boolean).length;
+  const activeCount = [filters.phone, filters.userId, filters.ownerId, filters.direction, filters.status, filters.tag, get("from"), get("to")].filter(Boolean).length;
 
   const users = useQuery({ queryKey: ["users"], queryFn: () => api<User[]>("/api/users"), enabled: manager });
 
@@ -174,6 +175,15 @@ export function CallsPage() {
               </NativeSelect>
             </div>
             <div>
+              <Label htmlFor="f-tag">Talk</Label>
+              <NativeSelect id="f-tag" value={get("tag")} onChange={(e) => set("tag", e.target.value)}>
+                <option value="">All calls</option>
+                <option value="ANY">Voicemail or no talk</option>
+                <option value="VOICEMAIL">Voicemail</option>
+                <option value="NO_SPEECH">No talk</option>
+              </NativeSelect>
+            </div>
+            <div>
               <Label htmlFor="f-from">From</Label>
               <Input id="f-from" type="date" value={get("from")} max={get("to") || undefined} onChange={(e) => set("from", e.target.value)} />
             </div>
@@ -221,7 +231,10 @@ export function CallsPage() {
                       <div className="truncate font-medium">{leadName(c) || c.phoneE164 || c.phoneRaw || "Unknown number"}</div>
                       {leadName(c) && <div className="truncate text-sm text-muted-foreground">{c.phoneE164 || c.phoneRaw}</div>}
                     </div>
-                    <StatusBadge status={c.status} logType={c.logType} direction={c.direction} durationS={c.durationS} />
+                    <div className="flex shrink-0 flex-col items-end gap-1">
+                      <StatusBadge status={c.status} logType={c.logType} direction={c.direction} durationS={c.durationS} />
+                      <TalkTag tag={c.transcript?.tag} />
+                    </div>
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                     <DirectionTag direction={c.direction} />
@@ -286,7 +299,10 @@ export function CallsPage() {
                       <div className="truncate">{c.lead?.owner ? personName(c.lead.owner) : "—"}</div>
                     </TableCell>
                     <TableCell>
-                      <StatusBadge status={c.status} logType={c.logType} direction={c.direction} durationS={c.durationS} />
+                      <div className="flex flex-wrap items-center gap-1">
+                        <StatusBadge status={c.status} logType={c.logType} direction={c.direction} durationS={c.durationS} />
+                        <TalkTag tag={c.transcript?.tag} />
+                      </div>
                     </TableCell>
                     {hasScores && <TableCell className="text-right tabular-nums">{c.score != null ? <ScorePill score={c.score} /> : "—"}</TableCell>}
                   </TableRow>

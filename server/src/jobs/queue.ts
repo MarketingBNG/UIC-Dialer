@@ -92,6 +92,8 @@ export interface TranscriptResult {
   language?: string | undefined;
   provider: string;
   segments?: unknown;
+  /** NO_SPEECH / VOICEMAIL: nothing worth translating or summarizing. */
+  tag?: string | undefined;
 }
 
 /**
@@ -113,6 +115,7 @@ export async function completeJob(
       language: result.language ?? null,
       provider: result.provider,
       segments: (result.segments ?? undefined) as object | undefined,
+      tag: result.tag ?? null,
       // A re-transcription invalidates any earlier English version.
       textEn: null,
       translationModel: null,
@@ -136,7 +139,13 @@ export async function completeJob(
       where: { callId: job.callId, kind: { in: [...CLAUDE_KINDS] }, status: "QUEUED", externalRef: { not: null } },
       data: { externalRef: null },
     });
-    if (opts.translate) {
+    if (result.tag) {
+      // No real talk (voicemail, rings): nothing to translate or summarize; drop any queued ones.
+      await tx.job.updateMany({
+        where: { callId: job.callId, kind: { in: [...CLAUDE_KINDS] }, status: "QUEUED" },
+        data: { status: "FAILED", lastError: SUPERSEDED, finishedAt: new Date() },
+      });
+    } else if (opts.translate) {
       // A queued summary would read the new, untranslated text: drop it; the translation queues a fresh one.
       await tx.job.updateMany({
         where: { callId: job.callId, kind: "summarize", status: "QUEUED" },

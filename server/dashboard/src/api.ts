@@ -34,7 +34,8 @@ export interface CallItem {
   simSlot?: number | null;
   simCarrier?: string | null;
   user: UserRef;
-  transcript: { language: string | null } | null;
+  /** tag: VOICEMAIL / NO_SPEECH when there was no real talk (not translated or summarized). */
+  transcript: { language: string | null; tag?: string | null } | null;
   /** Overall AI score (0..100); absent on older servers. */
   score?: number | null;
   /** The lead (CRM contact) with this number: its name and owner; null when the number isn't a lead. */
@@ -57,6 +58,8 @@ export interface CallDetail extends Omit<CallItem, "transcript" | "score"> {
     text: string;
     language: string | null;
     provider: string | null;
+    /** VOICEMAIL / NO_SPEECH: no real talk, so no translation or summary. */
+    tag?: string | null;
     /** Provider segments; after translation each object also carries `en`. */
     segments: unknown;
     textEn?: string | null;

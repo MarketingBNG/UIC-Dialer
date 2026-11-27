@@ -81,6 +81,23 @@ export function ToneBadge({ tone = "gray", children, className }: { tone?: Tone;
   );
 }
 
+/** Calls with no real talk (tagged by the transcriber): transcript kept, no summary. */
+export const TALK_TAG_LABEL: Record<string, string> = { VOICEMAIL: "Voicemail", NO_SPEECH: "No talk" };
+
+export function TalkTag({ tag }: { tag?: string | null }) {
+  if (!tag || !TALK_TAG_LABEL[tag]) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge variant="gray" tabIndex={0}>
+          {TALK_TAG_LABEL[tag]}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent>No real conversation, so no summary was made. The transcript is kept.</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export function StatusBadge({ status, logType, direction, durationS }: { status: CallStatus; logType?: string | null; direction?: Direction; durationS?: number | null }) {
   const t = callRowStatusText(status, logType, direction, durationS);
   return (

@@ -274,6 +274,8 @@ model Transcript {
   language  String?
   provider  String
   segments  Json? // after translation each segment also has "en"
+  // NO_SPEECH / VOICEMAIL (set by the ElevenLabs worker): kept, but not translated or summarized.
+  tag       String?
   // English version made by the worker's translate job; null until translated.
   textEn           String? @map("text_en")
   translationModel String? @map("translation_model")

@@ -101,6 +101,40 @@ describe("transcribe completion", () => {
     expect(tr.textEn).toBeNull();
   });
 
+  it("a tagged transcript (voicemail / no talk) is stored but not translated or summarized", async () => {
+    const call = await newCall();
+    await t.db.job.create({ data: { callId: call.id } });
+    // A summary queued earlier is dropped too.
+    await t.db.job.create({ data: { callId: call.id, kind: "summarize" } });
+    const [job] = (await claim({ workerId: "w1" })).json().jobs;
+    expect(job.firefliesUploaded).toBe(false);
+    const ok = { ok: true, workerId: "w1", text: "Your call has been forwarded to voicemail.", provider: "elevenlabs", tag: "VOICEMAIL" };
+    expect((await postResult(job.jobId, ok)).statusCode).toBe(204);
+    const tr = await t.db.transcript.findUniqueOrThrow({ where: { callId: call.id } });
+    expect(tr.tag).toBe("VOICEMAIL");
+    expect(tr.text).toBe(ok.text);
+    expect(await t.db.job.count({ where: { callId: call.id, kind: { in: ["translate", "summarize"] }, status: "QUEUED" } })).toBe(0);
+    expect((await postResult(job.jobId, { ...ok, tag: "OTHER" })).statusCode).toBe(400);
+
+    // Calls list filter and detail show the tag.
+    const admin = await t.sessionFor(adminEmail);
+    const list = await t.app.inject({ method: "GET", url: "/api/calls?tag=ANY&limit=100", headers: admin });
+    expect(list.json().items.map((c: { id: string }) => c.id)).toContain(call.id);
+    const detail = await t.app.inject({ method: "GET", url: `/api/calls/${call.id}`, headers: admin });
+    expect(detail.json().transcript.tag).toBe("VOICEMAIL");
+  });
+
+  it("tells the worker when a call was already uploaded to Fireflies", async () => {
+    const call = await newCall();
+    await t.db.job.create({ data: { callId: call.id } });
+    await t.db.firefliesReservation.create({
+      data: { callId: call.id, month: "2026-11", minutes: 2, live: false, status: "COMMITTED", uploadedAt: new Date() },
+    });
+    const [job] = (await claim({ workerId: "w1" })).json().jobs;
+    expect(job.callId).toBe(call.id);
+    expect(job.firefliesUploaded).toBe(true);
+  });
+
   it("rejects an empty workerId on a translation", async () => {
     const { jobId } = await translateReady();
     expect((await postTranslation(jobId, { workerId: "", model: "m", textEn: "x", segments: [] })).statusCode).toBe(400);

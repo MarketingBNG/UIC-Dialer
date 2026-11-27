@@ -76,6 +76,7 @@ const Result = z.discriminatedUnion("ok", [
     language: z.string().max(20).optional(),
     provider: z.string().max(50),
     segments: z.array(z.record(z.string(), z.unknown())).max(100_000).optional(),
+    tag: z.enum(["NO_SPEECH", "VOICEMAIL"]).optional(),
   }),
   z.object({
     ok: z.literal(false),
@@ -114,6 +115,17 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
       await deps.db.call.updateMany({ where: { id: { in: transcribing } }, data: { status: "TRANSCRIBING" } });
     }
     const byId = new Map(calls.map((c) => [c.id, c]));
+    // Calls already uploaded to Fireflies (and paid for there) finish there, whatever the worker's provider.
+    const inFireflies = new Set(
+      transcribing.length === 0
+        ? []
+        : (
+            await deps.db.firefliesReservation.findMany({
+              where: { callId: { in: transcribing }, uploadedAt: { not: null }, status: { not: "RELEASED" } },
+              select: { callId: true },
+            })
+          ).map((r) => r.callId),
+    );
     // Score jobs: the script of the call list the call was made from (call -> activity -> list item -> list).
     const scoring = jobs.filter((j) => j.kind === "score").map((j) => j.callId);
     const scripts = new Map<string, { id: string; name: string; sections: unknown }>();
@@ -142,6 +154,7 @@ export async function internalRoutes(app: FastifyInstance, deps: Deps) {
         mimeType: byId.get(j.callId)?.mimeType ?? null,
         durationS: byId.get(j.callId)?.durationS ?? null,
         audioPath: `/internal/audio/${j.callId}`,
+        ...(j.kind === "transcribe" ? { firefliesUploaded: inFireflies.has(j.callId) } : {}),
         maskPii,
         // Summaries: the staff member on the call, so Claude can tell Agent from Customer.
         ...(j.kind === "summarize" || j.kind === "score"
