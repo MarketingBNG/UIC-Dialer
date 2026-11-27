@@ -75,9 +75,9 @@ class Translator:
 
     @classmethod
     def start(cls, api, settings: Settings, stopping: Callable[[], bool]) -> "Translator":
-        import anthropic
+        from .llmkeys import make_client
 
-        t = cls(api, anthropic.Anthropic(api_key=settings.anthropic_api_key), settings, stopping)
+        t = cls(api, make_client(settings), settings, stopping)
         t._thread = threading.Thread(target=t.run, name=cls.KIND, daemon=True)
         t._thread.start()
         return t

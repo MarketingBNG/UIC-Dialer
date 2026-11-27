@@ -37,6 +37,8 @@ class Settings:
     elevenlabs_concurrency: int = 4
     # English translation with Claude (off when no key)
     anthropic_api_key: str | None = None
+    # Backup key: used when the first one runs out of credit (worker/llmkeys.py)
+    anthropic_api_key_2: str | None = None
     translate_model: str = "claude-opus-5-5"
     translate_batch_max: int = 100
     translate_batch_wait_s: float = 900
@@ -72,6 +74,7 @@ class Settings:
             elevenlabs_model=e.get("ELEVENLABS_MODEL") or "scribe_v1",
             elevenlabs_concurrency=max(1, int(e.get("ELEVENLABS_CONCURRENCY", "4"))),
             anthropic_api_key=e.get("ANTHROPIC_API_KEY") or None,
+            anthropic_api_key_2=e.get("ANTHROPIC_API_KEY_2") or None,
             translate_model=e.get("TRANSLATE_MODEL") or "claude-opus-5-5",
             # Backlog translations: one Message Batch per this many calls, or after this long.
             translate_batch_max=max(1, int(e.get("TRANSLATE_BATCH_MAX", "100"))),
