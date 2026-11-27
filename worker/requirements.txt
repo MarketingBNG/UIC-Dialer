@@ -50,7 +50,7 @@ packaging==26.3
     # via onnxruntime
 protobuf==7.36.2
     # via onnxruntime
-pydantic==2.14.2
+pydantic==2.14.4
     # via anthropic
 pydantic-core==2.50.2
     # via pydantic
