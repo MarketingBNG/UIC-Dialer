@@ -44,7 +44,7 @@ class PhoneStateReceiver : BroadcastReceiver() {
             }
             TelephonyManager.EXTRA_STATE_OFFHOOK -> {
                 CallerCard.hideAfter(app, ANSWERED_HIDE_MS)
-                if (ringSent(app)) sendRing(app, "answered")
+                sendRing(app, "answered") // incoming answered, or an outgoing call started: the laptop shows "On call"
             }
             TelephonyManager.EXTRA_STATE_IDLE -> {
                 CallerCard.hide(app)

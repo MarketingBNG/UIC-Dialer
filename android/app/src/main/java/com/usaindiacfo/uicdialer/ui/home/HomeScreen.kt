@@ -1,5 +1,6 @@
 package com.usaindiacfo.uicdialer.ui.home
 
+import com.usaindiacfo.uicdialer.sync.UploadHealth
 import android.text.format.DateUtils
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -96,6 +97,22 @@ fun SyncStatus(onOpenSetup: () -> Unit) {
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+
+        // Waiting and nothing uploaded for a day: say why, with a one-tap fix.
+        val stuck = pending > 0 && (lastUpload == null || System.currentTimeMillis() - lastUpload!! > 24 * 3600_000L)
+        if (stuck && permsOk) {
+            val reasons = remember(resumeTick) { UploadHealth.reasons(context) }
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("$pending calls waiting to upload", style = MaterialTheme.typography.titleSmall)
+                    Text(
+                        reasons.firstOrNull()?.text ?: "Keep the phone on Wi-Fi and tap Sync now.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    reasons.firstOrNull()?.let { r -> TextButton(onClick = { r.fix(context) }) { Text("Fix") } }
+                }
+            }
+        }
 
         if (backlogLeft > 0 && total > 0) {
             Card(Modifier.fillMaxWidth()) {

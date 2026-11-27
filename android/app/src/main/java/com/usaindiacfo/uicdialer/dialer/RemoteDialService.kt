@@ -175,7 +175,7 @@ class RemoteDialService : Service() {
         private const val MAX_AGE_MS = 15_000L
 
         fun isEnabled(context: Context): Boolean =
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ON, false)
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ON, true) // on by default: the laptop's Call dials this phone
 
         private fun setEnabled(context: Context, on: Boolean) {
             context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ON, on).apply()
