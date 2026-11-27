@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import cookie from "@fastify/cookie";
 import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
@@ -49,7 +50,18 @@ export async function buildApp(deps: Deps, opts: FastifyServerOptions = {}) {
     },
   });
   await app.register(cookie);
-  await app.register(rateLimit, { max: 600, timeWindow: "1 minute" });
+  // Counted per signed-in person/phone (their token or session), not per IP: a whole office shares one IP.
+  await app.register(rateLimit, {
+    max: 600,
+    timeWindow: "1 minute",
+    keyGenerator: (req) => {
+      const auth = req.headers.authorization;
+      if (auth) return "t:" + createHash("sha256").update(auth).digest("hex").slice(0, 32);
+      const session = /(?:^|;\s*)uic_session=([^;]+)/.exec(req.headers.cookie ?? "")?.[1];
+      if (session) return "s:" + createHash("sha256").update(session).digest("hex").slice(0, 32);
+      return "ip:" + req.ip;
+    },
+  });
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof HttpError) {
