@@ -1,5 +1,5 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import {
   ApiError,
@@ -646,6 +646,8 @@ function initials(name: string | null, phone: string) {
     .join("");
 }
 
+const AUTO_DIAL_S = 5;
+
 /** Power-dial session: the next number, Call now / Skip, the script; saving the outcome brings up the next number. */
 export function ListSessionPage() {
   const { id = "" } = useParams();
@@ -676,6 +678,30 @@ export function ListSessionPage() {
       navigate("/lists");
     },
   });
+
+  // Auto-dial: after an outcome is saved on a call from this list, the next number dials in 5 s (Cancel stops it).
+  const calledItem = useRef<string | null>(null);
+  const [countdown, setCountdown] = useState<number | null>(null);
+  const nextItem = next.data?.item;
+  useEffect(() => {
+    if (!nextItem || dialer.pending || !calledItem.current || calledItem.current === nextItem.id) return;
+    calledItem.current = null;
+    if (!nextItem.contact.dnc) setCountdown(AUTO_DIAL_S);
+  }, [nextItem, dialer.pending]);
+  useEffect(() => {
+    if (countdown === null) return;
+    if (countdown <= 0) {
+      setCountdown(null);
+      const c = nextItem?.contact;
+      if (nextItem && c) {
+        calledItem.current = nextItem.id;
+        void dialer.call(c.phoneE164, c.name || c.phoneE164, { callListItemId: nextItem.id, listId: id, dnc: !!c.dnc });
+      }
+      return;
+    }
+    const t = setTimeout(() => setCountdown((n) => (n === null ? null : n - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [countdown, nextItem, dialer, id]);
 
   const header = (
     <>
@@ -783,12 +809,21 @@ export function ListSessionPage() {
                     size="lg"
                     variant="call"
                     className="flex-1"
-                    onClick={() => void dialer.call(c!.phoneE164, label, { callListItemId: it.id, listId: id, dncReason: c!.dnc?.reason ?? null, dnc: !!c!.dnc })}
+                    onClick={() => {
+                      setCountdown(null);
+                      calledItem.current = it.id;
+                      void dialer.call(c!.phoneE164, label, { callListItemId: it.id, listId: id, dncReason: c!.dnc?.reason ?? null, dnc: !!c!.dnc });
+                    }}
                   >
-                    <Phone /> Call now
+                    <Phone /> {countdown !== null ? `Calling in ${countdown}s` : "Call now"}
                   </Button>
                 )}
-                <Button size="lg" variant="outline" disabled={skip.isPending} onClick={() => skip.mutate(it.id)}>
+                {countdown !== null && !onThisCall && (
+                  <Button size="lg" variant="outline" onClick={() => setCountdown(null)}>
+                    Cancel
+                  </Button>
+                )}
+                <Button size="lg" variant="outline" disabled={skip.isPending} onClick={() => { setCountdown(null); skip.mutate(it.id); }}>
                   <SkipForward /> {skip.isPending ? "Skipping…" : "Skip"}
                 </Button>
                 <Button asChild size="lg" variant="ghost">

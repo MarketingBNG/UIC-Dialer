@@ -40,6 +40,8 @@ interface PendingCall {
   /** Set when the call was started from a call-list session: the outcome is saved against this item. */
   callListItemId?: string;
   listId?: string;
+  /** Typed in the call bar during the call; pre-fills the outcome note. */
+  note?: string;
 }
 export interface CallOptions {
   /** Shown in the do-not-call confirm when the caller already knows it (contact.dnc.reason). */
@@ -105,6 +107,12 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+/** m:ss for the live call timer. */
+const clock = (ms: number) => {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+};
+
 const DialerContext = createContext<DialerApi | null>(null);
 export const useDialer = () => {
   const d = useContext(DialerContext);
@@ -122,9 +130,18 @@ export function DialerProvider({ children }: { children: ReactNode }) {
     savePending(p);
     setPending(p);
   };
+  // What the phone reports about the current call: dialling, on the call (since), or ended.
+  const [live, setLive] = useState<{ state: "dialing" | "on" | "ended"; since: number }>({ state: "dialing", since: Date.now() });
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (live.state !== "on") return;
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [live.state]);
 
   const dial = useCallback(async (p: PendingCall, viaPhone = true) => {
     update({ ...p, at: Date.now() });
+    setLive({ state: "dialing", since: Date.now() });
     setAsking(false);
     // One click: the UIC app on the rep's phone dials by itself (Phone Link still brings the audio here).
     // Needs the dial intent, which only exists when the check above went through.
@@ -182,9 +199,13 @@ export function DialerProvider({ children }: { children: ReactNode }) {
   // own popup takes focus, and the rep may switch windows mid-call). The "Log outcome" bar stays as a fallback.
   useEffect(() => {
     const onRing = (e: Event) => {
-      if ((e as CustomEvent<{ state?: string }>).detail?.state !== "ended") return;
+      const state = (e as CustomEvent<{ state?: string }>).detail?.state;
       const p = loadPending();
-      if (p && Date.now() - p.at > MIN_CALL_MS) setAsking(true);
+      if (!p) return;
+      if (state === "answered") setLive({ state: "on", since: Date.now() });
+      if (state !== "ended") return;
+      setLive({ state: "ended", since: Date.now() });
+      if (Date.now() - p.at > MIN_CALL_MS) setAsking(true);
     };
     window.addEventListener(RING_EVENT, onRing);
     return () => window.removeEventListener(RING_EVENT, onRing);
@@ -199,9 +220,28 @@ export function DialerProvider({ children }: { children: ReactNode }) {
             <span className="mr-auto flex items-center gap-2">
               <PhoneCall aria-hidden className="size-4 text-success" />
               <span>
-                Call to <strong>{pending.label}</strong> started on your phone.
+                {live.state === "on" ? (
+                  <>
+                    On call with <strong>{pending.label}</strong> · <span className="tabular-nums">{clock(Date.now() - live.since)}</span>
+                  </>
+                ) : live.state === "ended" ? (
+                  <>
+                    Call with <strong>{pending.label}</strong> ended.
+                  </>
+                ) : (
+                  <>
+                    Calling <strong>{pending.label}</strong> on your phone…
+                  </>
+                )}
               </span>
             </span>
+            <Input
+              aria-label="Call notes"
+              placeholder="Notes during the call…"
+              className="h-9 w-full sm:w-72"
+              value={pending.note ?? ""}
+              onChange={(e) => update({ ...pending, note: e.target.value.slice(0, 2000) })}
+            />
             <Button onClick={() => setAsking(true)}>
               <ClipboardCheck /> Log outcome
             </Button>
@@ -213,7 +253,7 @@ export function DialerProvider({ children }: { children: ReactNode }) {
       )}
       {pending && (
         <OutcomeDialog
-          key={pending.clientId}
+          key={`${pending.clientId}${asking ? "-open" : ""}`}
           open={asking}
           call={pending}
           onClose={() => setAsking(false)}
@@ -272,8 +312,8 @@ function OutcomeDialog({ open, call, onClose, onDone }: { open: boolean; call: P
   const [picked, setPicked] = useState<OutcomeDto | null>(null);
   const [followUp, setFollowUp] = useState("");
   const [custom, setCustom] = useState(false);
-  const [note, setNote] = useState("");
-  const [showNote, setShowNote] = useState(false);
+  const [note, setNote] = useState(call.note ?? "");
+  const [showNote, setShowNote] = useState(!!call.note);
   const prompt = picked ? datePrompt(picked) : null;
   const save = useMutation({
     mutationFn: ({ o, followUpAt }: { o: OutcomeDto; followUpAt?: string }) =>
