@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { CheckCircle2, Link2, XCircle } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
+import { api } from "../api";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 /** Exposed by the Windows app (desktop/src/preload.js); absent in a normal browser. */
@@ -15,6 +16,7 @@ const STEPS = [
   "Open Phone Link on this PC (button below) and choose Android.",
   "On your work phone, install \"Link to Windows\" and scan the QR code shown on the PC.",
   "In Phone Link, open Calls and allow it. Turn on Bluetooth on both, and accept the pairing prompt.",
+  "In the UIC Dialer app on your phone: Settings → Calls from PC → turn on \"Dial from my laptop\".",
   "Test it: press Call on any contact here. Your phone dials, and you talk through the PC.",
 ];
 
@@ -32,8 +34,15 @@ export function PhoneLinkSetup() {
     refetchOnWindowFocus: true,
     staleTime: 60_000,
   });
+  const phone = useQuery({
+    queryKey: ["remote-dial-status"],
+    queryFn: () => api<{ phones: number }>("/api/remote-dial/status"),
+    enabled: !!d,
+    refetchInterval: 30_000,
+  });
   if (!d) return null;
   const installed = status.data?.installed;
+  const connected = (phone.data?.phones ?? 0) > 0;
 
   return (
     <>
@@ -44,7 +53,11 @@ export function PhoneLinkSetup() {
       >
         <Link2 aria-hidden className="size-4 shrink-0" />
         <span className="flex-1">Calling from PC (Phone Link)</span>
-        {installed === undefined ? null : installed ? (
+        {connected ? (
+          <span className="flex items-center gap-1 text-green-300">
+            <span aria-hidden className="size-1.5 rounded-full bg-green-400" /> Connected
+          </span>
+        ) : installed === undefined ? null : installed ? (
           <span className="text-white/70">Set up</span>
         ) : (
           <span className="text-amber-300">Install</span>
@@ -58,6 +71,14 @@ export function PhoneLinkSetup() {
               Phone Link dials on your work phone and brings the call to this PC. Set it up once on each PC.
             </DialogDescription>
           </DialogHeader>
+          <div className="flex items-center gap-2 text-sm">
+            {connected ? (
+              <CheckCircle2 className="size-4 text-green-700" />
+            ) : (
+              <XCircle className="size-4 text-amber-600" />
+            )}
+            {connected ? "Your phone is connected: Call dials on it straight away." : "Your phone isn't connected yet (see step 4 below)."}
+          </div>
           <div className="flex items-center gap-2 text-sm">
             {installed ? (
               <>

@@ -267,6 +267,9 @@ export async function realtimeRoutes(app: FastifyInstance, deps: Deps) {
     return { phones };
   });
 
+  /** Is the rep's phone listening for laptop calls ("Dial from my laptop" on)? Drives the sidebar "Connected". */
+  app.get("/api/remote-dial/status", { preHandler: requireSession(deps) }, async (req) => ({ phones: rt.phonesFor(currentUser(req).id) }));
+
   const anyone = { preHandler: requireSession(deps), config: { rateLimit: { max: 30, timeWindow: "1 minute" } } };
   app.get("/api/events", anyone, async (req, reply) => {
     const user = currentUser(req);
