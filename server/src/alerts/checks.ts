@@ -223,7 +223,6 @@ export async function runChecks(db: Db, storage: LocalStorage, send: AlertSender
     if (c.firing) await sendAlert(db, send, c.key, c.text, now, { repeat: c.repeat ?? true });
     else await resolveAlert(db, send, c.key, c.text, now);
   }
-  await dailyPhoneReport(db, send, now).catch(() => false);
   // Prune old worker IDs but always keep the newest, so a long outage keeps alerting.
   await db.$executeRaw`
     DELETE FROM "worker_seen" WHERE "last_seen_at" < ${new Date(now.getTime() - WORKER_SEEN_KEEP_MS)}
@@ -244,6 +243,7 @@ export function startAlertLoop(
     running = true;
     try {
       await runChecks(db, storage, send);
+      await dailyPhoneReport(db, send).catch(() => false);
     } catch (err) {
       onError(err);
     } finally {
