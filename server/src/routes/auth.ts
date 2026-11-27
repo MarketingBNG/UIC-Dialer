@@ -5,6 +5,7 @@ import { claimsToIdentity } from "../auth/google.js";
 import { SESSION_COOKIE, issueSession } from "../auth/guards.js";
 import { AccessDeniedError, resolveUser } from "../auth/users.js";
 import { HttpError, type Deps } from "../context.js";
+import { takeOverBlockedDevices } from "../devices/handover.js";
 
 const OIDC_COOKIE = "uic_oidc";
 
@@ -65,6 +66,12 @@ export async function authRoutes(app: FastifyInstance, deps: Deps) {
       // Signing in again on the same install re-enables a device an admin revoked.
       update: { ...info, lastSeenAt: new Date(), revokedAt: null },
     });
+    // This phone was used by a blocked shared account: its calls now belong to this rep.
+    const moved = await takeOverBlockedDevices(deps.db, user.id, d.installId).catch((e) => {
+      req.log.error({ err: e }, "device takeover failed");
+      return 0;
+    });
+    if (moved) req.log.info({ userId: user.id, moved }, "moved calls from blocked account on this phone");
     const tokens = await deps.tokens.issueForDevice(user.id, device.id);
     return {
       accessToken: tokens.accessToken,
