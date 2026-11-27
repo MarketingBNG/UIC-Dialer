@@ -23,6 +23,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Follow-up reminders at the exact time (falls back to a 10-minute window when not allowed). Not USE_EXACT_ALARM: we aren't a clock/calendar app. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
@@ -80,6 +81,9 @@
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
+        <receiver
+            android:name=".update.UpdateStatusReceiver"
+            android:exported="false" />
         <receiver
             android:name=".reminders.ReminderReceiver"
             android:exported="false" />

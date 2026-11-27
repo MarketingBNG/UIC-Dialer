@@ -45,6 +45,7 @@ object SyncScheduler {
                 .setConstraints(Constraints.Builder().setRequiresCharging(true).build())
                 .build(),
         )
+        com.usaindiacfo.uicdialer.update.AutoUpdate.schedule(context)
         WorkManager.getInstance(context).cancelUniqueWork(OLD_BACKLOG)
         enqueueBacklog(context)
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(

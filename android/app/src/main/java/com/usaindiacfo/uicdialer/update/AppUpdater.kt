@@ -61,6 +61,9 @@ class AppUpdater(private val context: Context, private val api: ApiClient) {
 
     /** Hands the verified APK to the system package installer. */
     fun install(activity: Context, apk: File) {
+        // Android 12+: install through our own session so this app becomes the installer of record; later updates
+        // then install silently in the background (AutoUpdate). Falls back to the system installer screen.
+        if (Build.VERSION.SDK_INT >= 31 && runCatching { AutoUpdate.installSession(context, apk) }.isSuccess) return
         val uri = FileProvider.getUriForFile(context, authority(context), apk)
         val intent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, "application/vnd.android.package-archive")
