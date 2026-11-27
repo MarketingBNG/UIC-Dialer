@@ -295,7 +295,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
         }
       : null;
     const [from] = await fromNumbers(deps.db, [call]);
-    return { ...rest, ...from, transcript, crm, fileSize: call.fileSize?.toString() ?? null, score, scorePending: pending("score") };
+    return { ...rest, ...from, transcript, crm, fileSize: call.fileSize?.toString() ?? null, bytesSaved: call.bytesSaved?.toString() ?? null, score, scorePending: pending("score") };
   });
 
   /** Audio playback with HTTP Range support (seeking in the browser player). `?download=1` saves the file (audited). */
