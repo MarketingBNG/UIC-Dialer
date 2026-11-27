@@ -48,7 +48,9 @@ class PhoneStateReceiver : BroadcastReceiver() {
             }
             TelephonyManager.EXTRA_STATE_IDLE -> {
                 CallerCard.hide(app)
-                if (ringSent(app)) { setRingSent(app, false); sendRing(app, "ended") }
+                // Every call end (outgoing too): the desktop asks for the outcome only once the call is really over.
+                setRingSent(app, false)
+                sendRing(app, "ended")
                 // Any call just ended: send its call-log entry once the dialer has written it.
                 if (app.container.tokenStore.user.value != null) com.usaindiacfo.uicdialer.sync.SyncScheduler.enqueueCallLogSync(app, delaySec = 3)
                 if (rang(app)) {

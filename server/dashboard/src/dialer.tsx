@@ -1,8 +1,9 @@
 import { toast } from "sonner";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { ApiError, api, type OutcomeDto } from "./api";
 import { dialOnPhone } from "./remoteDial";
+import { RING_EVENT } from "./components/IncomingCall";
 import { fromLocalInput } from "./format";
 import { OutcomeButtons, datePrompt, quickPicks, useOutcomes } from "./components/Outcomes";
 import { AlertTriangle, CalendarClock, Check, ClipboardCheck, Phone, PhoneCall, ShieldAlert } from "lucide-react";
@@ -116,7 +117,6 @@ export function DialerProvider({ children }: { children: ReactNode }) {
   const [asking, setAsking] = useState(false);
   // unverified: the do-not-call check could not be made (timeout, offline, server error).
   const [dnc, setDnc] = useState<{ call: PendingCall; reason: string | null; unverified?: boolean } | null>(null);
-  const left = useRef(false);
 
   const update = (p: PendingCall | null) => {
     savePending(p);
@@ -125,7 +125,6 @@ export function DialerProvider({ children }: { children: ReactNode }) {
 
   const dial = useCallback(async (p: PendingCall, viaPhone = true) => {
     update({ ...p, at: Date.now() });
-    left.current = false;
     setAsking(false);
     // One click: the UIC app on the rep's phone dials by itself (Phone Link still brings the audio here).
     // Needs the dial intent, which only exists when the check above went through.
@@ -179,24 +178,16 @@ export function DialerProvider({ children }: { children: ReactNode }) {
     [dial],
   );
 
+  // Ask for the outcome when the phone reports the call ended (not when the window gets focus back: Phone Link's
+  // own popup takes focus, and the rep may switch windows mid-call). The "Log outcome" bar stays as a fallback.
   useEffect(() => {
-    const away = () => {
-      left.current = true;
-    };
-    const back = () => {
-      if (document.visibilityState === "hidden") return;
+    const onRing = (e: Event) => {
+      if ((e as CustomEvent<{ state?: string }>).detail?.state !== "ended") return;
       const p = loadPending();
-      if (p && left.current && Date.now() - p.at > MIN_CALL_MS) setAsking(true);
-      left.current = false;
+      if (p && Date.now() - p.at > MIN_CALL_MS) setAsking(true);
     };
-    window.addEventListener("blur", away);
-    window.addEventListener("focus", back);
-    document.addEventListener("visibilitychange", back);
-    return () => {
-      window.removeEventListener("blur", away);
-      window.removeEventListener("focus", back);
-      document.removeEventListener("visibilitychange", back);
-    };
+    window.addEventListener(RING_EVENT, onRing);
+    return () => window.removeEventListener(RING_EVENT, onRing);
   }, []);
 
   return (
