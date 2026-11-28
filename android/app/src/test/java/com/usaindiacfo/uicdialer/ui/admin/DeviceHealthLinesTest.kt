@@ -21,11 +21,11 @@ class DeviceHealthLinesTest {
         )
         assertEquals(
             listOf(
-                "Calls / recordings (7 d): 12 / 0 (calls but no recordings)" to true,
-                "Standby bucket: RESTRICTED (throttled)" to true,
-                "Last job stop: App standby" to false,
-                "Dialer: Google Phone (recordings not readable)" to true,
-                "Autostart screen: com.miui.securitycenter" to false,
+                "Calls / recordings (7 days): 12 / 0 (calls but no recordings)" to true,
+                "Battery limit: RESTRICTED (app slowed down)" to true,
+                "Last background stop: App standby" to false,
+                "Phone app: Google Phone (recordings not readable)" to true,
+                "Auto-start setting: com.miui.securitycenter" to false,
             ),
             lines,
         )
