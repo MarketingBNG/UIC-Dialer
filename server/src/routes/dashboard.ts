@@ -17,6 +17,7 @@ import { crmRecordUrl, crmStats } from "../crm/sync.js";
 import { PrivacySettings, getPrivacySettings, savePrivacySettings } from "../privacy/settings.js";
 import { V2_AUDIT_ACTIONS } from "../audit.js";
 import { TargetFields } from "./team.js";
+import { phoneSearchDigits } from "../activity/contacts.js";
 
 const AUDIT_ACTIONS = ["PLAY", "DOWNLOAD", "SEARCH", "DELETE", "USER_CHANGE", "DEVICE_REVOKE", "SETTINGS_CHANGE", "CLIENT_LIST_CHANGE", "RETENTION_DELETE", "EXPORT", "CRM_SYNC", ...V2_AUDIT_ACTIONS] as const;
 const AuditQuery = z.object({
@@ -39,8 +40,9 @@ const ListQuery = z.object({
   status: z.enum(["PENDING_UPLOAD", "UPLOADED", "TRANSCRIBING", "TRANSCRIBED", "FAILED", "NO_RECORDING"]).optional(),
   // v=2: include call-log-only calls (status NO_RECORDING); old apps' Kotlin enum can't decode that status.
   v: z.string().max(5).optional(),
-  from: z.iso.datetime({ offset: true }).optional(),
-  to: z.iso.datetime({ offset: true }).optional(),
+  // Also minute precision: old phone builds send "…T00:00+05:30" (Java drops ":00" seconds).
+  from: z.iso.datetime({ offset: true, precision: -1 }).or(z.iso.datetime({ offset: true })).optional(),
+  to: z.iso.datetime({ offset: true, precision: -1 }).or(z.iso.datetime({ offset: true })).optional(),
   cursor: z.uuid().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   /** Calls the transcriber tagged (no real talk): VOICEMAIL, NO_SPEECH, or ANY of them. */
@@ -66,12 +68,29 @@ const idParam = (req: FastifyRequest) => z.uuid().parse((req.params as { id: str
 
 const SEARCH_LIMIT = 1000;
 
+/** Words of a search as a prefix tsquery ("gst inv" -> "gst:* & inv:*"), or null if nothing searchable. */
+function prefixQuery(q: string): string | null {
+  const words = q.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  return words.length ? words.map((w) => `${w}:*`).join(" & ") : null;
+}
+
 /**
- * Transcript full-text search with role scope and filters applied in SQL, so the
- * LIMIT only counts calls this user may see. Mirrors callScope() in guards.ts.
+ * Call search with role scope and filters applied in SQL, so the LIMIT only counts calls this
+ * user may see. Mirrors callScope() in guards.ts. Matches words said (prefix), the call's contact
+ * name, the lead's name or company, and the number; calls with no transcript can match too.
  */
 function searchCallIds(db: Deps["db"], user: User, q: z.infer<typeof ListQuery> & { q: string }) {
-  const where: Prisma.Sql[] = [Prisma.sql`t."tsv" @@ websearch_to_tsquery('simple', ${q.q})`];
+  const like = `%${q.q.replace(/[\\%_]/g, (m) => `\\${m}`)}%`;
+  const match: Prisma.Sql[] = [
+    Prisma.sql`c."contact_name" ILIKE ${like}`,
+    Prisma.sql`EXISTS (SELECT 1 FROM "contacts" k WHERE k."phone_e164" = c."phone_e164" AND (k."name" ILIKE ${like} OR k."company" ILIKE ${like}))`,
+  ];
+  const tsq = prefixQuery(q.q);
+  if (tsq) match.push(Prisma.sql`t."tsv" @@ to_tsquery('simple', ${tsq})`);
+  const digits = phoneSearchDigits(q.q);
+  // Only when the box holds a number, so "gst 2024" doesn't match phone numbers.
+  if (digits.length >= 3 && /^[\d\s+()-]+$/.test(q.q)) match.push(Prisma.sql`c."phone_e164" LIKE ${`%${digits}%`}`);
+  const where: Prisma.Sql[] = [Prisma.sql`(${Prisma.join(match, " OR ")})`];
   if (user.role === "MANAGER" && user.team) where.push(Prisma.sql`u."team" = ${user.team}`);
   else if (user.role !== "ADMIN") where.push(Prisma.sql`c."user_id" = ${user.id}::uuid`);
   if (q.userId) where.push(Prisma.sql`c."user_id" = ${q.userId}::uuid`);
@@ -81,9 +100,9 @@ function searchCallIds(db: Deps["db"], user: User, q: z.infer<typeof ListQuery> 
   if (q.from) where.push(Prisma.sql`c."started_at" >= ${new Date(q.from)}`);
   if (q.to) where.push(Prisma.sql`c."started_at" <= ${new Date(q.to)}`);
   return db.$queryRaw<{ id: string }[]>`
-    SELECT c."id" FROM "transcripts" t
-    JOIN "calls" c ON c."id" = t."call_id"
+    SELECT c."id" FROM "calls" c
     JOIN "users" u ON u."id" = c."user_id"
+    LEFT JOIN "transcripts" t ON t."call_id" = c."id"
     WHERE ${Prisma.join(where, " AND ")}
     ORDER BY c."started_at" DESC
     LIMIT ${SEARCH_LIMIT}`;
@@ -109,7 +128,11 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   /** The call list's filters (role scope, fields, transcript search) as a Prisma where. Audits searches. */
-  const listWhere = async (req: FastifyRequest, q: z.infer<typeof ListQuery>): Promise<Prisma.CallWhereInput> => {
+  const listWhere = async (
+    req: FastifyRequest,
+    q: z.infer<typeof ListQuery>,
+  ): Promise<{ where: Prisma.CallWhereInput; capped: boolean }> => {
+    let capped = false;
     const where: Prisma.CallWhereInput = { AND: [callScope(currentUser(req))] };
     const and = where.AND as Prisma.CallWhereInput[];
     if (q.userId) and.push({ userId: q.userId });
@@ -121,21 +144,22 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     if (q.status) and.push({ status: q.status });
     if (q.tag) and.push({ transcript: { tag: q.tag === "ANY" ? { not: null } : q.tag } });
     if (Number(q.v ?? "1") < 2) and.push({ status: { not: "NO_RECORDING" } });
-    if (q.phone) and.push({ phoneE164: { contains: q.phone.replace(/[^\d+]/g, "") } });
+    if (q.phone) and.push({ phoneE164: { contains: phoneSearchDigits(q.phone) } });
     if (q.from || q.to) {
       and.push({ startedAt: { gte: q.from ? new Date(q.from) : undefined, lte: q.to ? new Date(q.to) : undefined } });
     }
     if (q.q) {
       const hits = await searchCallIds(deps.db, currentUser(req), { ...q, q: q.q });
       and.push({ id: { in: hits.map((h) => h.id) } });
+      capped = hits.length >= SEARCH_LIMIT;
       audit(req, "SEARCH", undefined, { q: q.q });
     }
-    return where;
+    return { where, capped };
   };
 
   app.get("/api/calls", anyone, async (req) => {
     const q = ListQuery.parse(req.query);
-    const where = await listWhere(req, q);
+    const { where, capped } = await listWhere(req, q);
     const rows = await deps.db.call.findMany({
       where,
       orderBy: [{ startedAt: "desc" }, { id: "desc" }],
@@ -176,7 +200,8 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     const items = page.map(({ score, deviceId: _d, simKey: _k, ...c }, i) => ({
       ...c, ...from[i], score: score?.overall ?? null, lead: (c.phoneE164 && leadBy.get(c.phoneE164)) || null,
     }));
-    return { items, nextCursor: more ? items.at(-1)?.id : null };
+    // searchCapped: the search hit SEARCH_LIMIT, so older matches are left out (UI says "narrow your search").
+    return { items, nextCursor: more ? items.at(-1)?.id : null, searchCapped: capped };
   });
 
   /**
@@ -185,7 +210,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
    */
   app.get("/api/calls/export", managers, async (req, reply) => {
     const q = ListQuery.omit({ cursor: true, limit: true }).parse(req.query);
-    const where = await listWhere(req, { ...q, limit: EXPORT_MAX_ROWS });
+    const { where } = await listWhere(req, { ...q, limit: EXPORT_MAX_ROWS });
     // Pages of 500 so only the CSV text is held, not thousands of Prisma rows with their transcripts.
     const select = {
       id: true,

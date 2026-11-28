@@ -144,7 +144,8 @@ export async function listRoutes(app: FastifyInstance, deps: Deps) {
     const rows = await deps.db.callListItem.findMany({
       where: {
         listId: id,
-        ...(q.state ? { state: q.state } : {}),
+        // Removed items stay hidden unless asked for.
+        ...(q.state ? { state: q.state } : { state: { not: "REMOVED" as const } }),
         ...(after ? { OR: [{ position: { gt: after.position } }, { position: after.position, id: { gt: after.id } }] } : {}),
       },
       orderBy: [{ position: "asc" }, { id: "asc" }],

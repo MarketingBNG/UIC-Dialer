@@ -3,9 +3,10 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { api, isManager, qs, type CallItem, type CallPage, type CallStatus, type Direction, type User } from "../api";
 import { useMe } from "../App";
-import { DIRECTION_LABEL, STATUS_LABEL, formatDuration, formatShortWhen, fromLabel, personName } from "../format";
+import { DIRECTION_LABEL, STATUS_LABEL, formatDuration, formatShortWhen, fromLabel, istDayBoundary, personName } from "../format";
 import { Download, PhoneCall, Search, SlidersHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,13 +16,6 @@ import { DirectionTag, Empty, ErrorBox, PageHeader, ScorePill, Spinner, StatusBa
 
 const FILTER_KEYS = ["q", "phone", "userId", "ownerId", "direction", "status", "tag", "from", "to"] as const;
 
-/** yyyy-mm-dd from a date input, read in the viewer's time zone. */
-function dayBoundary(day: string, end: boolean) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return undefined;
-  const [y, m, d] = day.split("-").map(Number) as [number, number, number];
-  const date = end ? new Date(y, m - 1, d, 23, 59, 59, 999) : new Date(y, m - 1, d);
-  return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
-}
 
 function useDebounced<T>(value: T, ms: number) {
   const [v, setV] = useState(value);
@@ -39,9 +33,7 @@ export function CallsPage() {
   const [params, setParams] = useSearchParams();
   const get = (k: (typeof FILTER_KEYS)[number]) => params.get(k) ?? "";
   const [q, setQ] = useState(get("q"));
-  const [phone, setPhone] = useState(get("phone"));
   const dq = useDebounced(q.trim(), 400);
-  const dphone = useDebounced(phone.trim(), 400);
   const [showFilters, setShowFilters] = useState(() => FILTER_KEYS.some((k) => k !== "q" && params.get(k)));
 
   const set = (k: string, v: string) =>
@@ -55,25 +47,31 @@ export function CallsPage() {
       { replace: true },
     );
   useEffect(() => set("q", dq), [dq]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => set("phone", dphone), [dphone]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Re-sync the box when the URL's q changes from outside (links, back/forward).
+  const urlQ = get("q");
+  useEffect(() => {
+    if (urlQ !== dq) setQ(urlQ);
+  }, [urlQ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Like the Android app: a number-like search (3+ chars) searches by phone, not transcript.
   const search = get("q").trim();
   const isPhone = search.length >= 3 && /^[+\d][\d\s()\-]*$/.test(search);
   const filters = {
     q: isPhone ? "" : search,
+    // Old links may still carry ?phone=; the search box covers numbers now.
     phone: isPhone ? search.replace(/[^\d+]/g, "") : get("phone"),
     userId: manager ? get("userId") : "",
     ownerId: manager ? get("ownerId") : "",
     direction: get("direction"),
     status: get("status"),
     tag: get("tag"),
-    from: dayBoundary(get("from"), false),
-    to: dayBoundary(get("to"), true),
+    // Dates are India days, whatever the viewer's time zone.
+    from: istDayBoundary(get("from"), false),
+    to: istDayBoundary(get("to"), true),
     // Include call-log-only calls (no recording).
     v: "2",
   };
-  const activeCount = [filters.phone, filters.userId, filters.ownerId, filters.direction, filters.status, filters.tag, get("from"), get("to")].filter(Boolean).length;
+  const activeCount = [get("phone"), filters.userId, filters.ownerId, filters.direction, filters.status, filters.tag, get("from"), get("to")].filter(Boolean).length;
 
   const users = useQuery({ queryKey: ["users"], queryFn: () => api<User[]>("/api/users"), enabled: manager });
 
@@ -84,6 +82,11 @@ export function CallsPage() {
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
   const items = calls.data?.pages.flatMap((p) => p.items) ?? [];
+  // The server stops a word search at 1,000 matches; say so instead of looking complete.
+  const capped = calls.data?.pages.some((p) => {
+    const x = p as CallPage & { capped?: boolean; truncated?: boolean; searchCapped?: boolean };
+    return !!(x.capped || x.truncated || x.searchCapped);
+  });
   // The score column appears once any listed call has an AI score.
   const hasScores = items.some((c) => c.score != null);
   const loadMoreError = calls.isFetchNextPageError ? calls.error : null;
@@ -91,9 +94,22 @@ export function CallsPage() {
 
   const clear = () => {
     setQ("");
-    setPhone("");
     setParams(new URLSearchParams(), { replace: true });
   };
+
+  const userName = (id: string) => (id === me.id ? "Me" : personName(users.data?.find((u) => u.id === id) ?? { name: null, email: "Someone" }));
+  const TAG_LABEL: Record<string, string> = { ANY: "Voicemail or no talk", VOICEMAIL: "Voicemail", NO_SPEECH: "No talk" };
+  const activeChips = [
+    search && { key: "q", label: `Search: ${search}`, clear: () => { setQ(""); set("q", ""); } },
+    get("phone") && { key: "phone", label: `Number: ${get("phone")}`, clear: () => set("phone", "") },
+    filters.userId && { key: "user", label: `Called by: ${userName(filters.userId)}`, clear: () => set("userId", "") },
+    filters.ownerId && { key: "owner", label: `Owned by: ${userName(filters.ownerId)}`, clear: () => set("ownerId", "") },
+    filters.direction && { key: "dir", label: DIRECTION_LABEL[filters.direction as Direction] ?? filters.direction, clear: () => set("direction", "") },
+    filters.status && { key: "status", label: STATUS_LABEL[filters.status as CallStatus] ?? filters.status, clear: () => set("status", "") },
+    filters.tag && { key: "tag", label: TAG_LABEL[filters.tag] ?? filters.tag, clear: () => set("tag", "") },
+    get("from") && { key: "from", label: `From ${get("from")}`, clear: () => set("from", "") },
+    get("to") && { key: "to", label: `To ${get("to")}`, clear: () => set("to", "") },
+  ].filter(Boolean) as { key: string; label: string; clear: () => void }[];
 
   return (
     <>
@@ -102,11 +118,11 @@ export function CallsPage() {
       <Card className="mb-4 p-3 sm:p-4">
         <div className="flex flex-wrap gap-2">
           <Label className="sr-only" htmlFor="q">
-            Search transcripts or phone
+            Search calls
           </Label>
           <div className="relative min-w-48 flex-1">
             <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input id="q" type="search" className="min-h-11 pl-9" placeholder="Search transcripts or phone" value={q} onChange={(e) => setQ(e.target.value)} />
+            <Input id="q" type="search" className="min-h-11 pl-9" placeholder="Name, company, number or words said" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <Button variant="outline" className="min-h-11 shrink-0" aria-expanded={showFilters} aria-controls="filters" onClick={() => setShowFilters((s) => !s)}>
             <SlidersHorizontal /> Filters{activeCount ? ` (${activeCount})` : ""}
@@ -122,13 +138,9 @@ export function CallsPage() {
         </div>
         {showFilters && (
           <div id="filters" className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            <div>
-              <Label htmlFor="f-phone">Phone number</Label>
-              <Input id="f-phone" inputMode="tel" placeholder="Any part of the number" value={phone} onChange={(e) => setPhone(e.target.value)} />
-            </div>
             {manager && (
               <div>
-                <Label htmlFor="f-owner">Lead owner</Label>
+                <Label htmlFor="f-owner">Customer owned by</Label>
                 <NativeSelect id="f-owner" value={get("ownerId")} onChange={(e) => set("ownerId", e.target.value)}>
                   <option value="">Any owner</option>
                   {users.data?.map((u) => (
@@ -141,7 +153,7 @@ export function CallsPage() {
             )}
             {manager && (
               <div>
-                <Label htmlFor="f-user">Person</Label>
+                <Label htmlFor="f-user">Called by</Label>
                 <NativeSelect id="f-user" value={get("userId")} onChange={(e) => set("userId", e.target.value)}>
                   <option value="">Everyone</option>
                   {users.data?.map((u) => (
@@ -184,21 +196,35 @@ export function CallsPage() {
               </NativeSelect>
             </div>
             <div>
-              <Label htmlFor="f-from">From</Label>
+              <Label htmlFor="f-from">From (IST)</Label>
               <Input id="f-from" type="date" value={get("from")} max={get("to") || undefined} onChange={(e) => set("from", e.target.value)} />
             </div>
             <div>
-              <Label htmlFor="f-to">To</Label>
+              <Label htmlFor="f-to">To (IST)</Label>
               <Input id="f-to" type="date" value={get("to")} min={get("from") || undefined} onChange={(e) => set("to", e.target.value)} />
-            </div>
-            <div className="flex items-end">
-              <Button variant="ghost" className="min-h-11" onClick={clear}>
-                <X /> Clear all
-              </Button>
             </div>
           </div>
         )}
+        {activeChips.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2" aria-label="Active filters">
+            {activeChips.map((c) => (
+              <Badge key={c.key} variant="secondary" className="gap-1 py-1 pl-2.5 pr-1">
+                {c.label}
+                <button type="button" className="rounded-full p-0.5 hover:bg-muted-foreground/20" aria-label={`Remove ${c.label}`} onClick={c.clear}>
+                  <X className="size-3.5" />
+                </button>
+              </Badge>
+            ))}
+            <Button variant="ghost" size="sm" onClick={clear}>
+              Clear all
+            </Button>
+          </div>
+        )}
       </Card>
+
+      {capped && (
+        <p className="mb-3 text-sm text-muted-foreground">Showing first 1,000 matches. Add more words or a date to narrow it down.</p>
+      )}
 
       {calls.isPending ? (
         <Spinner label="Loading calls" />
@@ -242,7 +268,7 @@ export function CallsPage() {
                     <span>{formatShortWhen(c.startedAt)}</span>
                     <span>{formatDuration(c.durationS)}</span>
                     {manager && <span className="truncate">{personName(c.user)}</span>}
-                    {c.lead?.owner && <span className="truncate">Owner: {personName(c.lead.owner)}</span>}
+                    {c.lead?.owner && <span className="truncate">Owned by: {personName(c.lead.owner)}</span>}
                     {fromLabel(c) && <span className="truncate">{fromLabel(c)}</span>}
                     {c.score != null && <ScorePill score={c.score} />}
                   </div>
@@ -262,8 +288,8 @@ export function CallsPage() {
                   <TableHead scope="col" className="text-right">
                     Duration
                   </TableHead>
-                  {manager && <TableHead scope="col">Person</TableHead>}
-                  <TableHead scope="col">Lead owner</TableHead>
+                  {manager && <TableHead scope="col">Called by</TableHead>}
+                  <TableHead scope="col">Customer owned by</TableHead>
                   <TableHead scope="col">Status</TableHead>
                   {hasScores && (
                     <TableHead scope="col" className="text-right">

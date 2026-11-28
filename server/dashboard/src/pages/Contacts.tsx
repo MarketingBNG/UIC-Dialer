@@ -57,13 +57,17 @@ export function TrackerTabs() {
 }
 
 const FILTER_KEYS = ["q", "ownerId", "status", "due", "filter"] as const;
-const CHIPS: [ContactFilterKey | "", string][] = [
-  ["", "All"],
-  ["interested", "Interested"],
-  ["callback", "Call back"],
-  ["never", "Never called"],
-  ["mine", "Mine"],
+/** Quick buttons set the same params as the dropdowns, so the two can never disagree. */
+type Chip = { label: string; status?: ContactStatus; mine?: true; filter?: ContactFilterKey };
+const CHIPS: Chip[] = [
+  { label: "All" },
+  { label: "Interested", status: "INTERESTED" },
+  { label: "Call back", status: "CALL_BACK" },
+  { label: "Never called", filter: "never" },
+  { label: "Mine", mine: true },
 ];
+// Old links used ?filter= for these; read them as the matching status/owner.
+const LEGACY: Partial<Record<ContactFilterKey, Chip>> = { interested: CHIPS[1], callback: CHIPS[2], mine: CHIPS[4] };
 
 export function ContactsPage() {
   const me = useMe();
@@ -90,8 +94,18 @@ export function ContactsPage() {
     if (urlQ !== dq) setQ(urlQ);
   }, [urlQ]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const chip = get("filter") as ContactFilterKey | "";
-  const filters = { q: get("q"), ownerId: manager ? get("ownerId") : "", status: get("status"), due: get("due"), filter: chip === "dnc" && !manager ? "" : chip };
+  const rawFilter = get("filter") as ContactFilterKey | "";
+  const legacy = rawFilter ? LEGACY[rawFilter] : undefined;
+  const chip = legacy ? "" : rawFilter;
+  // Reps may only narrow to their own leads.
+  const ownerParam = legacy?.mine ? me.id : get("ownerId");
+  const filters = {
+    q: get("q"),
+    ownerId: manager || ownerParam === me.id ? ownerParam : "",
+    status: legacy?.status ?? get("status"),
+    due: get("due"),
+    filter: chip === "dnc" && !manager ? "" : chip,
+  };
   const activeCount = [filters.ownerId, filters.status, filters.due, filters.filter].filter(Boolean).length;
   const navigate = useNavigate();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -135,6 +149,30 @@ export function ContactsPage() {
     setParams(new URLSearchParams(), { replace: true });
   };
 
+  // A chip is lit when the current filters are exactly what it would set.
+  const chipOn = (c: Chip) =>
+    (filters.status || "") === (c.status ?? "") && (filters.filter || "") === (c.filter ?? "") && (filters.ownerId || "") === (c.mine ? me.id : "");
+  const pickChip = (c: Chip) =>
+    setParams(
+      (p) => {
+        const n = new URLSearchParams(p);
+        for (const k of ["status", "ownerId", "filter"]) n.delete(k);
+        if (c.status) n.set("status", c.status);
+        if (c.filter) n.set("filter", c.filter);
+        if (c.mine) n.set("ownerId", me.id);
+        return n;
+      },
+      { replace: true },
+    );
+  const ownerName = (id: string) => (id === me.id ? "Me" : personName(users.data?.find((u) => u.id === id) ?? { name: null, email: "Someone" }));
+  const activeChips: { key: string; label: string; clear: () => void }[] = [
+    filters.q && { key: "q", label: `Search: ${filters.q}`, clear: () => { setQ(""); set("q", ""); } },
+    filters.status && { key: "status", label: CONTACT_STATUS_LABEL[filters.status as ContactStatus] ?? filters.status, clear: () => { set("status", ""); if (legacy?.status) set("filter", ""); } },
+    filters.ownerId && { key: "owner", label: `Owner: ${ownerName(filters.ownerId)}`, clear: () => { set("ownerId", ""); if (legacy?.mine) set("filter", ""); } },
+    filters.due && { key: "due", label: filters.due === "today" ? "Due today" : "Overdue", clear: () => set("due", "") },
+    filters.filter && { key: "filter", label: filters.filter === "never" ? "Never called" : "Do not call", clear: () => set("filter", "") },
+  ].filter(Boolean) as { key: string; label: string; clear: () => void }[];
+
   const followUp = (iso: string | null) =>
     iso ? <span className={isOverdue(iso, now) ? "font-medium text-destructive" : ""}>{formatShortWhen(iso)}{isOverdue(iso, now) ? " · overdue" : ""}</span> : "—";
 
@@ -173,18 +211,14 @@ export function ContactsPage() {
       />
       <TrackerTabs />
       <div role="group" aria-label="Quick filters" className="mb-3 flex flex-wrap gap-2">
-        {[...CHIPS, ...(manager ? ([["dnc", "Do-not-call"]] as [ContactFilterKey, string][]) : [])].map(([v, l]) => (
-          <Button
-            key={v || "all"}
-            size="sm"
-            variant={filters.filter === v ? "default" : "outline"}
-            aria-pressed={filters.filter === v}
-            className="rounded-full"
-            onClick={() => set("filter", v)}
-          >
-            {l}
-          </Button>
-        ))}
+        {[...CHIPS, ...(manager ? [{ label: "Do not call", filter: "dnc" } as Chip] : [])].map((c) => {
+          const on = chipOn(c);
+          return (
+            <Button key={c.label} size="sm" variant={on ? "default" : "outline"} aria-pressed={on} className="rounded-full" onClick={() => pickChip(c)}>
+              {c.label}
+            </Button>
+          );
+        })}
       </div>
 
       <Card className="mb-4 p-3 sm:p-4">
@@ -198,7 +232,7 @@ export function ContactsPage() {
           </div>
           {manager && (
             <div>
-              <Label htmlFor="c-owner">Owner</Label>
+              <Label htmlFor="c-owner">Customer owned by</Label>
               <NativeSelect id="c-owner" value={get("ownerId")} onChange={(e) => set("ownerId", e.target.value)}>
                 <option value="">Everyone</option>
                 {users.data?.map((u) => (
@@ -229,10 +263,20 @@ export function ContactsPage() {
             </NativeSelect>
           </div>
         </div>
-        {(activeCount > 0 || filters.q) && (
-          <Button variant="ghost" className="mt-2" onClick={clear}>
-            <X /> Clear all filters
-          </Button>
+        {activeChips.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-2" aria-label="Active filters">
+            {activeChips.map((c) => (
+              <Badge key={c.key} variant="secondary" className="gap-1 py-1 pl-2.5 pr-1">
+                {c.label}
+                <button type="button" className="rounded-full p-0.5 hover:bg-muted-foreground/20" aria-label={`Remove ${c.label}`} onClick={c.clear}>
+                  <X className="size-3.5" />
+                </button>
+              </Badge>
+            ))}
+            <Button variant="ghost" size="sm" onClick={clear}>
+              Clear all
+            </Button>
+          </div>
         )}
       </Card>
 

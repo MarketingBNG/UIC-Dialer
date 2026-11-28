@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { setupTestApp, sha256, uniqueEmail } from "./helpers.js";
 
@@ -342,7 +342,35 @@ describe("regressions", () => {
 
     const sess = await t.sessionFor(agentEmail);
     const res = await t.app.inject({ method: "GET", url: "/api/calls?q=zebra", headers: { cookie: sess.cookie } });
-    expect(res.json().items.map((c: { id: string }) => c.id)).toEqual([mine.id]);
+    expect(res.json().searchCapped).toBe(false);
+  });
+
+  it("search matches contact name, lead company, word prefixes and 0-prefixed numbers; dates without seconds work", async () => {
+    const email = uniqueEmail("finder");
+    const u = await t.db.user.create({ data: { email } });
+    const tag = randomUUID().slice(0, 6);
+    const phone = `+9198${String(Math.floor(Math.random() * 1e8)).padStart(8, "0")}`;
+    const named = await t.db.call.create({
+      data: { userId: u.id, originalSha256: sha256(`n-${tag}`), startedAt: new Date(), status: "NO_RECORDING", contactName: `Ravi${tag} Kumar`, phoneE164: phone },
+    });
+    await t.db.contact.create({ data: { phoneE164: phone, name: "Lead", company: `Acme${tag} Traders` } });
+    const said = await t.db.call.create({ data: { userId: u.id, originalSha256: sha256(`s-${tag}`), startedAt: new Date(), status: "TRANSCRIBED" } });
+    await t.db.transcript.create({ data: { callId: said.id, text: `talked about quarterly${tag} returns`, provider: "stub" } });
+    const sess = await t.sessionFor(email);
+    const get = async (qs: string) => {
+      const res = await t.app.inject({ method: "GET", url: `/api/calls?v=2&${qs}`, headers: { cookie: sess.cookie } });
+      expect(res.statusCode).toBe(200);
+      return res.json().items.map((c: { id: string }) => c.id);
+    };
+    expect(await get(`q=ravi${tag}`)).toEqual([named.id]);
+    expect(await get(`q=acme${tag}`)).toEqual([named.id]);
+    expect(await get(`q=quarterly${tag.slice(0, 3)}`)).toEqual([said.id]);
+    const local = `0${phone.slice(3)}`;
+    expect(await get(`q=${local}`)).toEqual([named.id]);
+    expect(await get(`phone=${local}`)).toEqual([named.id]);
+    expect(await get(`phone=${encodeURIComponent(`+91 ${phone.slice(3)}`)}`)).toEqual([named.id]);
+    const from = encodeURIComponent(new Date(Date.now() - 86400000).toISOString().slice(0, 16) + "+00:00");
+    expect(await get(`from=${from}&q=ravi${tag}`)).toEqual([named.id]);
   });
 
   it("logs PLAY for browser range requests starting at 0", async () => {

@@ -36,6 +36,9 @@ describe("contacts search and filters", () => {
     const o = (await activity(other.headers, randomMobile(), { note: `${word} too` })).json().contact;
     const byNote = await inject("GET", `/v1/contacts?q=${word}`, rep.headers);
     expect(ids(byNote)).toEqual([c.id]);
+    // A number typed with a leading 0 or +91 still finds the contact.
+    expect(ids(await inject("GET", `/v1/contacts?q=0${phone}`, rep.headers))).toEqual([c.id]);
+    expect(ids(await inject("GET", `/v1/contacts?q=${encodeURIComponent(`+91 ${phone}`)}`, rep.headers))).toEqual([c.id]);
     const city = `Nagpur${randomUUID().slice(0, 4)}`;
     expect((await inject("PATCH", `/v1/contacts/${c.id}`, rep.headers, { city })).json().city).toBe(city);
     expect(ids(await inject("GET", `/v1/contacts?q=${city.toLowerCase()}`, rep.headers))).toEqual([c.id]);

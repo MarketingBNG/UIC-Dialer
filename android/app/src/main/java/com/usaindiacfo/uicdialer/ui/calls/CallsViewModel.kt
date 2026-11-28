@@ -37,6 +37,7 @@ import java.io.IOException
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
 /** One list row, from either the server or the offline cache. */
@@ -82,7 +83,7 @@ data class CallsFilterState(
             DatePreset.TODAY -> LocalDate.now(zone).atStartOfDay(zone).toOffsetDateTime()
             DatePreset.WEEK -> OffsetDateTime.now(zone).minusDays(7)
             DatePreset.MONTH -> OffsetDateTime.now(zone).minusDays(30)
-        }?.truncatedTo(ChronoUnit.SECONDS)?.toString()
+        }?.truncatedTo(ChronoUnit.SECONDS)?.format(FROM_FMT)
         return CallFilter(
             q = s.takeIf { it.isNotEmpty() && !isPhone },
             phone = if (isPhone) s.filter { it.isDigit() || it == '+' } else null,
@@ -92,7 +93,11 @@ data class CallsFilterState(
         )
     }
 
-    private companion object { val PHONE_RE = Regex("^[+\\d][\\d\\s()\\-]*$") }
+    private companion object {
+        val PHONE_RE = Regex("^[+\\d][\\d\\s()\\-]*$")
+        // Always seconds + numeric offset ("xxx" gives +00:00, never "Z"); toString() dropped ":00" seconds.
+        val FROM_FMT: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ssxxx")
+    }
 }
 
 /** Calls deleted in this process, hidden from already-loaded pages without a reload. */
@@ -160,5 +165,5 @@ class CallsViewModel(private val c: AppContainer) : ViewModel() {
     fun setDirection(d: Direction?) = _filter.update { it.copy(direction = d) }
     fun setDate(p: DatePreset) = _filter.update { it.copy(date = p) }
     fun setUser(id: String?) = _filter.update { it.copy(userId = id) }
-    fun clearFilters() = _filter.update { CallsFilterState(search = it.search) }
+    fun clearFilters() = _filter.update { CallsFilterState() }
 }

@@ -212,6 +212,9 @@ describe("rep session", () => {
     expect(page2.items[0].contact.id).toBe(cs[1]!.id);
     const itemId = detail.items[0].id;
     expect((await inject("DELETE", `/api/call-lists/${list.id}/items/${itemId}`, mgr)).statusCode).toBe(204);
+    // Removed items are hidden unless asked for.
+    expect((await inject("GET", `/api/call-lists/${list.id}`, mgr)).json().items.map((i: { id: string }) => i.id)).not.toContain(itemId);
+    expect((await inject("GET", `/api/call-lists/${list.id}?state=REMOVED`, mgr)).json().items.map((i: { id: string }) => i.id)).toEqual([itemId]);
     const reset = await inject("POST", `/api/call-lists/${list.id}/items/${itemId}/reset`, mgr);
     expect(reset.json()).toMatchObject({ id: itemId, state: "PENDING" });
     const added = await inject("POST", `/api/call-lists/${list.id}/items`, mgr, { contactIds: [cs[0]!.id, ...(await contacts(1, null)).map((c) => c.id)] });

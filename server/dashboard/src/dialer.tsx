@@ -256,6 +256,8 @@ export function DialerProvider({ children }: { children: ReactNode }) {
           key={`${pending.clientId}${asking ? "-open" : ""}`}
           open={asking}
           call={pending}
+          // Keep the note on the pending call, so "Later" or a reopen never loses it.
+          onNote={(note) => update({ ...pending, note })}
           onClose={() => setAsking(false)}
           onDone={() => {
             setAsking(false);
@@ -305,15 +307,31 @@ export function DialerProvider({ children }: { children: ReactNode }) {
   );
 }
 
-function OutcomeDialog({ open, call, onClose, onDone }: { open: boolean; call: PendingCall; onClose: () => void; onDone: () => void }) {
+function OutcomeDialog({
+  open,
+  call,
+  onNote,
+  onClose,
+  onDone,
+}: {
+  open: boolean;
+  call: PendingCall;
+  onNote: (note: string) => void;
+  onClose: () => void;
+  onDone: () => void;
+}) {
   const qc = useQueryClient();
   const outcomes = useOutcomes();
   /** The tapped outcome when it still needs a time (quick picks) or a remove-from-lists confirm. */
   const [picked, setPicked] = useState<OutcomeDto | null>(null);
   const [followUp, setFollowUp] = useState("");
   const [custom, setCustom] = useState(false);
-  const [note, setNote] = useState(call.note ?? "");
-  const [showNote, setShowNote] = useState(!!call.note);
+  // Starts with what was typed during the call; every edit is copied back to the pending call.
+  const [note, setNoteState] = useState(call.note ?? "");
+  const setNote = (v: string) => {
+    setNoteState(v);
+    onNote(v);
+  };
   const prompt = picked ? datePrompt(picked) : null;
   const save = useMutation({
     mutationFn: ({ o, followUpAt }: { o: OutcomeDto; followUpAt?: string }) =>
@@ -373,6 +391,11 @@ function OutcomeDialog({ open, call, onClose, onDone }: { open: boolean; call: P
           <DialogTitle>How did the call to {call.label} go?</DialogTitle>
           <DialogDescription>One tap logs it. The recording is linked automatically once the phone uploads it.</DialogDescription>
         </DialogHeader>
+        {/* Note first: the outcome tap saves it along with the outcome. */}
+        <div>
+          <Label htmlFor="oc-note">Note (optional)</Label>
+          <Textarea id="oc-note" rows={3} maxLength={2000} placeholder="What was said, next step…" value={note} disabled={save.isPending} onChange={(e) => setNote(e.target.value.slice(0, 2000))} />
+        </div>
         {!picked ? (
           <fieldset>
             <legend className="sr-only">Outcome</legend>
@@ -448,16 +471,6 @@ function OutcomeDialog({ open, call, onClose, onDone }: { open: boolean; call: P
               </Button>
             </div>
           </div>
-        )}
-        {showNote ? (
-          <div>
-            <Label htmlFor="oc-note">Note (optional)</Label>
-            <Textarea id="oc-note" rows={3} maxLength={2000} autoFocus value={note} onChange={(e) => setNote(e.target.value)} />
-          </div>
-        ) : (
-          <Button variant="link" className="self-start px-0" onClick={() => setShowNote(true)}>
-            Add note
-          </Button>
         )}
         <FormError error={save.isError ? save.error : null} />
         <DialogFooter>

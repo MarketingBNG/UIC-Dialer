@@ -20,6 +20,17 @@ export const ContactFilter = z.object({
 export type ContactFilter = z.infer<typeof ContactFilter>;
 
 /**
+ * Digits to match a typed number against stored E.164: non-digits stripped, a leading 0 / 91 / +91
+ * dropped (098…, +91 98…, 9198…), then the last 10 digits.
+ */
+export function phoneSearchDigits(q: string): string {
+  let d = q.replace(/\D/g, "");
+  if (d.length > 10 && d.startsWith("91")) d = d.slice(2);
+  d = d.replace(/^0+/, "");
+  return d.slice(-10);
+}
+
+/**
  * name / company / city, digits (3+) against the stored number, and the text of any activity note on the contact.
  * The notes branch is safe for every role: the caller ANDs this with its contact scope.
  */
@@ -31,7 +42,7 @@ export function searchWhere(q: string | undefined): Prisma.ContactWhereInput {
     { city: { contains: q, mode: "insensitive" } },
     { activities: { some: { note: { contains: q, mode: "insensitive" } } } },
   ];
-  const digits = q.replace(/\D/g, "");
+  const digits = phoneSearchDigits(q);
   if (digits.length >= 3) or.push({ phoneE164: { contains: digits } });
   return { OR: or };
 }

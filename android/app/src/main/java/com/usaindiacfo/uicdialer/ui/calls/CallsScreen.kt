@@ -100,7 +100,7 @@ fun CallsScreen(onOpenCall: (id: String) -> Unit) {
             value = filter.search,
             onValueChange = vm::setSearch,
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
-            placeholder = { Text("Search transcripts or phone") },
+            placeholder = { Text("Name, company, number or words said") },
             leadingIcon = { Icon(Icons.Default.Search, null) },
             trailingIcon = {
                 if (filter.search.isNotEmpty()) IconButton(onClick = { vm.setSearch("") }) { Icon(Icons.Default.Clear, "Clear search") }
@@ -151,7 +151,7 @@ private fun FilterRow(f: CallsFilterState, vm: CallsViewModel, showPerson: Boole
             FilterChip(f.direction != null, { dirOpen = true }, { Text(f.direction?.label() ?: "Direction") })
             DropdownMenu(dirOpen, { dirOpen = false }) {
                 DropdownMenuItem({ Text("All directions") }, { vm.setDirection(null); dirOpen = false })
-                Direction.entries.forEach { d -> DropdownMenuItem({ Text(d.label()) }, { vm.setDirection(d); dirOpen = false }) }
+                Direction.entries.filter { it != Direction.UNKNOWN }.forEach { d -> DropdownMenuItem({ Text(d.label()) }, { vm.setDirection(d); dirOpen = false }) }
             }
         }
         Box {
@@ -169,7 +169,7 @@ private fun FilterRow(f: CallsFilterState, vm: CallsViewModel, showPerson: Boole
                 people.forEach { (id, name) -> DropdownMenuItem({ Text(name) }, { vm.setUser(id); personOpen = false }) }
             }
         }
-        if (f.direction != null || f.date != DatePreset.ALL || f.userId != null) {
+        if (f.search.isNotEmpty() || f.direction != null || f.date != DatePreset.ALL || f.userId != null) {
             IconButton(onClick = vm::clearFilters) { Icon(Icons.Default.Close, "Clear filters") }
         }
         if (showPerson) AssistChip(onClick = onExport, label = { Text("Export CSV") })
