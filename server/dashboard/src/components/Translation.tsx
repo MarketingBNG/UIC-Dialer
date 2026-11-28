@@ -35,7 +35,7 @@ export function TranslationPanel() {
 
 function Usage({ u }: { u: TranslationUsage }) {
   const bar = Math.min(100, u.pct);
-  const tone = u.pct >= 100 ? "bg-red-600" : u.pct >= 80 ? "bg-amber-500" : "bg-brand-600";
+  const tone = u.pct >= 100 ? "bg-destructive" : u.pct >= 80 ? "bg-warning" : "bg-primary";
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -52,7 +52,7 @@ function Usage({ u }: { u: TranslationUsage }) {
         <span className="font-medium tabular-nums">{u.pct}% used</span>
       </div>
       <div
-        className="relative mt-2 h-3 overflow-hidden rounded-full bg-slate-200"
+        className="relative mt-2 h-3 overflow-hidden rounded-full bg-muted"
         role="progressbar"
         aria-label="Claude translation spend"
         aria-valuemin={0}
@@ -98,7 +98,7 @@ function AdminForm({ u }: { u: TranslationUsage }) {
 
   return (
     <form
-      className="mt-5 space-y-4 border-t border-slate-200 pt-4"
+      className="mt-5 space-y-4 border-t pt-4"
       onSubmit={(e) => {
         e.preventDefault();
         if (budgetOk && dirty) save.mutate(patch);
@@ -125,12 +125,12 @@ function AdminForm({ u }: { u: TranslationUsage }) {
           English translations wait once this month's spend reaches the cap. Jobs already started still finish, so spend can go a little over (one batch per running worker).
         </p>
       </div>
-      <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-4">
+      <div className="flex flex-wrap items-center gap-2 border-t pt-4">
         <Button type="submit" className="min-h-11" disabled={!dirty || !budgetOk || save.isPending}>
           <Save /> {save.isPending ? "Saving…" : "Save changes"}
         </Button>
         <span aria-live="polite" className="text-sm">
-          {saved && !dirty && <span className="text-emerald-700">Saved.</span>}
+          {saved && !dirty && <span className="text-success-text">Saved.</span>}
           {save.error && <span className="text-destructive">{save.error.message}</span>}
         </span>
       </div>

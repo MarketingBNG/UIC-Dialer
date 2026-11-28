@@ -22,8 +22,8 @@ const FILTER_KEYS = ["q", "phone", "userId", "ownerId", "direction", "status", "
 const DIR_WORD: Record<string, string> = { INCOMING: "Incoming", OUTGOING: "Outgoing", MISSED: "Missed", UNKNOWN: "Unknown" };
 
 /**
- * The quick chips. Each maps onto the server's existing filters; "Answered" and "No answer" have no
- * server filter, so they also narrow the loaded rows here (?show=).
+ * The quick chips. Each maps onto the server's filters; ?show=answered|noanswer becomes the
+ * server's answered=true|false, so old links keep working.
  */
 type Chip = { key: string; label: string; direction?: string; status?: string; show?: string };
 const CHIPS: Chip[] = [
@@ -139,6 +139,7 @@ export function CallsPage() {
     // Dates are India days, whatever the viewer's time zone.
     from: istDayBoundary(get("from"), false),
     to: istDayBoundary(get("to"), true),
+    answered: get("show") === "answered" ? "true" : get("show") === "noanswer" ? "false" : "",
     // Include call-log-only calls (no recording).
     v: "2",
   };
@@ -166,8 +167,7 @@ export function CallsPage() {
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
-  const loaded = calls.data?.pages.flatMap((p) => p.items) ?? [];
-  const items = show === "answered" ? loaded.filter(wasAnswered) : show === "noanswer" ? loaded.filter((c) => !wasAnswered(c)) : loaded;
+  const items = calls.data?.pages.flatMap((p) => p.items) ?? [];
   const groups = groupByDay(items);
   // The server stops a word search at 1,000 matches; say so instead of looking complete.
   const capped = calls.data?.pages.some((p) => {
@@ -370,8 +370,6 @@ export function CallsPage() {
         )
       ) : (
         <>
-          {items.length === 0 && <p className="mb-3 text-sm text-muted-foreground">None in the calls loaded so far. Load more to look further back.</p>}
-
           {/* Phones: one card per call, under a day heading */}
           <div className="space-y-4 md:hidden">
             {groups.map((g) => (

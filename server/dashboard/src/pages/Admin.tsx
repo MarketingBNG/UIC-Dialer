@@ -17,13 +17,14 @@ export function AdminPage() {
   const links: AdminLink[] = [
     { to: "/lists", label: "Call lists", text: "Create lists, assign reps, see progress and results.", icon: ClipboardList },
     { to: "/team", label: "Team", text: "Calls, talk time and targets for each rep.", icon: Users },
-    { to: "/health", label: "Sync health", text: "Phones, uploads, transcription and alerts.", icon: Activity },
+    { to: "/health", label: "Sync health", text: "Are phones uploading and transcripts coming in?", icon: Activity },
     { to: "/users", label: "Users", text: "People, roles, teams and phones.", icon: UserCog },
   ];
-  if (me.role === "MANAGER") links.push({ to: "/settings/dnc", label: "Do-not-call", text: "Numbers nobody should call.", icon: PhoneOff });
+  // Managers see only Do not call (and Targets once App.tsx routes it for them); reps have no settings.
+  if (me.role === "MANAGER") links.push({ to: "/settings/dnc", label: "Do not call", text: "Numbers nobody should call.", icon: PhoneOff });
   if (me.role === "ADMIN")
     links.push(
-      { to: "/settings", label: "Settings", text: "Outcomes, scripts, templates, lead sources, do-not-call, privacy.", icon: Settings },
+      { to: "/settings", label: "Settings", text: "Calling, leads & numbers, privacy.", icon: Settings },
       { to: "/audit", label: "Audit log", text: "Who played, downloaded or changed what.", icon: ScrollText },
     );
   return (

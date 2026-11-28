@@ -18,6 +18,14 @@ import { Empty, ErrorBox, FormError, Hint, Spinner } from "../../ui";
 
 const RULES = Object.keys(RULE_LABEL) as OutcomeRule[];
 const BASES = Object.keys(OUTCOME_LABEL) as CallOutcome[];
+// Retry choices reps' managers understand; any other saved value shows as its own option so editing keeps it.
+const RETRY_CHOICES: [number, string][] = [
+  [2, "In 2 hours"],
+  [4, "In 4 hours"],
+  [24, "Tomorrow"],
+  [72, "In 3 days"],
+];
+const retryText = (h: number) => RETRY_CHOICES.find(([v]) => v === h)?.[1].toLowerCase() ?? `in ${h} h`;
 
 /** Same checks as the server: Call back needs a date-asking rule or RETRY; RETRY needs hours. */
 function invalid(f: OutcomeInput): string | null {
@@ -25,7 +33,7 @@ function invalid(f: OutcomeInput): string | null {
   if (f.label.trim().length > 40) return "Label: 40 characters at most.";
   if (!/^#[0-9A-Fa-f]{6}$/.test(f.color)) return "Pick a colour.";
   if (f.baseOutcome === "CALL_BACK" && !(f.rule.startsWith("ASK_") || f.rule === "RETRY")) return "A Call back outcome must ask for a date or retry.";
-  if (f.rule === "RETRY" && !(f.retryHours && f.retryHours >= 1 && f.retryHours <= 720)) return "Retry needs hours, 1 to 720.";
+  if (f.rule === "RETRY" && !(f.retryHours && f.retryHours >= 1 && f.retryHours <= 720)) return "Pick when to try again.";
   return null;
 }
 
@@ -61,7 +69,7 @@ export function OutcomesTab() {
       <CardHeader className="flex-row flex-wrap items-start justify-between gap-2">
         <div>
           <CardTitle>Call outcomes</CardTitle>
-          <CardDescription>The buttons reps pick after a call, in this order. Each maps to a base outcome so reports and Zoho keep working.</CardDescription>
+          <CardDescription>The buttons reps pick after a call, in this order.</CardDescription>
         </div>
         <Button onClick={() => setEditing("new")}>
           <Plus aria-hidden />
@@ -99,8 +107,8 @@ export function OutcomesTab() {
                 <OutcomeChip label={o.label} color={o.color} />
                 <span className="min-w-0 flex-1 text-sm text-muted-foreground">
                   {OUTCOME_LABEL[o.baseOutcome]} · {RULE_LABEL[o.rule]}
-                  {o.rule === "RETRY" && o.retryHours ? ` in ${o.retryHours} h` : ""}
-                  {o.addToDnc ? " · adds to do-not-call" : ""}
+                  {o.rule === "RETRY" && o.retryHours ? ` ${retryText(o.retryHours)}` : ""}
+                  {o.addToDnc ? " · adds to Do not call" : ""}
                 </span>
                 {!o.active && <Badge variant="gray">Inactive</Badge>}
                 <Button variant="ghost" onClick={() => setEditing(o)} aria-label={`Edit ${o.label}`}>
@@ -167,7 +175,7 @@ function OutcomeDialog({ initial, onClose, onSaved }: { initial: OutcomeDto | nu
             </div>
           </div>
           <div>
-            <Label htmlFor="o-base">Base outcome</Label>
+            <Label htmlFor="o-base">Counts in reports as</Label>
             <NativeSelect id="o-base" value={f.baseOutcome} onChange={(e) => set("baseOutcome", e.target.value as CallOutcome)}>
               {BASES.map((b) => (
                 <option key={b} value={b}>
@@ -175,10 +183,10 @@ function OutcomeDialog({ initial, onClose, onSaved }: { initial: OutcomeDto | nu
                 </option>
               ))}
             </NativeSelect>
-            <Hint>Sets the contact status and what reports and Zoho see.</Hint>
+            <Hint>Also sets the contact status and what Zoho sees.</Hint>
           </div>
           <div>
-            <Label htmlFor="o-rule">After picking it</Label>
+            <Label htmlFor="o-rule">What happens next</Label>
             <NativeSelect id="o-rule" value={f.rule} onChange={(e) => set("rule", e.target.value as OutcomeRule)}>
               {RULES.map((r) => (
                 <option key={r} value={r}>
@@ -189,15 +197,23 @@ function OutcomeDialog({ initial, onClose, onSaved }: { initial: OutcomeDto | nu
           </div>
           {f.rule === "RETRY" && (
             <div className="max-w-xs">
-              <Label htmlFor="o-hours">Retry after (hours)</Label>
-              <Input id="o-hours" inputMode="numeric" value={f.retryHours ?? ""} onChange={(e) => set("retryHours", e.target.value === "" ? null : Number(e.target.value.replace(/\D/g, "")))} />
+              <Label htmlFor="o-hours">Try again</Label>
+              <NativeSelect id="o-hours" value={f.retryHours ?? ""} onChange={(e) => set("retryHours", e.target.value === "" ? null : Number(e.target.value))}>
+                <option value="">Pick a time</option>
+                {RETRY_CHOICES.map(([h, l]) => (
+                  <option key={h} value={h}>
+                    {l}
+                  </option>
+                ))}
+                {f.retryHours && !RETRY_CHOICES.some(([h]) => h === f.retryHours) && <option value={f.retryHours}>In {f.retryHours} hours</option>}
+              </NativeSelect>
             </div>
           )}
           {f.rule === "REMOVE_FROM_LISTS" && (
             <div className="flex min-h-11 items-center gap-2">
               <Checkbox id="o-dnc" checked={!!f.addToDnc} onCheckedChange={(v) => set("addToDnc", v === true)} />
               <Label htmlFor="o-dnc" className="mb-0 cursor-pointer">
-                Also mark the number do-not-call (e.g. wrong number)
+                Also add the number to Do not call (e.g. wrong number)
               </Label>
             </div>
           )}
@@ -207,7 +223,7 @@ function OutcomeDialog({ initial, onClose, onSaved }: { initial: OutcomeDto | nu
               Active
             </Label>
           </div>
-          {error && f.label && <p className="text-sm text-amber-700">{error}</p>}
+          {error && f.label && <p className="text-sm text-warning-text">{error}</p>}
           <FormError error={save.error} />
         </div>
         <DialogFooter>

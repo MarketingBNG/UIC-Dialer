@@ -14,7 +14,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +35,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Phone
+import com.usaindiacfo.uicdialer.ui.common.EmptyState
+import com.usaindiacfo.uicdialer.ui.common.Pill
+import com.usaindiacfo.uicdialer.ui.common.PillTone
+import com.usaindiacfo.uicdialer.ui.common.colors
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.usaindiacfo.uicdialer.appContainer
 import com.usaindiacfo.uicdialer.data.api.DeviceDto
@@ -103,10 +108,10 @@ fun DevicesScreen() {
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    stats?.let { s -> item(key = "stats") { StatsHeader(s) } }
+                    stats?.let { s -> item(key = "stats") { StatsHeader(s, offlineNames(list, now)) } }
                     item(key = "fireflies") { FirefliesPanel(isAdmin, ff, ffSave) }
                     item(key = "translation") { TranslationPanel(isAdmin, tr, trSave) }
-                    if (sorted.isEmpty()) item(key = "empty") { Text("No devices have signed in yet.") }
+                    if (sorted.isEmpty()) item(key = "empty") { EmptyState(Icons.Filled.Phone, "No phones yet", text = "Phones show up here after staff sign in.") }
                     items(sorted, key = { it.id }) { d ->
                         DeviceRow(d, now, onRevoke = if (isAdmin && d.revokedAt == null) ({ confirm = d }) else null)
                     }
@@ -121,36 +126,58 @@ fun DevicesScreen() {
         var busy by remember(d.id) { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { if (!busy) confirm = null },
-            title = { Text("Revoke device?") },
+            title = { Text("Sign out this phone?") },
             text = {
-                Text("${d.model ?: "This device"} (${d.user.name ?: d.user.email}) will be signed out and stop uploading until the user signs in again.")
+                Text("${d.model ?: "This device"} (${d.user.name ?: d.user.email}) will be signed out and stop sending calls until they sign in again.")
             },
             confirmButton = {
                 TextButton(enabled = !busy, onClick = {
                     busy = true
                     scope.launch {
                         apiCall { api.revokeDevice(d.id) }
-                            .onSuccess { confirm = null; reload++; snackbar.showSnackbar("Device revoked") }
+                            .onSuccess { confirm = null; reload++; snackbar.showSnackbar("Phone signed out") }
                             .onFailure { confirm = null; snackbar.showSnackbar(it.userMessage()) }
                     }
-                }) { Text("Revoke", color = MaterialTheme.colorScheme.error) }
+                }) { Text("Sign out", color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = { TextButton(enabled = !busy, onClick = { confirm = null }) { Text("Cancel") } },
         )
     }
 }
 
+/** Names of active phones not seen for a day, for the server card. */
+private fun offlineNames(list: List<DeviceDto>, now: Instant): List<String> = list
+    .filter { it.revokedAt == null && parseInstant(it.lastSeenAt)?.let { t -> Duration.between(t, now) > STALE } != false }
+    .map { it.user.name ?: it.user.email }
+    .distinct()
+
+/** Call states in plain words; Uploaded and Transcribing are one step to a manager. */
+internal fun callStatusLabel(status: String): String = when (status) {
+    "PENDING_UPLOAD" -> "Waiting to upload"
+    "UPLOADED", "TRANSCRIBING" -> "Working on transcript"
+    "TRANSCRIBED" -> "Transcript ready"
+    "FAILED" -> "No transcript, audio kept"
+    "NO_RECORDING" -> "No recording"
+    else -> status.lowercase().replace('_', ' ')
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun StatsHeader(s: Stats) {
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+private fun StatsHeader(s: Stats, offline: List<String>) {
+    val amber = PillTone.WARNING.colors().fg
+    Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Server health", style = MaterialTheme.typography.titleSmall)
-            if (s.calls.isNotEmpty()) StatLine("Calls", s.calls)
-            if (s.jobs.isNotEmpty()) StatLine("Queue", s.jobs, ::jobStatusLabel)
-            val diskColor = if (s.disk.usedPct > 80) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+            Text("Server", style = MaterialTheme.typography.titleSmall)
+            if (s.calls.isNotEmpty()) StatLine("Calls", s.calls, ::callStatusLabel)
+            if (s.jobs.isNotEmpty()) StatLine("Transcript jobs", s.jobs, ::jobStatusLabel)
+            // Red only when the disk is nearly full (act now); amber as an early warning.
+            val diskColor = when {
+                s.disk.usedPct > 95 -> PillTone.DANGER.colors().fg
+                s.disk.usedPct > 80 -> amber
+                else -> MaterialTheme.colorScheme.primary
+            }
             Text(
-                "Disk ${s.disk.usedPct}% used · ${formatBytes(s.disk.freeBytes)} free of ${formatBytes(s.disk.totalBytes)}",
+                "Storage ${s.disk.usedPct}% used · ${formatBytes(s.disk.freeBytes)} free of ${formatBytes(s.disk.totalBytes)}",
                 style = MaterialTheme.typography.bodySmall,
             )
             LinearProgressIndicator(
@@ -160,26 +187,29 @@ private fun StatsHeader(s: Stats) {
             )
             s.compression?.let { c ->
                 Text(
-                    "Saved by compression: ${formatBytes(c.bytesSaved)} (${c.compressedCalls} calls)",
+                    "Space saved by shrinking audio: ${formatBytes(c.bytesSaved)} (${c.compressedCalls} calls)",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
             s.throughput?.let { t ->
-                val failColor = if (t.failureRatePct > 5) MaterialTheme.colorScheme.error else Color.Unspecified
                 Text(
-                    "${t.jobsPerHour} jobs/h · ${t.avgJobSeconds?.let { "${it}s per job" } ?: "no recent jobs"}",
+                    "Transcripts that didn't work (24 h): ${t.failureRatePct}%",
                     style = MaterialTheme.typography.bodySmall,
+                    color = if (t.failureRatePct > 5) amber else Color.Unspecified,
                 )
-                Text("Failure rate ${t.failureRatePct}% (24 h)", style = MaterialTheme.typography.bodySmall, color = failColor)
                 Text(
-                    "Backlog ${t.backlogCalls} calls · ${t.backlogMinutes} min · ETA ${t.etaText()}",
+                    "Calls still to do: ${t.backlogCalls} (${t.backlogMinutes} min) · done in about ${t.etaText()}",
                     style = MaterialTheme.typography.bodySmall,
                 )
             }
             Text(
-                if (s.staleDevices == 0) "All devices checked in within 24 h" else "${s.staleDevices} device(s) not seen in 24 h",
+                when {
+                    s.staleDevices == 0 -> "All phones checked in today"
+                    offline.isNotEmpty() -> "Phones offline for more than a day: ${offline.joinToString(", ")}"
+                    else -> "Phones offline for more than a day: ${s.staleDevices}"
+                },
                 style = MaterialTheme.typography.bodySmall,
-                color = if (s.staleDevices > 0) MaterialTheme.colorScheme.error else Color.Unspecified,
+                color = if (s.staleDevices > 0) amber else Color.Unspecified,
             )
         }
     }
@@ -187,52 +217,57 @@ private fun StatsHeader(s: Stats) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun StatLine(label: String, counts: Map<String, Int>, name: (String) -> String = { it.lowercase().replace('_', ' ') }) {
+private fun StatLine(label: String, counts: Map<String, Int>, name: (String) -> String) {
+    // Several raw states can share one plain word, so add them up.
+    val merged = remember(counts) {
+        counts.entries.sortedBy { it.key }.groupingBy { name(it.key) }.fold(0) { acc, e -> acc + e.value }
+    }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("$label:", style = MaterialTheme.typography.labelMedium)
-        counts.entries.sortedBy { it.key }.forEach { (k, v) ->
-            Text("${name(k)} $v", style = MaterialTheme.typography.bodySmall)
-        }
+        merged.forEach { (k, v) -> Text("$k $v", style = MaterialTheme.typography.bodySmall) }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DeviceRow(d: DeviceDto, now: Instant, onRevoke: (() -> Unit)?) {
     val revoked = d.revokedAt != null
     val lastSeen = parseInstant(d.lastSeenAt)
     val stale = !revoked && (lastSeen == null || Duration.between(lastSeen, now) > STALE)
-    val error = MaterialTheme.colorScheme.error
+    val amber = PillTone.WARNING.colors().fg
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(d.user.name ?: d.user.email, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     Text(
-                        listOfNotNull(d.model, d.androidVersion?.let { "Android $it" }, d.appVersion?.let { "v$it" }).joinToString(" · ").ifEmpty { "Unknown device" },
+                        listOfNotNull(d.model, d.androidVersion?.let { "Android $it" }, d.appVersion?.let { "App $it" }).joinToString(" · ").ifEmpty { "Unknown phone" },
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                if (onRevoke != null) TextButton(onClick = onRevoke) { Text("Revoke", color = error) }
+                if (onRevoke != null) TextButton(onClick = onRevoke) { Text("Sign out") }
             }
-            if (revoked) {
-                Text("Revoked ${formatDate(d.revokedAt)}", color = error, style = MaterialTheme.typography.labelMedium)
-            } else {
-                Text(
-                    "Last seen ${ago(d.lastSeenAt, now)}" + if (stale) " (stale)" else "",
-                    color = if (stale) error else Color.Unspecified,
-                    style = MaterialTheme.typography.bodySmall,
-                )
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                when {
+                    revoked -> Pill("Signed out ${formatDate(d.revokedAt)}", PillTone.NEUTRAL)
+                    stale -> Pill("Offline", PillTone.WARNING)
+                    else -> Pill("Online", PillTone.SUCCESS)
+                }
+                if (!d.permissionsOk && !revoked) Pill("Needs permission", PillTone.WARNING)
             }
-            Text("Last sync ${ago(d.lastSyncAt, now)}", style = MaterialTheme.typography.bodySmall)
+            if (!revoked) {
+                Text("Last seen ${ago(d.lastSeenAt, now)}", style = MaterialTheme.typography.bodySmall)
+            }
+            Text("Last sent calls ${ago(d.lastSyncAt, now)}", style = MaterialTheme.typography.bodySmall)
             Text(
-                "Pending ${d.pendingCount} · Free ${formatBytes(d.freeBytes?.toLongOrNull())}",
+                "Waiting to upload ${d.pendingCount} · Phone space free ${formatBytes(d.freeBytes?.toLongOrNull())}",
                 style = MaterialTheme.typography.bodySmall,
             )
             if (!d.permissionsOk && !revoked) {
-                Text("Permissions missing: recordings can't be read", color = error, style = MaterialTheme.typography.bodySmall)
+                Text("App can't read recordings. Open the app on this phone and tap Fix.", color = amber, style = MaterialTheme.typography.bodySmall)
             }
             deviceHealthLines(d).forEach { (text, warn) ->
-                Text(text, color = if (warn && !revoked) error else Color.Unspecified, style = MaterialTheme.typography.bodySmall)
+                Text(text, color = if (warn && !revoked) amber else Color.Unspecified, style = MaterialTheme.typography.bodySmall)
             }
         }
     }
@@ -242,13 +277,13 @@ private fun DeviceRow(d: DeviceDto, now: Instant, onRevoke: (() -> Unit)?) {
 internal fun deviceHealthLines(d: DeviceDto): List<Pair<String, Boolean>> = buildList {
     if (d.calls7d != null) {
         val tail = if (d.callsWithoutRecordings) " (calls but no recordings)" else ""
-        add(Pair("Calls / recordings (7 d): ${d.calls7d} / ${d.recordings7d ?: "-"}$tail", d.callsWithoutRecordings))
+        add(Pair("Calls / recordings (7 days): ${d.calls7d} / ${d.recordings7d ?: "-"}$tail", d.callsWithoutRecordings))
     }
-    d.standbyBucketName?.let { add(Pair("Standby bucket: $it" + (if (d.throttled) " (throttled)" else ""), d.throttled)) }
-    d.lastStopReason?.let { add("Last job stop: ${com.usaindiacfo.uicdialer.sync.DeviceHealth.stopReasonLabel(it)}" to false) }
+    d.standbyBucketName?.let { add(Pair("Battery limit: $it" + (if (d.throttled) " (app slowed down)" else ""), d.throttled)) }
+    d.lastStopReason?.let { add("Last background stop: ${com.usaindiacfo.uicdialer.sync.DeviceHealth.stopReasonLabel(it)}" to false) }
     d.defaultDialer?.let {
         val google = com.usaindiacfo.uicdialer.sync.DeviceHealth.isGoogleDialer(it)
-        add(Pair("Dialer: " + (if (google) "Google Phone (recordings not readable)" else it), google))
+        add(Pair("Phone app: " + (if (google) "Google Phone (recordings not readable)" else it), google))
     }
-    d.autostartIntent?.let { add("Autostart screen: ${it.substringBefore('/')}" to false) }
+    d.autostartIntent?.let { add("Auto-start setting: ${it.substringBefore('/')}" to false) }
 }

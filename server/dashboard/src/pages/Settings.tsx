@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Save } from "lucide-react";
-import { useState } from "react";
-import { NavLink, Navigate, Route, Routes } from "react-router";
+import { useEffect, useState, type ReactNode } from "react";
+import { NavLink, Navigate, Route, Routes, useLocation } from "react-router";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,6 +12,7 @@ import { tabLinkClass, tabsListClass } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { api, type DeviceConfig, type Settings } from "../api";
+import { MaintenanceJobs } from "../components/MaintenanceJobs";
 import { ClientListPanel } from "../components/Privacy";
 import { ErrorBox, FormError, Hint, PageHeader, Spinner } from "../ui";
 import { DncTab } from "./settings/Dnc";
@@ -23,69 +24,176 @@ import { TargetsTab } from "./settings/Targets";
 import { TemplatesTab } from "./settings/Templates";
 
 const TABS = [
-  { to: "/settings", label: "General", end: true },
-  { to: "/settings/outcomes", label: "Outcomes" },
-  { to: "/settings/scripts", label: "Scripts" },
-  { to: "/settings/templates", label: "Templates" },
-  { to: "/settings/lead-sources", label: "Lead sources" },
-  { to: "/settings/dnc", label: "Do-not-call" },
-  { to: "/settings/retention", label: "Retention" },
-  { to: "/settings/targets", label: "Targets" },
+  { to: "/settings/calling", label: "Calling" },
+  { to: "/settings/leads", label: "Leads & numbers" },
+  { to: "/settings/privacy", label: "Privacy" },
+  { to: "/settings/advanced", label: "Advanced" },
 ];
 
-/** Admin settings with sub-tabs (each tab is its own URL, so /settings/dnc deep-links). */
+// Old tab URLs (bookmarks, links in messages) land on the section's new home.
+const OLD_TABS: [string, string][] = [
+  ["outcomes", "/settings/calling#outcomes"],
+  ["scripts", "/settings/calling#scripts"],
+  ["templates", "/settings/calling#templates"],
+  ["targets", "/settings/calling#targets"],
+  ["lead-sources", "/settings/leads#lead-sources"],
+  ["dnc", "/settings/leads#dnc"],
+  ["retention", "/settings/privacy"],
+];
+
+/** Admin settings in 4 tabs (each its own URL). Managers reach Do not call through their own route. */
 export function SettingsPage() {
   return (
     <>
-      <PageHeader title="Settings" subtitle="How phones sync, what reps see on calls, and who can be called." />
+      <PageHeader title="Settings" subtitle="What reps see on calls, where leads go, and privacy." />
       <nav aria-label="Settings" className={cn(tabsListClass, "mb-5")}>
         {TABS.map((t) => (
-          <NavLink key={t.to} to={t.to} end={t.end} className={tabLinkClass}>
+          <NavLink key={t.to} to={t.to} className={tabLinkClass}>
             {t.label}
           </NavLink>
         ))}
       </nav>
+      <ScrollToHash />
       <Routes>
-        <Route index element={<GeneralTab />} />
-        <Route path="outcomes" element={<OutcomesTab />} />
-        <Route path="scripts" element={<ScriptsTab />} />
-        <Route path="templates" element={<TemplatesTab />} />
-        <Route path="lead-sources" element={<LeadSourcesTab />} />
-        <Route path="dnc" element={<DncTab />} />
-        <Route path="retention" element={<RetentionTab />} />
-        <Route path="targets" element={<TargetsTab />} />
-        <Route path="*" element={<Navigate to="/settings" replace />} />
+        <Route index element={<Navigate to="/settings/calling" replace />} />
+        <Route path="calling" element={<CallingTab />} />
+        <Route path="leads" element={<LeadsTab />} />
+        <Route path="privacy" element={<RetentionTab />} />
+        <Route path="advanced" element={<AdvancedTab />} />
+        {OLD_TABS.map(([from, to]) => (
+          <Route key={from} path={from} element={<Navigate to={to} replace />} />
+        ))}
+        <Route path="*" element={<Navigate to="/settings/calling" replace />} />
       </Routes>
     </>
   );
 }
 
-function GeneralTab() {
-  const settings = useQuery({ queryKey: ["settings"], queryFn: () => api<Settings>("/api/settings") });
+/** Old tab links point at a section (#dnc); scroll to it once it has rendered. */
+function ScrollToHash() {
+  const { hash, pathname } = useLocation();
+  useEffect(() => {
+    if (!hash) return;
+    const t = setTimeout(() => document.getElementById(hash.slice(1))?.scrollIntoView({ block: "start" }), 50);
+    return () => clearTimeout(t);
+  }, [hash, pathname]);
+  return null;
+}
+
+function Section({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <section id={id} className="mb-4 scroll-mt-20">
+      {children}
+    </section>
+  );
+}
+
+function CallingTab() {
   return (
     <>
-      <p className="mb-4 text-sm text-muted-foreground">Applied to every phone. Excluded numbers are set per user on the Users page.</p>
-      {settings.isPending ? (
-        <Spinner label="Loading settings" />
-      ) : settings.isError ? (
-        <ErrorBox error={settings.error} onRetry={() => void settings.refetch()} />
-      ) : (
-        <>
-          <DeviceConfigForm initial={settings.data.deviceConfig} />
-          <ClientListPanel />
-          <Card className="mt-4">
-            <CardHeader className="pb-5">
-              <CardTitle>Published app</CardTitle>
-              <CardDescription className="break-all">
-                {settings.data.latestApp
-                  ? `${settings.data.latestApp.versionName} (${settings.data.latestApp.versionCode}) · ${settings.data.latestApp.fileName}`
-                  : "No app version published yet."}
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        </>
-      )}
+      <Section id="outcomes">
+        <OutcomesTab />
+      </Section>
+      <Section id="scripts">
+        <ScriptsTab />
+      </Section>
+      <Section id="templates">
+        <TemplatesTab />
+      </Section>
+      <Section id="targets">
+        <TargetsTab />
+      </Section>
     </>
+  );
+}
+
+function LeadsTab() {
+  return (
+    <>
+      <Section id="lead-sources">
+        <LeadSourcesTab />
+      </Section>
+      <Section id="dnc">
+        <DncTab />
+      </Section>
+      <Section id="personal-calls">
+        <PersonalCalls />
+      </Section>
+    </>
+  );
+}
+
+const useSettings = () => useQuery({ queryKey: ["settings"], queryFn: () => api<Settings>("/api/settings") });
+
+/** "Business calls only" plus the client list. Saves the whole device config with just this switch changed. */
+function PersonalCalls() {
+  const qc = useQueryClient();
+  const settings = useSettings();
+  const save = useMutation({
+    mutationFn: (businessOnly: boolean) =>
+      api<DeviceConfig>("/api/settings/device-config", { method: "PUT", body: { ...settings.data!.deviceConfig, businessOnly } }),
+    onSuccess: (data) => {
+      toast.success("Saved. Phones pick this up on their next sync.");
+      qc.setQueryData<Settings>(["settings"], (s) => (s ? { ...s, deviceConfig: data } : s));
+    },
+  });
+  return (
+    <>
+      <Card>
+        <CardHeader>
+          <CardTitle>Personal calls</CardTitle>
+          <CardDescription>Keep reps' personal calls off the server.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {settings.isPending ? (
+            <Spinner label="Loading settings" />
+          ) : settings.isError ? (
+            <ErrorBox error={settings.error} onRetry={() => void settings.refetch()} />
+          ) : (
+            <>
+              <SettingSwitch
+                id="s-business"
+                label="Business calls only"
+                hint="Phones skip calls with numbers saved in the rep's contacts, unless the number is on the client list below. New numbers still upload."
+                checked={save.isPending ? !!save.variables : settings.data.deviceConfig.businessOnly}
+                onChange={(v) => save.mutate(v)}
+              />
+              <FormError error={save.error} />
+            </>
+          )}
+        </CardContent>
+      </Card>
+      <ClientListPanel />
+    </>
+  );
+}
+
+/** Upload settings, catch-up jobs, app version and test alert: closed by default so nobody changes them by accident. */
+function AdvancedTab() {
+  const settings = useSettings();
+  return (
+    <details className="rounded-xl border bg-card p-4">
+      <summary className="cursor-pointer font-medium">Show advanced settings</summary>
+      <p className="mt-1 text-sm text-muted-foreground">Change only if recordings are not uploading.</p>
+      <div className="mt-4">
+        {settings.isPending ? (
+          <Spinner label="Loading settings" />
+        ) : settings.isError ? (
+          <ErrorBox error={settings.error} onRetry={() => void settings.refetch()} />
+        ) : (
+          <>
+            <DeviceConfigForm key={JSON.stringify(settings.data.deviceConfig)} initial={settings.data.deviceConfig} />
+            <MaintenanceJobs />
+            <h3 className="mb-2 mt-6 font-semibold">Latest app version</h3>
+            <Card className="break-all p-4 text-sm text-muted-foreground">
+              {settings.data.latestApp
+                ? `${settings.data.latestApp.versionName} (${settings.data.latestApp.versionCode}) · ${settings.data.latestApp.fileName}`
+                : "No app version published yet."}
+            </Card>
+          </>
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -122,7 +230,8 @@ function DeviceConfigForm({ initial }: { initial: DeviceConfig }) {
     backlogCutoffDays: cutoff,
     maxParallelUploads: form.maxParallelUploads,
     compressAudio: form.compressAudio,
-    businessOnly: form.businessOnly,
+    // Set on the Leads & numbers tab; always the saved value here.
+    businessOnly: initial.businessOnly,
   };
   const dirty = JSON.stringify(config) !== JSON.stringify(initial);
 
@@ -137,8 +246,8 @@ function DeviceConfigForm({ initial }: { initial: DeviceConfig }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Device sync settings</CardTitle>
-        <CardDescription>Where phones look for recordings and how they upload them.</CardDescription>
+        <CardTitle>Phone recording & upload</CardTitle>
+        <CardDescription>Where phones find recordings and how they upload them.</CardDescription>
       </CardHeader>
       <CardContent>
         <form
@@ -152,13 +261,13 @@ function DeviceConfigForm({ initial }: { initial: DeviceConfig }) {
             <Label htmlFor="s-folders">Recorder folders, one per line</Label>
             <Textarea id="s-folders" rows={8} className="font-mono" value={form.folders} onChange={(e) => set("folders", e.target.value)} aria-describedby="s-folders-hint" aria-invalid={!foldersOk} />
             <Hint id="s-folders-hint" className={foldersOk ? "" : "text-destructive"}>
-              Paths under internal storage, such as Recordings/Call. {folderList.length}/50
+              Folders in the phone's storage, such as Recordings/Call. {folderList.length}/50
             </Hint>
           </div>
 
           <div>
-            <p id="s-net-label" className="mb-1.5 text-sm font-medium text-slate-700">
-              Live uploads network
+            <p id="s-net-label" className="mb-1.5 text-sm font-medium text-foreground">
+              Upload calls on
             </p>
             <div role="radiogroup" aria-labelledby="s-net-label" className="flex flex-wrap gap-2">
               {(
@@ -176,28 +285,25 @@ function DeviceConfigForm({ initial }: { initial: DeviceConfig }) {
           </div>
 
           <div className="divide-y">
-            <SettingSwitch id="s-backlog" label="Upload old recordings (backlog)" hint="Recordings made before the app was installed." checked={form.backlogEnabled} onChange={(v) => set("backlogEnabled", v)} />
-            <SettingSwitch id="s-compress" label="Compress audio before upload" hint="Smaller files, less mobile data." checked={form.compressAudio} onChange={(v) => set("compressAudio", v)} />
-            <SettingSwitch
-              id="s-business"
-              label="Business calls only"
-              hint="Phones skip calls with numbers saved in their contacts, unless the number is on the client list below. Unsaved numbers still upload. Phones ask for the Contacts permission."
-              checked={form.businessOnly}
-              onChange={(v) => set("businessOnly", v)}
-            />
-          </div>
-
-          <div className="max-w-xs">
-            <Label htmlFor="s-cutoff">Backlog cutoff (days)</Label>
-            <Input id="s-cutoff" inputMode="numeric" value={form.cutoff} onChange={(e) => set("cutoff", e.target.value)} aria-describedby="s-cutoff-hint" aria-invalid={!cutoffOk} />
-            <Hint id="s-cutoff-hint" className={cutoffOk ? "" : "text-destructive"}>
-              Skip recordings older than this. 0 to 3650.
-            </Hint>
+            <SettingSwitch id="s-backlog" label="Also upload older calls" hint="Calls recorded before the app was installed." checked={form.backlogEnabled} onChange={(v) => set("backlogEnabled", v)} />
+            {form.backlogEnabled && (
+              <div className="flex flex-wrap items-center gap-2 py-3 text-sm">
+                <Label htmlFor="s-cutoff" className="mb-0">
+                  From the last
+                </Label>
+                <Input id="s-cutoff" inputMode="numeric" className="w-24" value={form.cutoff} onChange={(e) => set("cutoff", e.target.value)} aria-describedby="s-cutoff-hint" aria-invalid={!cutoffOk} />
+                <span>days</span>
+                <Hint id="s-cutoff-hint" className={cn("w-full", cutoffOk ? "" : "text-destructive")}>
+                  0 to 3650.
+                </Hint>
+              </div>
+            )}
+            <SettingSwitch id="s-compress" label="Make audio smaller before upload" hint="Uses less mobile data." checked={form.compressAudio} onChange={(v) => set("compressAudio", v)} />
           </div>
 
           <div>
-            <p id="s-par-label" className="mb-1.5 text-sm font-medium text-slate-700">
-              Max parallel uploads
+            <p id="s-par-label" className="mb-1.5 text-sm font-medium text-foreground">
+              Uploads at the same time
             </p>
             <div role="radiogroup" aria-labelledby="s-par-label" className="flex gap-2">
               {[1, 2, 3, 4].map((n) => (
@@ -206,7 +312,7 @@ function DeviceConfigForm({ initial }: { initial: DeviceConfig }) {
                 </Button>
               ))}
             </div>
-            <Hint>Low-RAM phones always upload one at a time.</Hint>
+            <Hint>Phones with little memory always upload one at a time.</Hint>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 border-t pt-4">

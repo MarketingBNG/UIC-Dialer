@@ -51,12 +51,20 @@ export function firefliesAlerts(u: FirefliesUsage): { level: Level; text: string
   return out;
 }
 
+/** Managers never see the provider, budget or raw errors: only whether transcripts are paused. */
+function managerAlerts(u: FirefliesUsage): { level: Level; text: string }[] {
+  if (u.blocked) return [{ level: "warning", text: `Transcripts paused until ${formatWhen(u.blockedUntil)}. Recordings are safe.` }];
+  if (u.pct >= 100 || u.waitingBudgetJobs > 0) return [{ level: "warning", text: "Transcripts paused for now. Recordings are safe." }];
+  return [];
+}
+
 /** Shown in the app shell for managers and admins on every page. */
 export function FirefliesBanner() {
   const me = useMe();
   const usage = useUsage();
   if (!usage.data) return null;
-  const alerts = firefliesAlerts(usage.data);
+  const isAdmin = me.role === "ADMIN";
+  const alerts = isAdmin ? firefliesAlerts(usage.data) : managerAlerts(usage.data);
   if (alerts.length === 0) return null;
   return (
     <div className="mb-4 space-y-2">
@@ -67,8 +75,8 @@ export function FirefliesBanner() {
             <Icon />
             <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
               <span className="min-w-0 break-words">{a.text}</span>
-              <Link to="/health#fireflies" className="inline-flex min-h-11 items-center font-medium underline sm:min-h-0">
-                {me.role === "ADMIN" ? "Manage" : "Details"}
+              <Link to={isAdmin ? "/health#fireflies" : "/health"} className="inline-flex min-h-11 items-center font-medium underline sm:min-h-0">
+                {isAdmin ? "Manage" : "Details"}
               </Link>
             </AlertDescription>
           </Alert>
@@ -105,7 +113,7 @@ function Usage({ u }: { u: FirefliesUsage }) {
   const total = u.usedMinutes + u.reservedMinutes;
   const pctBar = Math.min(100, u.pct);
   const usedBar = u.budgetMinutes > 0 ? Math.min(100, (u.usedMinutes / u.budgetMinutes) * 100) : 100;
-  const barTone = u.pct >= 100 ? "bg-red-600" : u.pct >= 80 ? "bg-amber-500" : "bg-brand-600";
+  const barTone = u.pct >= 100 ? "bg-destructive" : u.pct >= 80 ? "bg-warning" : "bg-primary";
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -123,7 +131,7 @@ function Usage({ u }: { u: FirefliesUsage }) {
         <span className="font-medium tabular-nums">{u.pct}% used</span>
       </div>
       <div
-        className="relative mt-2 h-3 overflow-hidden rounded-full bg-slate-200"
+        className="relative mt-2 h-3 overflow-hidden rounded-full bg-muted"
         role="progressbar"
         aria-label="Fireflies minutes used"
         aria-valuemin={0}
@@ -141,7 +149,7 @@ function Usage({ u }: { u: FirefliesUsage }) {
         <dt className="text-muted-foreground">Live reserve</dt>
         <dd className="tabular-nums">{u.liveReservePct}%</dd>
         <dt className="text-muted-foreground">Backlog sent</dt>
-        <dd className={`tabular-nums ${u.backlogSent >= u.approvedBacklogCount ? "font-medium text-amber-700" : ""}`}>
+        <dd className={`tabular-nums ${u.backlogSent >= u.approvedBacklogCount ? "font-medium text-warning-text" : ""}`}>
           {u.backlogSent} of {u.approvedBacklogCount} approved
         </dd>
         <dt className="text-muted-foreground">Delete after fetch</dt>
@@ -154,7 +162,7 @@ function Usage({ u }: { u: FirefliesUsage }) {
         )}
       </dl>
       {u.lastError && (
-        <p className="mt-3 break-words text-sm text-slate-600">
+        <p className="mt-3 break-words text-sm text-muted-foreground">
           Last error{u.lastErrorAt ? ` (${formatWhen(u.lastErrorAt)})` : ""}: {u.lastError}
         </p>
       )}
@@ -213,7 +221,7 @@ function AdminForm({ u, saved, setSaved }: { u: FirefliesUsage; saved: boolean; 
 
   return (
     <form
-      className="mt-5 space-y-4 border-t border-slate-200 pt-4"
+      className="mt-5 space-y-4 border-t pt-4"
       onSubmit={(e) => {
         e.preventDefault();
         if (valid && dirty) save.mutate(patch);
@@ -257,7 +265,7 @@ function AdminForm({ u, saved, setSaved }: { u: FirefliesUsage; saved: boolean; 
           </p>
         </div>
       </div>
-      <div className="divide-y divide-slate-200">
+      <div className="divide-y">
         <SwitchRow checked={form.enabled} onChange={(v) => set("enabled", v)} label="Send calls to Fireflies" hint="When off, no new calls are sent." />
         <SwitchRow
           checked={form.deleteAfterFetch}
@@ -267,7 +275,7 @@ function AdminForm({ u, saved, setSaved }: { u: FirefliesUsage; saved: boolean; 
         />
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-4">
+      <div className="flex flex-wrap items-center gap-2 border-t pt-4">
         <Button type="submit" className="min-h-11" disabled={!dirty || !valid || save.isPending}>
           <Save /> {save.isPending ? "Saving…" : "Save changes"}
         </Button>
@@ -286,7 +294,7 @@ function AdminForm({ u, saved, setSaved }: { u: FirefliesUsage; saved: boolean; 
           </Button>
         )}
         <span aria-live="polite" className="text-sm">
-          {saved && !dirty && <span className="text-emerald-700">Saved.</span>}
+          {saved && !dirty && <span className="text-success-text">Saved.</span>}
           {save.error && <span className="text-destructive">{save.error.message}</span>}
         </span>
       </div>

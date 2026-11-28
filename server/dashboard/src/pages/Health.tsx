@@ -1,15 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, type CallStatus, type ClientErrorDto, type CompressionStats, type CrmStats, type TranslateBackfillResult, type Device, type Stats, type Throughput } from "../api";
+import { Link, useLocation } from "react-router";
+import { api, type CallStatus, type ClientErrorDto, type CrmStats, type Device, type FirefliesUsage, type Stats, type Throughput } from "../api";
 import { useMe } from "../App";
-import { STATUS_LABEL, ago, jobStatusLabel, formatBytes, formatWhen, personName } from "../format";
+import { STATUS_LABEL, ago, formatBytes, formatWhen, personName } from "../format";
 import { FirefliesPanel } from "../components/Fireflies";
 import { TranslationPanel } from "../components/Translation";
 import { ComputersPanel } from "../components/Computers";
 import { DeviceSims } from "../components/DeviceSims";
 import { Empty, ErrorBox, FormError, PageHeader, Spinner } from "../ui";
+import { cn } from "@/lib/utils";
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
-import { RefreshCw, Send, Smartphone } from "lucide-react";
+import { CircleCheck, RefreshCw, Smartphone, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +32,8 @@ export function stopReasonLabel(r: number): string {
 export function HealthPage() {
   const me = useMe();
   const isAdmin = me.role === "ADMIN";
+  // The admin banner links to #fireflies: open the details so the link lands.
+  const { hash } = useLocation();
   const qc = useQueryClient();
   const devices = useQuery({ queryKey: ["devices"], queryFn: () => api<Device[]>("/api/devices") });
   // Stats failing (e.g. disk probe) shouldn't hide the device list.
@@ -53,7 +57,7 @@ export function HealthPage() {
     <>
       <PageHeader
         title="Sync health"
-        subtitle="Phones that upload recordings (a phone not seen for 24 hours is flagged), and computers signed in to the dashboard."
+        subtitle="Are phones uploading and transcripts coming in?"
         actions={
           <Button variant="outline"
             disabled={devices.isFetching}
@@ -68,17 +72,11 @@ export function HealthPage() {
         }
       />
 
-      {stats.data && <StatsHeader s={stats.data} />}
-      {stats.isError && <p className="mb-4 text-sm text-amber-700">Server stats unavailable: {stats.error.message}</p>}
+      {stats.data && <Summary s={stats.data} offline={sorted.filter((d) => isStale(d, now))} />}
+      {stats.isError && <p className="mb-4 text-sm text-warning-text">Couldn't load the summary. Try Refresh.</p>}
 
-      <FirefliesPanel />
-      <TranslationPanel />
-      {isAdmin && <TranslateBackfill />}
-      {isAdmin && <SummarizeBackfill />}
-      {isAdmin && stats.data?.compression && <CompressBackfill c={stats.data.compression} />}
-      {isAdmin && <TestAlert enabled={stats.data?.alertsEnabled} />}
       <CrmPanel isAdmin={isAdmin} />
-      <ClientErrors />
+      <ClientErrors isAdmin={isAdmin} />
 
       {devices.isPending ? (
         <Spinner label="Loading devices" />
@@ -89,10 +87,10 @@ export function HealthPage() {
       ) : (
         <ul className="grid gap-3 md:grid-cols-2">
           {sorted.map((d) => {
-            const stale = !d.revokedAt && (!d.lastSeenAt || now - new Date(d.lastSeenAt).getTime() > STALE_MS);
+            const stale = isStale(d, now);
             return (
               <li key={d.id}>
-                <Card className={`h-full p-4 ${d.revokedAt ? "opacity-60" : ""} ${stale ? "border-amber-300" : ""}`}>
+                <Card className={cn("h-full p-4", d.revokedAt && "opacity-60", stale && "border-warning")}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="truncate font-medium">{personName(d.user)}</div>
@@ -103,15 +101,15 @@ export function HealthPage() {
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                    {d.revokedAt ? <Badge variant="red">Revoked</Badge> : stale ? <Badge variant="amber">Not seen 24h+</Badge> : <Badge variant="green">OK</Badge>}
-                    {!d.revokedAt && !d.permissionsOk && <Badge variant="red">Permissions missing</Badge>}
-                    {!d.revokedAt && d.throttled && <Badge variant="amber">Throttled ({d.standbyBucketName})</Badge>}
-                    {!d.revokedAt && d.callsWithoutRecordings && <Badge variant="red">Calls but no recordings</Badge>}
-                    {!d.revokedAt && d.fewRecordings && <Badge variant="amber">Missing most recordings</Badge>}
+                    {d.revokedAt ? <Badge variant="neutral">Signed out</Badge> : stale ? <Badge variant="warning">Offline over a day</Badge> : <Badge variant="success">OK</Badge>}
+                    {!d.revokedAt && !d.permissionsOk && <Badge variant="danger">Permissions missing</Badge>}
+                    {!d.revokedAt && d.throttled && <Badge variant="warning">Phone is slowing the app</Badge>}
+                    {!d.revokedAt && d.callsWithoutRecordings && <Badge variant="danger">Calls but no recordings</Badge>}
+                    {!d.revokedAt && d.fewRecordings && <Badge variant="warning">Missing most recordings</Badge>}
                     {!d.revokedAt && d.backlogFgsError && d.pendingCount > 0 && (
-                      <Badge variant="amber" title={`Android refused the upload notification (${d.backlogFgsError}). Older recordings upload in short bursts; opening the app speeds them up.`}>Slow background upload</Badge>
+                      <Badge variant="warning" title={`Android refused the upload notification (${d.backlogFgsError}). Older recordings upload in short bursts; opening the app speeds them up.`}>Slow background upload</Badge>
                     )}
-                    {!d.revokedAt && d.sims?.some((x) => x.isNew) && <Badge variant="amber">New SIM</Badge>}
+                    {!d.revokedAt && d.sims?.some((x) => x.isNew) && <Badge variant="warning">New SIM</Badge>}
                   </div>
                 </div>
                 <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
@@ -120,24 +118,24 @@ export function HealthPage() {
                   <dt className="text-muted-foreground">Last sync</dt>
                   <dd title={formatWhen(d.lastSyncAt)}>{ago(d.lastSyncAt, now)}</dd>
                   <dt className="text-muted-foreground">Waiting to upload</dt>
-                  <dd className={d.pendingCount > 0 ? "font-medium text-amber-700" : ""}>{d.pendingCount}</dd>
+                  <dd className={d.pendingCount > 0 ? "font-medium text-warning-text" : ""}>{d.pendingCount}</dd>
                   <dt className="text-muted-foreground">Free space</dt>
                   <dd>{formatBytes(d.freeBytes)}</dd>
                   {d.calls7d != null && (
                     <>
                       <dt className="text-muted-foreground">Calls / recordings (7 d)</dt>
-                      <dd className={d.callsWithoutRecordings ? "font-medium text-destructive" : d.fewRecordings ? "font-medium text-amber-700" : ""}>
+                      <dd className={d.callsWithoutRecordings ? "font-medium text-danger-text" : d.fewRecordings ? "font-medium text-warning-text" : ""}>
                         {d.calls7d} / {d.recordings7d ?? "–"}
                       </dd>
                     </>
                   )}
-                  {d.standbyBucketName && (
+                  {isAdmin && d.standbyBucketName && (
                     <>
                       <dt className="text-muted-foreground">Standby bucket</dt>
-                      <dd className={d.throttled ? "font-medium text-amber-700" : ""}>{d.standbyBucketName}</dd>
+                      <dd className={d.throttled ? "font-medium text-warning-text" : ""}>{d.standbyBucketName}</dd>
                     </>
                   )}
-                  {d.lastStopReason != null && (
+                  {isAdmin && d.lastStopReason != null && (
                     <>
                       <dt className="text-muted-foreground">Last job stop</dt>
                       <dd>{stopReasonLabel(d.lastStopReason)}</dd>
@@ -151,7 +149,7 @@ export function HealthPage() {
                       </dd>
                     </>
                   )}
-                  {d.autostartIntent && (
+                  {isAdmin && d.autostartIntent && (
                     <>
                       <dt className="text-muted-foreground">Autostart screen</dt>
                       <dd className="truncate" title={d.autostartIntent}>{d.autostartIntent.split("/")[0]}</dd>
@@ -167,7 +165,7 @@ export function HealthPage() {
                 <DeviceSims deviceId={d.id} sims={d.sims ?? []} isAdmin={isAdmin} />
                 {isAdmin && !d.revokedAt && (
                   <Button variant="ghost" className="mt-3 -ml-3 px-3 text-destructive hover:text-destructive" onClick={() => setConfirm(d)}>
-                    Revoke device
+                    Sign out phone
                   </Button>
                 )}
                 </Card>
@@ -178,6 +176,20 @@ export function HealthPage() {
       )}
 
       <ComputersPanel isAdmin={isAdmin} />
+
+      {isAdmin && (
+        <details className="mt-4 rounded-xl border bg-card p-4" open={hash === "#fireflies" || hash === "#translation"}>
+          <summary className="cursor-pointer font-medium">Technical details</summary>
+          <div className="mt-4">
+            {stats.data && <TechDetails s={stats.data} />}
+            <FirefliesPanel />
+            <TranslationPanel />
+            <p className="text-sm text-muted-foreground">
+              Catch-up jobs and the test alert are in <Link to="/settings/advanced" className="underline">Settings, Advanced</Link>.
+            </p>
+          </div>
+        </details>
+      )}
 
       <AlertDialog
         open={!!confirm}
@@ -203,7 +215,7 @@ export function HealthPage() {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={revoke.isPending}>Cancel</AlertDialogCancel>
             <Button variant="destructive" disabled={revoke.isPending} onClick={() => confirm && revoke.mutate(confirm)}>
-              {revoke.isPending ? "Working…" : "Revoke"}
+              {revoke.isPending ? "Working…" : "Sign out phone"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -212,69 +224,134 @@ export function HealthPage() {
   );
 }
 
-function StatsHeader({ s }: { s: Stats }) {
-  const tile = (label: string, value: string | number, warn = false) => (
-    <Card className="p-3">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div className={`mt-1 text-xl font-semibold tabular-nums ${warn ? "text-amber-700" : ""}`}>{value}</div>
-    </Card>
-  );
-  const jobsWaiting = (s.jobs["QUEUED"] ?? 0) + (s.jobs["RUNNING"] ?? 0) + (s.jobs["WAITING_BUDGET"] ?? 0);
+/** Phone not seen for a day (signed-out phones don't count). */
+function isStale(d: Device, now: number): boolean {
+  return !d.revokedAt && (!d.lastSeenAt || now - new Date(d.lastSeenAt).getTime() > STALE_MS);
+}
+
+// Job states in plain words; managers never see provider or budget names.
+const JOB_WORDS: Record<string, string> = {
+  QUEUED: "Waiting",
+  RUNNING: "In progress",
+  DONE: "Done",
+  FAILED: "Gave up after retries",
+  WAITING_BUDGET: "Paused (monthly limit)",
+};
+const jobWords = (k: string) => JOB_WORDS[k] ?? k.charAt(0) + k.slice(1).toLowerCase();
+
+function hoursText(h: number): string {
+  return h >= 48 ? `about ${Math.round(h / 24)} days` : `about ${Math.max(1, Math.round(h))} h`;
+}
+
+/** One sentence that says if anything needs attention, then soft tiles. */
+function Summary({ s, offline }: { s: Stats; offline: Device[] }) {
+  // Usage feeds only the "paused until" date; the endpoint is open to managers (the app banner uses it).
+  const ff = useQuery({ queryKey: ["fireflies"], queryFn: () => api<FirefliesUsage>("/api/fireflies/usage"), refetchInterval: 60_000 });
+  const t = s.throughput;
+  const waiting = t?.backlogCalls ?? (s.jobs["QUEUED"] ?? 0) + (s.jobs["RUNNING"] ?? 0) + (s.jobs["WAITING_BUDGET"] ?? 0);
+  const paused = s.fireflies?.blocked || (s.jobs["WAITING_BUDGET"] ?? 0) > 0;
+  const failed = s.calls.FAILED ?? 0;
+  const sentence = paused
+    ? `Transcripts paused${ff.data?.blockedUntil ? ` until ${formatWhen(ff.data.blockedUntil)}` : ""}. Recordings are safe.`
+    : waiting > 0
+      ? `Transcripts: ${waiting} waiting${t?.backlogEtaHours != null ? `, ${hoursText(t.backlogEtaHours)}` : ""}.`
+      : "Transcripts: all caught up.";
+  const ok = !paused && offline.length === 0;
+  // Approximate counts from the 24 h rate: jobs per hour x 24, and the failure share of those.
+  const tried = t ? Math.round(t.jobsPerHour * 24) : 0;
+  const didntWork = t ? Math.round((tried * t.failureRatePct) / 100) : 0;
   return (
     <div className="mb-4 space-y-3">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {tile("Stale phones", s.staleDevices, s.staleDevices > 0)}
-        {tile("Failed calls", s.calls.FAILED ?? 0, (s.calls.FAILED ?? 0) > 0)}
-        {tile("Transcription queue", jobsWaiting)}
-        {tile("Server disk used", `${s.disk.usedPct}%`, s.disk.usedPct > 80)}
-      </div>
-      {s.throughput && <ThroughputTiles t={s.throughput} tile={tile} />}
-      <Card className="p-3 text-sm">
-      <details>
-        <summary className="flex min-h-10 cursor-pointer items-center font-medium">Details</summary>
-        <div className="mt-2 grid gap-4 sm:grid-cols-3">
-          <div>
-            <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Calls by status</div>
-            {(Object.keys(STATUS_LABEL) as CallStatus[]).map((k) => (
-              <div key={k} className="flex justify-between">
-                <span>{STATUS_LABEL[k]}</span>
-                <span className="tabular-nums">{s.calls[k] ?? 0}</span>
-              </div>
-            ))}
-          </div>
-          <div>
-            <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Jobs</div>
-            {Object.keys(s.jobs).length === 0 && <div className="text-muted-foreground">None</div>}
-            {Object.entries(s.jobs).map(([k, v]) => (
-              <div key={k} className="flex justify-between">
-                <span>{jobStatusLabel(k)}</span>
-                <span className="tabular-nums">{v}</span>
-              </div>
-            ))}
-          </div>
-          <div>
-            <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Disk</div>
-            <div className="flex justify-between">
-              <span>Free</span>
-              <span>{formatBytes(s.disk.freeBytes)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Total</span>
-              <span>{formatBytes(s.disk.totalBytes)}</span>
-            </div>
-            <meter className="mt-2 w-full" min={0} max={100} low={70} high={85} optimum={0} value={s.disk.usedPct} aria-label="Disk used" />
-            {s.compression && (
-              <div className="mt-2 flex justify-between">
-                <span>Saved by compression</span>
-                <span>
-                  {formatBytes(s.compression.bytesSaved)} ({s.compression.compressedCalls} calls)
-                </span>
-              </div>
-            )}
-          </div>
+      <Card className={cn("flex items-start gap-3 p-4", ok ? "bg-success-soft" : "bg-warning-soft")} role="status">
+        {ok ? <CircleCheck aria-hidden className="mt-0.5 size-5 shrink-0 text-success-text" /> : <TriangleAlert aria-hidden className="mt-0.5 size-5 shrink-0 text-warning-text" />}
+        <div className="min-w-0">
+          <p className="font-medium">{sentence}</p>
+          {offline.length > 0 && (
+            <p className="mt-1 text-sm">Phones offline for more than a day: {offline.map((d) => personName(d.user)).join(", ")}</p>
+          )}
+          {t && tried > 0 && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Transcripts that didn't work (24 h): {didntWork} of {tried}
+            </p>
+          )}
         </div>
-      </details>
       </Card>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <Tile label="Phones offline over a day" value={offline.length} tone={offline.length > 0 ? "warning" : "neutral"} />
+        <Tile label="Waiting for transcript" value={waiting} tone="neutral" />
+        <Tile label="Calls without transcript" value={failed} tone={failed > 0 ? "warning" : "neutral"} to={failed > 0 ? "/calls?status=FAILED" : undefined} />
+      </div>
+    </div>
+  );
+}
+
+const TILE_TONE = { neutral: "bg-card", warning: "bg-warning-soft text-warning-text" } as const;
+
+function Tile({ label, value, tone, to }: { label: string; value: string | number; tone: keyof typeof TILE_TONE; to?: string }) {
+  const body = (
+    <Card className={cn("h-full p-3", TILE_TONE[tone], to && "transition-colors hover:border-primary")}>
+      <div className="text-xs text-muted-foreground">{label}</div>
+      <div className="mt-1 text-xl font-semibold tabular-nums">{value}</div>
+      {to && <div className="mt-1 text-xs text-primary underline">See calls</div>}
+    </Card>
+  );
+  return to ? (
+    <Link to={to} className="block rounded-xl outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
+      {body}
+    </Link>
+  ) : (
+    body
+  );
+}
+
+/** Admin only: rates, disk, and counts by state. */
+function TechDetails({ s }: { s: Stats }) {
+  const tile = (label: string, value: string | number, warn = false) => <Tile label={label} value={value} tone={warn ? "warning" : "neutral"} />;
+  return (
+    <div className="mb-4 space-y-3">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{tile("Server disk used", `${s.disk.usedPct}%`, s.disk.usedPct > 80)}</div>
+      {s.throughput && <ThroughputTiles t={s.throughput} tile={tile} />}
+      <div className="grid gap-4 text-sm sm:grid-cols-3">
+        <div>
+          <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Calls by status</div>
+          {(Object.keys(STATUS_LABEL) as CallStatus[]).map((k) => (
+            <div key={k} className="flex justify-between">
+              <span>{STATUS_LABEL[k]}</span>
+              <span className="tabular-nums">{s.calls[k] ?? 0}</span>
+            </div>
+          ))}
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Jobs</div>
+          {Object.keys(s.jobs).length === 0 && <div className="text-muted-foreground">None</div>}
+          {Object.entries(s.jobs).map(([k, v]) => (
+            <div key={k} className="flex justify-between">
+              <span>{jobWords(k)}</span>
+              <span className="tabular-nums">{v}</span>
+            </div>
+          ))}
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-semibold uppercase text-muted-foreground">Disk</div>
+          <div className="flex justify-between">
+            <span>Free</span>
+            <span>{formatBytes(s.disk.freeBytes)}</span>
+          </div>
+          <div className="flex justify-between">
+            <span>Total</span>
+            <span>{formatBytes(s.disk.totalBytes)}</span>
+          </div>
+          <meter className="mt-2 w-full" min={0} max={100} low={70} high={85} optimum={0} value={s.disk.usedPct} aria-label="Disk used" />
+          {s.compression && (
+            <div className="mt-2 flex justify-between">
+              <span>Saved by compression</span>
+              <span>
+                {formatBytes(s.compression.bytesSaved)} ({s.compression.compressedCalls} calls)
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -302,11 +379,10 @@ function ThroughputTiles({ t, tile }: { t: Throughput; tile: (label: string, val
   );
 }
 
-/** Admin: post a test message to the Zoho Cliq alert channel. */
 const SOURCE_LABEL: Record<ClientErrorDto["source"], string> = { android: "Phone", desktop: "Windows app", web: "Browser" };
 
 /** Problems staff phones / laptops reported in the last 7 days, newest first. */
-function ClientErrors() {
+function ClientErrors({ isAdmin }: { isAdmin: boolean }) {
   const q = useQuery({ queryKey: ["client-errors"], queryFn: () => api<{ items: ClientErrorDto[] }>("/api/client-errors?days=7") });
   return (
     <Card role="region" aria-labelledby="client-errors-h" className="mb-4 p-4">
@@ -332,130 +408,11 @@ function ClientErrors() {
                   {ago(e.createdAt)}
                 </span>
               </div>
-              {e.message && <p className="mt-0.5 break-words text-muted-foreground">{e.message}</p>}
+              {isAdmin && e.message && <p className="mt-0.5 break-words text-muted-foreground">{e.message}</p>}
             </li>
           ))}
         </ul>
       )}
-    </Card>
-  );
-}
-
-function TestAlert({ enabled }: { enabled: boolean | undefined }) {
-  const run = useMutation({ mutationFn: () => api<{ sent: boolean }>("/api/admin/test-alert", { method: "POST", body: {} }) });
-  return (
-    <Card role="region" aria-labelledby="alerts-h" className="mb-4 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 id="alerts-h" className="font-semibold">
-            Alerts
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            {enabled === false
-              ? "Off: set CLIQ_WEBHOOK_URL on the server to get Zoho Cliq alerts."
-              : "Zoho Cliq gets a message when the worker stops, Fireflies blocks us, the disk passes 80%, jobs fail or a phone stops syncing."}
-          </p>
-        </div>
-        <Button variant="outline" disabled={run.isPending || enabled === false} onClick={() => run.mutate()}>
-          <Send />
-          {run.isPending ? "Sending…" : "Send test alert"}
-        </Button>
-      </div>
-      <p className="mt-2 text-sm" role="status" aria-live="polite">
-        {run.isSuccess && "Test alert sent. Check the Cliq channel."}
-      </p>
-      {run.isError && <p className="mt-1 text-sm text-destructive">{run.error.message}</p>}
-    </Card>
-  );
-}
-
-/** Admin: queue English translations for every transcript that has none yet. */
-function TranslateBackfill() {
-  const run = useMutation({
-    mutationFn: () => api<TranslateBackfillResult>("/api/admin/translate-backfill", { method: "POST", body: {} }),
-  });
-  return (
-    <Card role="region" aria-labelledby="translate-h" className="mb-4 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 id="translate-h" className="font-semibold">
-            English translations
-          </h2>
-          <p className="text-sm text-muted-foreground">New transcripts are translated automatically. Queue older ones here (batch rate, may take hours).</p>
-        </div>
-        <Button variant="outline" disabled={run.isPending} onClick={() => run.mutate()}>
-          {run.isPending ? "Queuing…" : "Translate existing transcripts"}
-        </Button>
-      </div>
-      <p className="mt-2 text-sm" role="status" aria-live="polite">
-        {run.isSuccess && (run.data.queued ? `Queued ${run.data.queued} transcript${run.data.queued === 1 ? "" : "s"} for translation.` : "Nothing to queue: every transcript is translated or already queued.")}
-      </p>
-      {run.isError && <p className="mt-1 text-sm text-destructive">{run.error.message}</p>}
-    </Card>
-  );
-}
-
-/** Admin: queue AI summaries for every transcript that has none yet (counts toward the Claude cap). */
-function SummarizeBackfill() {
-  const run = useMutation({
-    mutationFn: () => api<TranslateBackfillResult>("/api/admin/summarize-backfill", { method: "POST", body: {} }),
-  });
-  return (
-    <Card role="region" aria-labelledby="summarize-h" className="mb-4 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 id="summarize-h" className="font-semibold">
-            AI call summaries
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Summary, action items, sentiment, tags and Agent / Customer labels. Queue older calls here (batch rate; uses the Claude monthly cap).
-          </p>
-        </div>
-        <Button variant="outline" disabled={run.isPending} onClick={() => run.mutate()}>
-          {run.isPending ? "Queuing…" : "Summarize existing calls"}
-        </Button>
-      </div>
-      <p className="mt-2 text-sm" role="status" aria-live="polite">
-        {run.isSuccess && (run.data.queued ? `Queued ${run.data.queued} call${run.data.queued === 1 ? "" : "s"} for a summary.` : "Nothing to queue: every call is summarized or already queued.")}
-      </p>
-      {run.isError && <p className="mt-1 text-sm text-destructive">{run.error.message}</p>}
-    </Card>
-  );
-}
-
-/** Admin: re-encode large old recordings to the phones' small AAC format (after transcription only). */
-function CompressBackfill({ c }: { c: CompressionStats }) {
-  const qc = useQueryClient();
-  const run = useMutation({
-    mutationFn: (limit?: number) =>
-      api<TranslateBackfillResult>("/api/admin/compress-backfill", { method: "POST", body: limit ? { limit } : {} }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["stats"] }),
-  });
-  return (
-    <Card role="region" aria-labelledby="compress-h" className="mb-4 p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 id="compress-h" className="font-semibold">
-            Compress old recordings
-          </h2>
-          <p className="text-sm text-muted-foreground">
-            Saved {formatBytes(c.bytesSaved)} on {c.compressedCalls} calls. {c.eligibleCalls} large transcribed recordings left
-            {c.queuedJobs ? `, ${c.queuedJobs} queued` : ""}. The original is kept if anything fails.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button variant="outline" disabled={run.isPending} onClick={() => run.mutate(5)}>
-            Try 5 calls
-          </Button>
-          <Button variant="outline" disabled={run.isPending} onClick={() => run.mutate(undefined)}>
-            {run.isPending ? "Queuing…" : "Compress all"}
-          </Button>
-        </div>
-      </div>
-      <p className="mt-2 text-sm" role="status" aria-live="polite">
-        {run.isSuccess && (run.data.queued ? `Queued ${run.data.queued} recording${run.data.queued === 1 ? "" : "s"} for compression.` : "Nothing to queue.")}
-      </p>
-      {run.isError && <p className="mt-1 text-sm text-destructive">{run.error.message}</p>}
     </Card>
   );
 }
@@ -475,17 +432,19 @@ function CrmPanel({ isAdmin }: { isAdmin: boolean }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 id="crm-h" className="font-semibold">
-            Zoho CRM sync
+            Zoho CRM
           </h2>
           <p className="text-sm text-muted-foreground">
             {d.enabled
-              ? `${d.synced} synced · ${d.noMatch} no match · ${d.errors} errors${d.queued ? ` · ${d.queued} queued` : ""}`
-              : "Off: set ZOHO_REFRESH_TOKEN (and client ID / secret) on the server. See docs/zoho-crm-setup.md."}
+              ? `${d.synced} added · ${d.noMatch} not found in Zoho · ${d.errors} not added${d.queued ? ` · ${d.queued} waiting` : ""}`
+              : isAdmin
+                ? "Off: set ZOHO_REFRESH_TOKEN (and client ID / secret) on the server. See docs/zoho-crm-setup.md."
+                : "Not turned on."}
           </p>
           {d.enabled && d.failing && (
-            <p className="text-sm text-destructive">Paused: {d.globalError ?? "Zoho is not responding"}. Retrying automatically.</p>
+            <p className="text-sm text-warning-text">Zoho is not answering. Trying again by itself{isAdmin && d.globalError ? ` (${d.globalError})` : ""}.</p>
           )}
-          {d.enabled && d.errors > 0 && d.lastError && <p className="text-sm text-destructive">Last error: {d.lastError}</p>}
+          {isAdmin && d.enabled && d.errors > 0 && d.lastError && <p className="text-sm text-danger-text">Couldn't add to Zoho – {d.lastError}</p>}
         </div>
         {isAdmin && (
           <Button variant="outline" disabled={run.isPending || !d.enabled} onClick={() => run.mutate()}>
@@ -494,7 +453,7 @@ function CrmPanel({ isAdmin }: { isAdmin: boolean }) {
         )}
       </div>
       <p className="mt-2 text-sm" role="status" aria-live="polite">
-        {run.isSuccess && (run.data.queued ? `Queued ${run.data.queued} call${run.data.queued === 1 ? "" : "s"}; they sync over the next minutes.` : "Nothing to queue.")}
+        {run.isSuccess && (run.data.queued ? `Added ${run.data.queued} call${run.data.queued === 1 ? "" : "s"}; they go to Zoho over the next minutes.` : "Nothing to add.")}
       </p>
       {run.isError && <p className="mt-1 text-sm text-destructive">{run.error.message}</p>}
     </Card>

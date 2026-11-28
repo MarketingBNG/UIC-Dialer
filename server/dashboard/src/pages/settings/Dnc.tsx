@@ -124,7 +124,7 @@ export function DncTab({ standalone = false }: { standalone?: boolean }) {
             <FormError error={add.error} />
             <FormError error={importCsv.error} />
             {imported && (
-              <p className="text-emerald-700">
+              <p className="text-success-text">
                 Imported: {imported.added} added, {imported.updated} updated, {imported.rejected} lines skipped
                 {imported.rejectedSample.length > 0 && ` (e.g. ${imported.rejectedSample.slice(0, 3).join("; ")})`}.
               </p>

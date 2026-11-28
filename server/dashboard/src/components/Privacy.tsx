@@ -26,7 +26,7 @@ export function PrivacyPanel() {
   const settings = useQuery({ queryKey: ["privacy"], queryFn: () => api<PrivacySettings>("/api/settings/privacy") });
   return (
     <Card className="p-4 sm:p-6">
-      <h2 className="font-semibold">Recording retention and privacy</h2>
+      <h2 className="font-semibold">Call audio and privacy</h2>
       {settings.isPending ? (
         <Spinner label="Loading privacy settings" />
       ) : settings.isError ? (
@@ -92,10 +92,10 @@ function PrivacyForm({ initial }: { initial: PrivacySettings }) {
         if (dirty && daysOk) submit();
       }}
     >
-      <div className="divide-y divide-slate-100">
+      <div className="divide-y">
         <SwitchRow
-          label="Delete old recordings"
-          hint="Off by default: recordings are kept forever. When on, audio of calls older than the days below is deleted once a day."
+          label="Delete old call audio"
+          hint="Off: audio is kept forever. On: audio older than the days below is deleted once a day. Transcripts are kept."
           checked={on}
           onChange={(v) => {
             touchRetention();
@@ -106,7 +106,7 @@ function PrivacyForm({ initial }: { initial: PrivacySettings }) {
           <div className="space-y-2 py-2">
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <Label htmlFor="p-days" className="mb-0">
-                Delete recordings after
+                Delete call audio after
               </Label>
               <Input
                 id="p-days"
@@ -119,9 +119,9 @@ function PrivacyForm({ initial }: { initial: PrivacySettings }) {
                   setDays(e.target.value);
                 }}
               />
-              <span>days</span>
+              <span>{deleteTranscript ? "days" : "days (transcripts are kept)"}</span>
             </div>
-            <p className={`mt-1 text-xs text-muted-foreground ${daysOk ? "" : "text-destructive"}`}>1 to 3650. Deleted audio can't be recovered.</p>
+            <p className={`mt-1 text-xs ${daysOk ? "text-muted-foreground" : "text-destructive"}`}>1 to 3650. Deleted audio can't be brought back.</p>
             {initial.retentionMonths != null && initial.retentionDays == null && (
               <p className="mt-1 text-xs text-muted-foreground">Currently set as {initial.retentionMonths} months by an older version; saving switches it to days.</p>
             )}
@@ -141,8 +141,8 @@ function PrivacyForm({ initial }: { initial: PrivacySettings }) {
           </div>
         )}
         <SwitchRow
-          label="Mask Aadhaar and card numbers in new transcripts"
-          hint="Replaces them with the last 4 digits before the transcript is stored. Existing transcripts are not changed. PAN and GST numbers are kept."
+          label="Hide Aadhaar and card numbers in transcripts"
+          hint="Only the last 4 digits are kept, for new transcripts. Older transcripts are not changed. PAN and GST numbers are kept."
           checked={maskPii}
           onChange={(v) => {
             touch();
@@ -155,17 +155,17 @@ function PrivacyForm({ initial }: { initial: PrivacySettings }) {
           <Save /> {save.isPending ? "Saving…" : "Save changes"}
         </Button>
         <span aria-live="polite" className="text-sm">
-          {saved && !dirty && <span className="text-emerald-700">Saved.</span>}
+          {saved && !dirty && <span className="text-success-text">Saved.</span>}
           {save.error && <span className="text-destructive">{save.error.message}</span>}
         </span>
       </div>
       <ConfirmDialog
         open={confirm}
-        title="Delete old recordings?"
+        title="Delete old call audio?"
         body={`Audio of calls older than ${nextDays} days will be deleted permanently in the next daily run.${
           nextDeleteTranscript ? " Their transcript text is cleared too; summaries and scores stay." : " Transcripts stay."
         }`}
-        confirmLabel="Turn on deletion"
+        confirmLabel="Delete old audio"
         busy={save.isPending}
         onClose={() => setConfirm(false)}
         onConfirm={() => {
@@ -217,8 +217,7 @@ export function ClientListPanel() {
     <Card className="mt-4 p-4 sm:p-6">
       <h2 className="font-semibold">Client list</h2>
       <p className="mt-1 text-xs text-muted-foreground">
-        With "Business calls only" on, phones skip calls with numbers saved as personal contacts, unless the number is on this list. Phones get the list
-        as hashes, which hides it from casual view only.
+        Numbers on this list always upload, even when a rep has saved them in their phone contacts.
       </p>
       <form
         className="mt-3 flex flex-wrap items-end gap-2"
@@ -265,7 +264,7 @@ export function ClientListPanel() {
         {importCsv.error && <p className="text-destructive">{importCsv.error.message}</p>}
         {remove.error && <p className="text-destructive">{remove.error.message}</p>}
         {imported && (
-          <p className="text-emerald-700">
+          <p className="text-success-text">
             Imported: {imported.added} added, {imported.updated} labels updated, {imported.rejected} lines skipped
             {imported.rejectedSample.length > 0 && ` (e.g. ${imported.rejectedSample.slice(0, 3).join("; ")})`}.
           </p>
@@ -289,12 +288,12 @@ export function ClientListPanel() {
             <Input id="cn-filter" type="search" className="sm:max-w-xs" placeholder="Filter" value={filter} onChange={(e) => setFilter(e.target.value)} />
             <span className="text-sm text-muted-foreground">{list.data.count} numbers</span>
           </div>
-          <ul className="mt-2 max-h-96 divide-y divide-slate-100 overflow-y-auto">
+          <ul className="mt-2 max-h-96 divide-y overflow-y-auto">
             {items.slice(0, 500).map((i) => (
               <li key={i.id} className="flex items-center gap-3 py-2 text-sm">
                 <span className="font-mono">{i.raw}</span>
                 <span className="min-w-0 flex-1 truncate text-muted-foreground">{i.label}</span>
-                <span className="hidden text-xs text-slate-400 sm:inline">{formatWhen(i.createdAt)}</span>
+                <span className="hidden text-xs text-muted-foreground sm:inline">{formatWhen(i.createdAt)}</span>
                 <Button variant="ghost" className="min-h-11 text-destructive hover:text-destructive" disabled={remove.isPending} onClick={() => remove.mutate(i.id)} aria-label={`Remove ${i.raw}`}>
                   Remove
                 </Button>

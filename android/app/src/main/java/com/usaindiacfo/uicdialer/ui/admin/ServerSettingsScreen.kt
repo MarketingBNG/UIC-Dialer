@@ -1,5 +1,6 @@
 package com.usaindiacfo.uicdialer.ui.admin
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,8 +12,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -212,17 +217,29 @@ private fun ConfigEditor(
         HorizontalDivider()
         PrivacySection()
 
+        // One-off maintenance jobs: rarely needed, so tucked away under Advanced.
         HorizontalDivider()
-        TranslateBackfillSection()
+        var advanced by remember { mutableStateOf(false) }
+        Row(
+            Modifier.fillMaxWidth().clickable { advanced = !advanced }.heightIn(min = 48.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Advanced", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
+            Icon(if (advanced) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, contentDescription = if (advanced) "Hide" else "Show")
+        }
+        if (advanced) {
+            Text("Catch-up jobs and alerts. Use only when asked.", style = MaterialTheme.typography.bodySmall)
+            TranslateBackfillSection()
 
-        HorizontalDivider()
-        SummarizeBackfillSection()
+            HorizontalDivider()
+            SummarizeBackfillSection()
 
-        HorizontalDivider()
-        CompressBackfillSection()
+            HorizontalDivider()
+            CompressBackfillSection()
 
-        HorizontalDivider()
-        TestAlertSection()
+            HorizontalDivider()
+            TestAlertSection()
+        }
 
         latestApp?.let {
             HorizontalDivider()

@@ -373,6 +373,32 @@ describe("regressions", () => {
     expect(await get(`from=${from}&q=ravi${tag}`)).toEqual([named.id]);
   });
 
+  it("answered=true/false splits connected calls from missed and unanswered ones", async () => {
+    const email = uniqueEmail("ans");
+    const u = await t.db.user.create({ data: { email } });
+    const tag = randomUUID().slice(0, 6);
+    const mk = (n: string, data: object) =>
+      t.db.call.create({ data: { userId: u.id, originalSha256: sha256(`${n}-${tag}`), startedAt: new Date(), ...data } });
+    const rec = await mk("rec", { status: "TRANSCRIBED", direction: "OUTGOING" });
+    const logTalk = await mk("lt", { status: "NO_RECORDING", direction: "OUTGOING", durationS: 40, logType: "OUTGOING" });
+    const logNull = await mk("ln", { status: "NO_RECORDING", direction: "INCOMING", durationS: 12 });
+    const noDur = await mk("nd", { status: "NO_RECORDING", direction: "OUTGOING" });
+    const zero = await mk("z", { status: "NO_RECORDING", direction: "OUTGOING", durationS: 0 });
+    const rejected = await mk("rj", { status: "NO_RECORDING", direction: "INCOMING", durationS: 5, logType: "REJECTED" });
+    const missed = await mk("m", { status: "NO_RECORDING", direction: "MISSED" });
+    const sess = await t.sessionFor(email);
+    const get = async (qs: string) => {
+      const res = await t.app.inject({ method: "GET", url: `/api/calls?v=2&userId=${u.id}&${qs}`, headers: { cookie: sess.cookie } });
+      expect(res.statusCode).toBe(200);
+      return res.json().items.map((c: { id: string }) => c.id).sort();
+    };
+    expect(await get("answered=true")).toEqual([rec.id, logTalk.id, logNull.id].sort());
+    expect(await get("answered=false")).toEqual([noDur.id, zero.id, rejected.id, missed.id].sort());
+    expect(await get("answered=false&direction=OUTGOING")).toEqual([noDur.id, zero.id].sort());
+    const bad = await t.app.inject({ method: "GET", url: "/api/calls?answered=maybe", headers: { cookie: sess.cookie } });
+    expect(bad.statusCode).toBe(400);
+  });
+
   it("logs PLAY for browser range requests starting at 0", async () => {
     const email = uniqueEmail("player");
     const s = await t.loginDevice(email);

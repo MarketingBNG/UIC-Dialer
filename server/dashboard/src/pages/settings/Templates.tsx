@@ -154,17 +154,17 @@ function TemplateDialog({ initial, onClose, onSaved }: { initial: TemplateDto | 
             <Hint>{body.length}/1000</Hint>
           </div>
           <fieldset>
-            <legend className="mb-1.5 text-sm font-medium text-slate-700">Channels</legend>
+            <legend className="mb-1.5 text-sm font-medium text-foreground">Channels</legend>
             <div className="flex flex-wrap gap-x-5">
               <CheckField id="tp-wa" label="WhatsApp" checked={whatsapp} onChange={setWhatsapp} />
               <CheckField id="tp-sms" label="SMS" checked={sms} onChange={setSms} />
               <CheckField id="tp-active" label="Active" checked={active} onChange={setActive} />
             </div>
           </fieldset>
-          {!whatsapp && !sms && <p className="text-sm text-amber-700">Pick at least one channel.</p>}
+          {!whatsapp && !sms && <p className="text-sm text-warning-text">Pick at least one channel.</p>}
           <div>
-            <p className="mb-1.5 text-sm font-medium text-slate-700">Preview (to Priya Shah)</p>
-            <p className="whitespace-pre-line rounded-lg bg-emerald-50 p-3 text-sm text-slate-800">{renderTemplate(body, "Priya Shah", repName(me))}</p>
+            <p className="mb-1.5 text-sm font-medium text-foreground">Preview (to Priya Shah)</p>
+            <p className="whitespace-pre-line rounded-lg bg-success-soft p-3 text-sm text-foreground">{renderTemplate(body, "Priya Shah", repName(me))}</p>
           </div>
           <FormError error={save.error} />
         </div>

@@ -19,7 +19,7 @@ import { api, qs, type FieldMap, type LeadEventDto, type LeadSourceDto } from ".
 import { useMe } from "../../App";
 import { UserMultiSelect, useAssignableUsers } from "../../components/UserPicker";
 import { formatShortWhen, personName } from "../../format";
-import { Empty, ErrorBox, FormError, Hint, Spinner, type Tone } from "../../ui";
+import { Empty, ErrorBox, FormError, Hint, Pill, Spinner, type Tone } from "../../ui";
 
 const FIELDS: { key: keyof FieldMap; label: string; hint: string }[] = [
   { key: "phone", label: "Phone", hint: "phone, mobile, phone_number…" },
@@ -28,12 +28,20 @@ const FIELDS: { key: keyof FieldMap; label: string; hint: string }[] = [
   { key: "city", label: "City", hint: "city, SENDER_CITY" },
   { key: "note", label: "Note", hint: "message, note, QUERY_MESSAGE…" },
 ];
+// Red only for "someone must act": a lead nobody got. Do-not-call skips are expected.
 const STATUS_TONE: Record<string, Tone> = {
   ASSIGNED: "green",
   EXISTING_OWNER: "blue",
-  DNC: "red",
-  NO_REP: "amber",
-  INVALID: "red",
+  DNC: "gray",
+  NO_REP: "red",
+  INVALID: "amber",
+};
+const STATUS_TEXT: Record<string, string> = {
+  ASSIGNED: "Given to a rep",
+  EXISTING_OWNER: "Went to existing owner",
+  DNC: "Skipped: Do not call",
+  NO_REP: "No rep to give it to",
+  INVALID: "Bad number",
 };
 
 type WithToken = LeadSourceDto & { token: string };
@@ -68,8 +76,8 @@ export function LeadSourcesTab() {
           <div className="min-w-0 flex-1">
             <CardTitle>Lead sources</CardTitle>
             <CardDescription>
-              Each source gets a webhook token. Website forms, Facebook or IndiaMART (through Zapier, Make or their webhook) post JSON leads to it; each lead goes to the
-              next rep in the pool, round-robin, and shows on their Today list.
+              New leads from your website form, Facebook or IndiaMART go to reps in turn and show on their Today list. Give the address and token to
+              whoever set up the form.
             </CardDescription>
           </div>
           <Button onClick={() => setEditing("new")}>
@@ -105,10 +113,11 @@ export function LeadSourcesTab() {
                       <span className="font-mono text-xs text-muted-foreground">token …{s.tokenHint}</span>
                     </div>
                     <div className="text-muted-foreground">
-                      {s.repPool.length ? `Pool: ${s.repPool.map(personName).join(", ")}` : "Pool: all active reps"} · {s.stats.last7d} leads in 7 days
+                      {s.repPool.length ? `Goes to ${s.repPool.map(personName).join(", ")}` : "Goes to all reps"} · {s.stats.last7d} leads in 7 days
                       {s.stats.lastAt ? ` · last ${formatShortWhen(s.stats.lastAt)}` : ""}
                     </div>
                   </div>
+                  <CopyButton label={`Address for ${s.name}`} value={s.webhookUrl} text="Copy address" />
                   <Button variant="outline" onClick={() => setEditing(s)} aria-label={`Edit ${s.name}`}>
                     <Pencil aria-hidden />
                     Edit
@@ -169,26 +178,32 @@ export function LeadSourcesTab() {
   );
 }
 
-function CopyBox({ label, value }: { label: string; value: string }) {
+function CopyButton({ label, value, text = "Copy" }: { label: string; value: string; text?: string }) {
   const [copied, setCopied] = useState(false);
   return (
+    <Button
+      variant="outline"
+      aria-label={`Copy ${label}`}
+      onClick={() => {
+        void navigator.clipboard?.writeText(value).then(() => {
+          setCopied(true);
+          toast.success(`${label} copied.`);
+        });
+      }}
+    >
+      {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
+      {copied ? "Copied" : text}
+    </Button>
+  );
+}
+
+function CopyBox({ label, value }: { label: string; value: string }) {
+  return (
     <div>
-      <p className="mb-1.5 text-sm font-medium text-slate-700">{label}</p>
+      <p className="mb-1.5 text-sm font-medium text-foreground">{label}</p>
       <div className="flex gap-2">
         <code className="block min-w-0 flex-1 overflow-x-auto whitespace-pre rounded-lg bg-muted p-2 text-xs">{value}</code>
-        <Button
-          variant="outline"
-          aria-label={`Copy ${label}`}
-          onClick={() => {
-            void navigator.clipboard?.writeText(value).then(() => {
-              setCopied(true);
-              toast.success(`${label} copied.`);
-            });
-          }}
-        >
-          {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-          {copied ? "Copied" : "Copy"}
-        </Button>
+        <CopyButton label={label} value={value} />
       </div>
     </div>
   );
@@ -200,17 +215,22 @@ function TokenDialog({ source, onClose }: { source: WithToken; onClose: () => vo
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent aria-describedby={undefined} className="w-[min(40rem,calc(100vw-2rem))]">
         <DialogHeader>
-          <DialogTitle>Webhook for {source.name}</DialogTitle>
+          <DialogTitle>Connect {source.name}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
           <Alert variant="warning">
             <KeyRound />
             <AlertDescription>Copy the token now. It is shown only once.</AlertDescription>
           </Alert>
-          <CopyBox label="Webhook URL" value={source.webhookUrl} />
+          <CopyBox label="Address" value={source.webhookUrl} />
           <CopyBox label="Token" value={source.token} />
-          <CopyBox label="Example" value={curl} />
-          <Hint>Send the token as a Bearer header or an X-UIC-Lead-Token header. Tokens in the URL are refused, because URLs end up in logs.</Hint>
+          <details className="rounded-lg border p-3">
+            <summary className="cursor-pointer text-sm font-medium">Advanced (for developers)</summary>
+            <div className="mt-3 space-y-3">
+              <CopyBox label="Example" value={curl} />
+              <Hint>Send the token as a Bearer header or an X-UIC-Lead-Token header. Tokens in the URL are refused, because URLs end up in logs.</Hint>
+            </div>
+          </details>
         </div>
         <DialogFooter>
           <Button onClick={onClose}>Done</Button>
@@ -250,9 +270,11 @@ function SourceDialog({ initial, onClose, onSaved }: { initial: LeadSourceDto | 
             <Label htmlFor="ls-name">Name</Label>
             <Input id="ls-name" maxLength={60} placeholder="Website, Facebook, IndiaMART…" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
-          <UserMultiSelect label="Rep pool (none selected = all active reps)" users={users.items} value={pool} onChange={setPool} />
-          <fieldset>
-            <legend className="mb-1.5 text-sm font-medium text-slate-700">Field map (optional)</legend>
+          <UserMultiSelect label="Give these leads to (none picked = all reps, in turn)" users={users.items} value={pool} onChange={setPool} />
+          <details className="rounded-lg border p-3" open={FIELDS.some((f) => !!map[f.key])}>
+            <summary className="cursor-pointer text-sm font-medium">Advanced (for developers)</summary>
+          <fieldset className="mt-3">
+            <legend className="mb-1.5 text-sm font-medium text-foreground">Field names (optional)</legend>
             <Hint className="mb-2 mt-0">JSON keys in the posted lead; dot paths like data.mobile work. Leave empty to use the usual names.</Hint>
             <div className="grid gap-2 sm:grid-cols-2">
               {FIELDS.map((f) => (
@@ -265,6 +287,7 @@ function SourceDialog({ initial, onClose, onSaved }: { initial: LeadSourceDto | 
               ))}
             </div>
           </fieldset>
+          </details>
           <div className="flex min-h-11 items-center gap-2">
             <Checkbox id="ls-active" checked={active} onCheckedChange={(v) => setActive(v === true)} />
             <Label htmlFor="ls-active" className="mb-0 cursor-pointer">
@@ -340,7 +363,7 @@ function LeadEvents({ sources }: { sources: LeadSourceDto[] }) {
                     <TableCell>{e.contact ? `${e.contact.name ?? ""} ${e.contact.phoneE164}`.trim() : "—"}</TableCell>
                     <TableCell>{e.assignedTo ? personName(e.assignedTo) : "—"}</TableCell>
                     <TableCell>
-                      <Badge variant={STATUS_TONE[e.status] ?? "gray"}>{e.status.replace("_", " ").toLowerCase()}</Badge>
+                      <Pill tone={STATUS_TONE[e.status] ?? "gray"}>{STATUS_TEXT[e.status] ?? e.status.replace("_", " ").toLowerCase()}</Pill>
                     </TableCell>
                   </TableRow>
                 ))}

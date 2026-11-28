@@ -47,7 +47,30 @@ const ListQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
   /** Calls the transcriber tagged (no real talk): VOICEMAIL, NO_SPEECH, or ANY of them. */
   tag: z.enum(["VOICEMAIL", "NO_SPEECH", "ANY"]).optional(),
+  /** true: the call connected (as the Calls page's "Answered"); false: it did not. */
+  answered: z.enum(["true", "false"]).optional(),
 });
+
+// Call-log types that never connected, even when the log reports a duration.
+const NOT_CONNECTED_LOG = ["MISSED", "REJECTED", "BLOCKED", "VOICEMAIL"];
+/** Same rule as the web wasAnswered(): a recording means talk; a log-only call needs a duration and a connected type. */
+const ANSWERED_WHERE: Prisma.CallWhereInput = {
+  direction: { not: "MISSED" },
+  OR: [
+    { status: { not: "NO_RECORDING" } },
+    { durationS: { gt: 0 }, OR: [{ logType: null }, { logType: { notIn: NOT_CONNECTED_LOG } }] },
+  ],
+};
+// Written out instead of NOT(ANSWERED_WHERE): SQL NOT over null columns would drop rows.
+const NOT_ANSWERED_WHERE: Prisma.CallWhereInput = {
+  OR: [
+    { direction: "MISSED" },
+    {
+      status: "NO_RECORDING",
+      OR: [{ durationS: null }, { durationS: { lte: 0 } }, { logType: { in: NOT_CONNECTED_LOG } }],
+    },
+  ],
+};
 
 const UserBody = z.object({
   email: z.email().transform((e) => e.toLowerCase()),
@@ -142,6 +165,7 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
     }
     if (q.direction) and.push({ direction: q.direction });
     if (q.status) and.push({ status: q.status });
+    if (q.answered) and.push(q.answered === "true" ? ANSWERED_WHERE : NOT_ANSWERED_WHERE);
     if (q.tag) and.push({ transcript: { tag: q.tag === "ANY" ? { not: null } : q.tag } });
     if (Number(q.v ?? "1") < 2) and.push({ status: { not: "NO_RECORDING" } });
     if (q.phone) and.push({ phoneE164: { contains: phoneSearchDigits(q.phone) } });

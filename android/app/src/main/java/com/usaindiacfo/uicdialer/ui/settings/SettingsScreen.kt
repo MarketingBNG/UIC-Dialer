@@ -18,10 +18,14 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -29,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,12 +42,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import com.usaindiacfo.uicdialer.BuildConfig
 import com.usaindiacfo.uicdialer.appContainer
 import com.usaindiacfo.uicdialer.data.api.DeviceConfig
 import com.usaindiacfo.uicdialer.data.api.Me
 import com.usaindiacfo.uicdialer.ui.dialer.Avatar
 import com.usaindiacfo.uicdialer.ui.home.SyncStatus
+import com.usaindiacfo.uicdialer.ui.setup.setupProblemCount
 import com.usaindiacfo.uicdialer.update.AutoUpdate
 import com.usaindiacfo.uicdialer.update.UpdateBanner
 import com.usaindiacfo.uicdialer.update.UpdateStatus
@@ -89,14 +97,19 @@ fun SettingsScreen(onOpenSetup: () -> Unit, onOpenGuide: () -> Unit, onOpenAdmin
                 }
             }
 
-            Section("Sync") { SyncStatus(onOpenSetup) }
+            Section("My phone") {
+                SetupStatusRow(config.businessOnly, onOpenSetup)
+                SyncStatus(onOpenSetup)
+            }
 
-            Section("Calls from PC") { CallsFromPcSetting() }
+            Section("Calling") { CallsFromPcSetting() }
 
-            Section("Morning summary") { RemindersSettings() }
+            Section("Reminders") { RemindersSettings(onOpenSetup) }
 
-            NavRow("Phone setup", "Fix permissions and phone settings", onOpenSetup)
-            if (user?.canManage == true) NavRow("Admin", "Users, devices, server settings", onOpenAdmin)
+            Section("About") {
+                Text("UIC Dialer ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium)
+                UpdateStatusLines(Modifier)
+            }
 
             OutlinedButton(
                 onClick = { confirmSignOut = true },
@@ -104,13 +117,12 @@ fun SettingsScreen(onOpenSetup: () -> Unit, onOpenGuide: () -> Unit, onOpenAdmin
                 modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
             ) { Text(if (signingOut) "Signing out..." else "Sign out") }
 
-            Text(
-                "UIC Dialer ${BuildConfig.VERSION_NAME}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.align(Alignment.CenterHorizontally),
-            )
-            UpdateStatusLines(Modifier.align(Alignment.CenterHorizontally))
+            // Manager tools sit last and apart so reps don't wander into them.
+            if (user?.canManage == true) {
+                HorizontalDivider(Modifier.padding(vertical = 8.dp))
+                Text("Manager tools", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                NavRow("Team and server", "Users, devices, server settings", onOpenAdmin)
+            }
         }
     }
 
@@ -145,41 +157,82 @@ private fun CallsFromPcSetting() {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        androidx.compose.material3.Switch(checked = on, onCheckedChange = {
+        Switch(checked = on, onCheckedChange = {
             on = it
             com.usaindiacfo.uicdialer.dialer.RemoteDialService.set(context, it)
         })
     }
 }
 
-/** Morning summary on/off and hour (IST). Follow-up reminders themselves are always on. */
+/** "Phone setup: All good / N problems"; re-checked on resume since the fixes happen in system screens. */
 @Composable
-private fun RemindersSettings() {
-    val context = androidx.compose.ui.platform.LocalContext.current
+private fun SetupStatusRow(businessOnly: Boolean, onOpenSetup: () -> Unit) {
+    val context = LocalContext.current
+    var tick by remember { mutableIntStateOf(0) }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { tick++ }
+    val problems = remember(tick, businessOnly) { setupProblemCount(context, businessOnly) }
+    Row(
+        Modifier.fillMaxWidth().clickable(onClick = onOpenSetup).heightIn(min = 48.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Phone setup", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Text(
+            when (problems) { 0 -> "All good"; 1 -> "1 problem"; else -> "$problems problems" },
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (problems == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+        )
+        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
+    }
+}
+
+/** Morning follow-up list on/off and time (IST, whole hours). Follow-up reminders themselves are always on. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RemindersSettings(onOpenSetup: () -> Unit) {
+    val context = LocalContext.current
     val store = remember { com.usaindiacfo.uicdialer.reminders.ReminderStore(context) }
     var enabled by remember { mutableStateOf(store.summaryEnabled) }
     var hour by remember { mutableStateOf(store.summaryHour) }
+    var picking by remember { mutableStateOf(false) }
     fun save() {
         store.summaryEnabled = enabled
         store.summaryHour = hour
         com.usaindiacfo.uicdialer.reminders.Reminders.scheduleMorning(context, androidx.work.ExistingWorkPolicy.REPLACE)
     }
     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text("Today's follow-ups, each morning", style = MaterialTheme.typography.bodyMedium)
-        }
-        androidx.compose.material3.Switch(checked = enabled, onCheckedChange = { enabled = it; save() })
+        Text("Morning follow-up list", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Switch(checked = enabled, onCheckedChange = { enabled = it; save() })
     }
     if (enabled) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("Time", Modifier.weight(1f))
-            TextButton(onClick = { hour = (hour - 1).coerceAtLeast(5); save() }, modifier = Modifier.heightIn(min = 48.dp)) { Text("−") }
-            Text(com.usaindiacfo.uicdialer.reminders.ReminderPlan.hourText(hour), style = MaterialTheme.typography.titleSmall)
-            TextButton(onClick = { hour = (hour + 1).coerceAtMost(12); save() }, modifier = Modifier.heightIn(min = 48.dp)) { Text("+") }
+        Row(
+            Modifier.fillMaxWidth().clickable { picking = true }.heightIn(min = 48.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text("Time", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            Text(com.usaindiacfo.uicdialer.reminders.ReminderPlan.hourText(hour), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
         }
     }
+    if (picking) {
+        val state = rememberTimePickerState(initialHour = hour, initialMinute = 0, is24Hour = false)
+        AlertDialog(
+            onDismissRequest = { picking = false },
+            title = { Text("Morning list time") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TimePicker(state = state)
+                    // The alarm runs on the hour, so minutes are dropped.
+                    Text("Comes on the hour.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            },
+            confirmButton = { TextButton(onClick = { hour = state.hour; picking = false; save() }) { Text("OK") } },
+            dismissButton = { TextButton(onClick = { picking = false }) { Text("Cancel") } },
+        )
+    }
     if (com.usaindiacfo.uicdialer.ui.setup.SetupChecks.exactAlarmApplies && !com.usaindiacfo.uicdialer.ui.setup.SetupChecks.canExactAlarms(context)) {
-        Text("Reminders may come up to 10 minutes late. Allow exact times in Setup checks.", style = MaterialTheme.typography.bodySmall)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Reminders may come up to 10 minutes late.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+            TextButton(onClick = onOpenSetup) { Text("Fix") }
+        }
     }
 }
 
@@ -215,7 +268,7 @@ private fun UpdateStatusLines(modifier: Modifier) {
     LaunchedEffect(Unit) { while (true) { delay(3_000); status = UpdateStatus.read(context) } }
     val small = MaterialTheme.typography.bodySmall
     val muted = MaterialTheme.colorScheme.onSurfaceVariant
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+    Column(modifier) {
         status.updatedTo?.let { Text("Updated to v$it on ${UpdateStatus.date(status.updatedAt)}", style = small, color = muted) }
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
