@@ -40,4 +40,15 @@ class QuickPickTest {
         assertEquals(QuickPick.entries, OutcomeLogic.quickPicks(def("ASK_CALLBACK")))
         assertEquals(listOf(QuickPick.TOMORROW_11, QuickPick.NEXT_WEEK), OutcomeLogic.quickPicks(def("ASK_FOLLOW_UP")))
     }
+
+    @Test fun daysAheadAtTimeSlot() {
+        val now = ms(2026, 11, 28, 22, 10)
+        assertEquals(ms(2026, 12, 2, 15, 0), OutcomeLogic.dayTimeMs(DayPick.IN_4.days, TimeSlot.AFTERNOON, now, zone))
+        assertEquals(ms(2026, 12, 8, 10, 0), OutcomeLogic.dayTimeMs(DayPick.IN_10.days, TimeSlot.MORNING, now, zone))
+        assertEquals(ms(2026, 11, 29, 18, 0), OutcomeLogic.dayTimeMs(DayPick.TOMORROW.days, TimeSlot.EVENING, now, zone))
+    }
+
+    @Test fun exactTimeOnAPickedDate() {
+        assertEquals(ms(2026, 12, 5, 16, 45), OutcomeLogic.atMs(java.time.LocalDate.of(2026, 12, 5), java.time.LocalTime.of(16, 45), zone))
+    }
 }

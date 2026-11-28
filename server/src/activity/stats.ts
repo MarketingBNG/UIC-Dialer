@@ -1,6 +1,7 @@
 import type { Deps } from "../context.js";
 import { Prisma } from "../generated/prisma/client.js";
 import { istDay } from "./service.js";
+import { directionCounts, type DirectionCounts } from "./live.js";
 
 const DAY_MS = 24 * 3600 * 1000;
 
@@ -106,6 +107,18 @@ export async function followUpsOverdue(db: Deps["db"], userIds: string[], now = 
 export const pct = (value: number, target: number | null, days: number) =>
   target && target > 0 ? Math.round((100 * value) / (target * days)) : null;
 
+/** Recorded / logged calls (calls table) per user over [from, to), by direction. */
+export async function callDirections(db: Deps["db"], userIds: string[], from: Date, to: Date): Promise<Map<string, DirectionCounts>> {
+  const rows = userIds.length
+    ? await db.call.groupBy({
+        by: ["userId", "direction"],
+        where: { userId: { in: userIds }, startedAt: { gte: from, lt: to } },
+        _count: { _all: true },
+      })
+    : [];
+  return directionCounts(rows.map((r) => ({ userId: r.userId, direction: r.direction, n: r._count._all })), userIds);
+}
+
 /** GET /api/team/stats (§8). */
 export async function teamStats(
   db: Deps["db"],
@@ -120,19 +133,25 @@ export async function teamStats(
     orderBy: [{ name: "asc" }, { email: "asc" }],
   });
   const ids = users.map((u) => u.id);
-  const [nums, done, overdue] = await Promise.all([activityNumbers(db, ids, from, to), followUpsDone(db, ids, from, to), followUpsOverdue(db, ids)]);
+  const [nums, done, overdue, dirs] = await Promise.all([
+    activityNumbers(db, ids, from, to),
+    followUpsDone(db, ids, from, to),
+    followUpsOverdue(db, ids),
+    callDirections(db, ids, from, to),
+  ]);
   const items = users.map((u) => {
     const n = nums.get(u.id)!;
     return {
       user: { id: u.id, name: u.name, email: u.email },
       ...n,
+      ...dirs.get(u.id)!,
       followUpsDone: done.get(u.id) ?? 0,
       followUpsOverdue: overdue.get(u.id) ?? 0,
       target: { callsPerDay: u.targetCallsPerDay, talkMinPerDay: u.targetTalkMinPerDay },
       vsTarget: { callsPct: pct(n.calls, u.targetCallsPerDay, days), talkPct: pct(n.talkTimeS / 60, u.targetTalkMinPerDay, days) },
     };
   });
-  const sum = (k: "calls" | "connected" | "talkTimeS" | "messages" | "followUpsDone" | "followUpsOverdue") =>
+  const sum = (k: "calls" | "connected" | "talkTimeS" | "messages" | "followUpsDone" | "followUpsOverdue" | "outgoing" | "incoming" | "missed") =>
     items.reduce((s, i) => s + i[k], 0);
   const totals = {
     calls: sum("calls"),
@@ -140,6 +159,9 @@ export async function teamStats(
     talkTimeS: sum("talkTimeS"),
     connectRate: rate(sum("connected"), sum("calls")),
     messages: sum("messages"),
+    outgoing: sum("outgoing"),
+    incoming: sum("incoming"),
+    missed: sum("missed"),
     followUpsDone: sum("followUpsDone"),
     followUpsOverdue: sum("followUpsOverdue"),
   };

@@ -90,6 +90,9 @@
             android:name=".reminders.ReminderReceiver"
             android:exported="false" />
         <receiver
+            android:name=".reminders.MorningReceiver"
+            android:exported="false" />
+        <receiver
             android:name=".reminders.BootReceiver"
             android:exported="true">
             <intent-filter>

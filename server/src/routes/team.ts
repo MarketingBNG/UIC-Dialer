@@ -39,7 +39,27 @@ export async function teamRoutes(app: FastifyInstance, deps: Deps) {
     } else {
       ({ from, to, days } = rangeBounds(q.range));
     }
-    return teamStats(deps.db, repUserScope(currentUser(req)), from, to, days);
+    const stats = await teamStats(deps.db, repUserScope(currentUser(req)), from, to, days);
+    // Live status: ringing / on a call (phone reports), phone app connected now, phone last seen.
+    const ids = stats.items.map((i) => i.user.id);
+    const devices = ids.length
+      ? await deps.db.device.groupBy({ by: ["userId"], where: { userId: { in: ids }, revokedAt: null }, _max: { lastSeenAt: true } })
+      : [];
+    const seen = new Map(devices.map((d) => [d.userId, d._max.lastSeenAt]));
+    const rt = app.realtime;
+    const items = stats.items.map((i) => {
+      const live = rt?.live.get(i.user.id) ?? null;
+      return {
+        ...i,
+        live: {
+          state: live?.state ?? null,
+          since: live?.since ?? null,
+          phoneOnline: (rt?.phonesFor(i.user.id) ?? 0) > 0,
+          phoneLastSeenAt: seen.get(i.user.id) ?? null,
+        },
+      };
+    });
+    return { ...stats, items, now: new Date() };
   });
 
   app.get("/v1/me/today", device, async (req) => meToday(deps.db, currentUser(req)));

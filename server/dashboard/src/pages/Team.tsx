@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { api, qs, type TeamStats, type TeamStatsRow } from "../api";
 import { useMe } from "../App";
@@ -49,7 +49,8 @@ export function TeamPage() {
   const stats = useQuery({
     queryKey: ["team-stats", params],
     queryFn: () => api<TeamStats>(`/api/team/stats${qs(params)}`),
-    refetchInterval: range === "today" ? 60_000 : false,
+    // Live: server notices (ringing / new calls) refetch at once; this poll catches the rest.
+    refetchInterval: range === "today" ? 20_000 : false,
   });
   const fmtTime = (iso: string | null) => (iso ? (range === "today" ? timeFmt : dayTimeFmt).format(new Date(iso)) : "—");
   const d = stats.data;
@@ -95,21 +96,25 @@ export function TeamPage() {
         <ErrorBox error={stats.error} onRetry={() => void stats.refetch()} />
       ) : !d ? null : (
         <>
-          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
             {[
               ["Calls", String(d.totals.calls)],
-              ["Connected", String(d.totals.connected)],
-              ["Connect rate", pct(d.totals.connectRate)],
+              ["Outgoing", String(d.totals.outgoing)],
+              ["Incoming", String(d.totals.incoming)],
+              ["Missed", String(d.totals.missed)],
+              ["Connected", `${d.totals.connected} (${pct(d.totals.connectRate)})`],
               ["Talk time", formatDuration(d.totals.talkTimeS)],
               ["Follow-ups done", String(d.totals.followUpsDone)],
               ["Overdue now", String(d.totals.followUpsOverdue)],
             ].map(([l, v]) => (
               <Card key={l} className="p-4">
-                <div className={`text-2xl font-semibold tabular-nums ${l === "Overdue now" && d.totals.followUpsOverdue ? "text-overdue" : ""}`}>{v}</div>
+                <div className={`text-2xl font-semibold tabular-nums ${(l === "Overdue now" && d.totals.followUpsOverdue) || (l === "Missed" && d.totals.missed) ? "text-overdue" : ""}`}>{v}</div>
                 <div className="text-sm text-muted-foreground">{l}</div>
               </Card>
             ))}
           </div>
+
+          {d.items.length > 0 && <LiveNow items={d.items} />}
 
           {d.items.length === 0 ? (
             <Empty icon={<Users />}>No reps to show yet. Add reps on the Users page and give them a team.</Empty>
@@ -119,8 +124,8 @@ export function TeamPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      {["Rep", "Calls", "Connected", "Rate", "Talk time", "First call", "Last call", "Messages", "Follow-ups done", "Overdue", "Calls vs target"].map((h, i) => (
-                        <TableHead key={h} scope="col" className={i && i < 10 ? "text-right" : ""}>
+                      {["Rep", "Calls", "Out", "In", "Missed", "Connected", "Rate", "Talk time", "First call", "Last call", "Messages", "Follow-ups done", "Overdue", "Calls vs target"].map((h, i) => (
+                        <TableHead key={h} scope="col" className={i && i < 13 ? "text-right" : ""}>
                           {h}
                         </TableHead>
                       ))}
@@ -169,6 +174,9 @@ function Row({ r, fmtTime, days }: { r: TeamStatsRow; fmtTime: (iso: string | nu
         {personName(r.user)}
       </TableHead>
       <TableCell className="text-right tabular-nums">{r.calls}</TableCell>
+      <TableCell className="text-right tabular-nums">{r.outgoing}</TableCell>
+      <TableCell className="text-right tabular-nums">{r.incoming}</TableCell>
+      <TableCell className={`text-right tabular-nums ${r.missed ? "font-medium text-overdue" : ""}`}>{r.missed}</TableCell>
       <TableCell className="text-right tabular-nums">{r.connected}</TableCell>
       <TableCell className="text-right tabular-nums">{pct(r.connectRate)}</TableCell>
       <TableCell className="text-right tabular-nums">{formatDuration(r.talkTimeS)}</TableCell>
@@ -197,5 +205,60 @@ function Row({ r, fmtTime, days }: { r: TeamStatsRow; fmtTime: (iso: string | nu
         )}
       </TableCell>
     </TableRow>
+  );
+}
+
+const mmss = (ms: number) => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
+/** Live status per rep: ringing / on a call (from the phone), phone app connected, last call. */
+function LiveNow({ items }: { items: TeamStatsRow[] }) {
+  const [now, setNow] = useState(() => Date.now());
+  const busy = items.some((r) => r.live.state);
+  useEffect(() => {
+    if (!busy) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [busy]);
+  const order = (r: TeamStatsRow) => (r.live.state === "onCall" ? 0 : r.live.state === "ringing" ? 1 : r.live.phoneOnline ? 2 : 3);
+  const sorted = [...items].sort((a, b) => order(a) - order(b));
+  return (
+    <Card role="region" aria-labelledby="live-h" className="mb-4 p-4">
+      <h2 id="live-h" className="mb-1 font-semibold">
+        Live now
+      </h2>
+      <Hint className="mb-3">On a call shows for incoming calls the phone reports. Updates by itself.</Hint>
+      <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {sorted.map((r) => {
+          const l = r.live;
+          const since = l.since ? new Date(l.since).getTime() : now;
+          const [dot, text] =
+            l.state === "onCall"
+              ? ["bg-call", `On a call ${mmss(now - since)}`]
+              : l.state === "ringing"
+                ? ["bg-primary animate-pulse", "Ringing"]
+                : l.phoneOnline
+                  ? ["bg-call/50", "Phone online"]
+                  : ["bg-muted-foreground/40", l.phoneLastSeenAt ? `Phone seen ${dayTimeFmt.format(new Date(l.phoneLastSeenAt))}` : "Phone not set up"];
+          return (
+            <li key={r.user.id} className="flex items-center gap-2 rounded-md border p-2 text-sm">
+              <span className={`size-2.5 shrink-0 rounded-full ${dot}`} aria-hidden />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">{personName(r.user)}</div>
+                <div className="truncate text-xs text-muted-foreground">
+                  {text}
+                  {r.lastCallAt ? ` · last call ${timeFmt.format(new Date(r.lastCallAt))}` : ""}
+                </div>
+              </div>
+              <span className="text-xs tabular-nums text-muted-foreground" title="Out / In / Missed">
+                {r.outgoing}/{r.incoming}/<span className={r.missed ? "text-overdue" : ""}>{r.missed}</span>
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
   );
 }

@@ -688,8 +688,12 @@ export interface TeamStatsRow {
   firstCallAt: string | null;
   lastCallAt: string | null;
   messages: number;
+  outgoing: number;
+  incoming: number;
+  missed: number;
   followUpsDone: number;
   followUpsOverdue: number;
+  live: { state: "ringing" | "onCall" | null; since: string | null; phoneOnline: boolean; phoneLastSeenAt: string | null };
   target: { callsPerDay: number | null; talkMinPerDay: number | null };
   vsTarget: { callsPct: number | null; talkPct: number | null };
 }
@@ -697,8 +701,9 @@ export interface TeamStats {
   from: string;
   to: string;
   days: number;
-  totals: { calls: number; connected: number; talkTimeS: number; connectRate: number | null; messages: number; followUpsDone: number; followUpsOverdue: number };
+  totals: { calls: number; connected: number; talkTimeS: number; connectRate: number | null; messages: number; outgoing: number; incoming: number; missed: number; followUpsDone: number; followUpsOverdue: number };
   items: TeamStatsRow[];
+  now: string;
   leaderboard: { userId: string; rank: number; calls: number; connected: number; talkTimeS: number }[];
 }
 export interface MeToday {

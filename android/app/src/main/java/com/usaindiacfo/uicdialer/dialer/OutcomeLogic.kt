@@ -7,6 +7,14 @@ import com.usaindiacfo.uicdialer.data.api.OutcomeRule
 /** One-tap follow-up times offered after a dated outcome ("Pick…" opens the platform picker instead). */
 enum class QuickPick(val label: String) { IN_1_HOUR("In 1 hour"), TOMORROW_11("Tomorrow 11 am"), NEXT_WEEK("Next week") }
 
+/** "Pick a day" chips on the outcome sheet: days from today. */
+enum class DayPick(val label: String, val days: Long) {
+    TOMORROW("Tomorrow", 1), IN_2("2 days", 2), IN_3("3 days", 3), IN_4("4 days", 4), IN_7("7 days", 7), IN_10("10 days", 10)
+}
+
+/** "Pick a time" chips on the outcome sheet. */
+enum class TimeSlot(val label: String, val hour: Int) { MORNING("Morning", 10), AFTERNOON("Afternoon", 15), EVENING("Evening", 18) }
+
 /** What the outcome sheet asks for once an outcome is chosen. */
 enum class OutcomePrompt { NONE, DATE, DATE_TIME, RETRY, SAVE_NOW, CONFIRM_REMOVE }
 
@@ -63,6 +71,18 @@ object OutcomeLogic {
             QuickPick.NEXT_WEEK -> today.plusDays(7).atTime(at11).atZone(zone).toInstant().toEpochMilli()
         }
     }
+
+    /** The day [days] after today (in [zone]). */
+    fun dayAhead(days: Long, nowMs: Long, zone: java.time.ZoneId): java.time.LocalDate =
+        java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate().plusDays(days)
+
+    /** Epoch ms for [date] at [time] in [zone]. */
+    fun atMs(date: java.time.LocalDate, time: java.time.LocalTime, zone: java.time.ZoneId): Long =
+        date.atTime(time).atZone(zone).toInstant().toEpochMilli()
+
+    /** Epoch ms for [days] from today at [slot]'s hour, e.g. 4 days, Afternoon -> that day 15:00. */
+    fun dayTimeMs(days: Long, slot: TimeSlot, nowMs: Long, zone: java.time.ZoneId): Long =
+        atMs(dayAhead(days, nowMs, zone), java.time.LocalTime.of(slot.hour, 0), zone)
 
     /** RETRY: the phone sets now + N h (the server recomputes it from the call time). */
     fun retryFollowUpMs(nowMs: Long, retryHours: Int?): Long? = retryHours?.takeIf { it > 0 }?.let { nowMs + it * 3600_000L }

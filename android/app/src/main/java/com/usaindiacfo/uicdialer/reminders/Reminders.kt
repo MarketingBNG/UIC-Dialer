@@ -1,6 +1,10 @@
 package com.usaindiacfo.uicdialer.reminders
 
+import android.app.AlarmManager
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
@@ -52,11 +56,37 @@ object Reminders {
     fun scheduleMorning(context: Context, policy: ExistingWorkPolicy = ExistingWorkPolicy.KEEP) {
         val store = ReminderStore(context)
         val wm = WorkManager.getInstance(context)
-        if (!store.summaryEnabled) { wm.cancelUniqueWork(MORNING); return }
-        val delay = ReminderPlan.nextMorningMs(System.currentTimeMillis(), store.summaryHour) - System.currentTimeMillis()
+        val am = context.getSystemService(AlarmManager::class.java)
+        if (!store.summaryEnabled) { wm.cancelUniqueWork(MORNING); am.cancel(morningAlarm(context)); return }
+        val now = System.currentTimeMillis()
+        val at = ReminderPlan.nextMorningMs(now, store.summaryHour)
+        // The alarm is the real trigger: Samsung/Xiaomi often hold back delayed WorkManager jobs for hours.
+        try {
+            if (ReminderScheduler.canExact(context)) am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, morningAlarm(context))
+            else am.setWindow(AlarmManager.RTC_WAKEUP, at, 10 * 60_000L, morningAlarm(context))
+        } catch (_: SecurityException) {
+            runCatching { am.setWindow(AlarmManager.RTC_WAKEUP, at, 10 * 60_000L, morningAlarm(context)) }
+        }
+        // Backup a bit later, in case the alarm was lost (force stop). Sends at most once a day either way.
         wm.enqueueUniqueWork(
             MORNING, policy,
-            OneTimeWorkRequestBuilder<MorningSummaryWorker>().setInitialDelay(delay.coerceAtLeast(0), TimeUnit.MILLISECONDS).build(),
+            OneTimeWorkRequestBuilder<MorningSummaryWorker>().setInitialDelay((at - now + BACKUP_MS).coerceAtLeast(0), TimeUnit.MILLISECONDS).build(),
+        )
+    }
+
+    private const val BACKUP_MS = 45 * 60_000L
+
+    private fun morningAlarm(context: Context): PendingIntent =
+        PendingIntent.getBroadcast(
+            context, 9105, Intent(context, MorningReceiver::class.java).setAction(MorningReceiver.ACTION),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+    /** The morning alarm fired: run the summary now. */
+    fun runMorningNow(context: Context) {
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "$MORNING-now", ExistingWorkPolicy.KEEP,
+            OneTimeWorkRequestBuilder<MorningSummaryWorker>().build(),
         )
     }
 
@@ -192,11 +222,10 @@ class MorningSummaryWorker(ctx: Context, params: WorkerParameters) : CoroutineWo
         try {
             if (store.summaryEnabled && c.tokenStore.user.value != null && store.lastSummaryDate != date) {
                 val today = runCatching { Reminders.fetchToday(c).also { ReminderScheduler.reschedule(ctx, it) } }.getOrNull() ?: c.contactCache.today
+                // Every morning, even with nothing due, so reps know the brief works.
                 val n = today?.counts?.let { it.overdue + it.today } ?: 0
-                if (n > 0) {
-                    Notifications.showSummary(ctx, n)
-                    store.lastSummaryDate = date
-                }
+                Notifications.showSummary(ctx, n)
+                store.lastSummaryDate = date
             }
         } finally {
             // KEEP would be dropped while this run is active; APPEND_OR_REPLACE queues the next one after it.
@@ -204,4 +233,13 @@ class MorningSummaryWorker(ctx: Context, params: WorkerParameters) : CoroutineWo
         }
         return Result.success()
     }
+}
+
+/** Morning alarm: hands off to [MorningSummaryWorker] right away (network fetch can't run in a receiver). */
+class MorningReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == ACTION) Reminders.runMorningNow(context)
+    }
+
+    companion object { const val ACTION = "com.usaindiacfo.uicdialer.MORNING_SUMMARY" }
 }

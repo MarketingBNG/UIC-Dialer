@@ -106,5 +106,5 @@ object ReminderPlan {
 
     fun istDate(nowMs: Long): String = Instant.ofEpochMilli(nowMs).atZone(DialLogic.IST).toLocalDate().toString() // LocalDate.ofInstant is API 34+
 
-    fun summaryText(n: Int): String = if (n == 1) "You have 1 follow-up today" else "You have $n follow-ups today"
+    fun summaryText(n: Int): String = if (n <= 0) "Good morning! No follow-ups due today" else if (n == 1) "You have 1 follow-up today" else "You have $n follow-ups today"
 }

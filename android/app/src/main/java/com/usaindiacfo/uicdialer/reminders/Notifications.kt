@@ -142,7 +142,7 @@ object Notifications {
         val n = NotificationCompat.Builder(context, CH_FOLLOWUPS)
             .setSmallIcon(R.drawable.ic_stat_call)
             .setContentTitle(ReminderPlan.summaryText(count))
-            .setContentText("Tap to see who to call")
+            .setContentText(if (count > 0) "Tap to see who to call" else "Tap to open Today")
             .setAutoCancel(true)
             .setContentIntent(openApp(context, "today", null, "summary"))
             .build()

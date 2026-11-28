@@ -27,6 +27,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { FormError } from "./ui";
 
+/** "Pick a day" buttons in the outcome dialog: label and days from today. */
+const DAY_PICKS: [string, number][] = [["Tomorrow", 1], ["2 days", 2], ["3 days", 3], ["4 days", 4], ["7 days", 7], ["10 days", 10]];
+/** Time-of-day buttons: Morning 10 am, Afternoon 3 pm, Evening 6 pm. */
+const TIME_SLOTS: [string, string][] = [["Morning", "10:00"], ["Afternoon", "15:00"], ["Evening", "18:00"]];
+
+/** "YYYY-MM-DD" (local) for [days] from today, as a datetime-local input wants it. */
+function dayAhead(days: number, now = new Date()) {
+  const d = new Date(now);
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+
 /**
  * Desktop click-to-call. Opening a tel: link hands the number to Windows Phone Link, which dials on the rep's
  * paired Android phone (the phone's own dialer records the call) and carries the audio over Bluetooth.
@@ -435,6 +448,37 @@ function OutcomeDialog({
               <Button variant="outline" className="h-auto min-h-12 text-base" disabled={save.isPending} onClick={() => setCustom(true)}>
                 <CalendarClock /> Pick…
               </Button>
+            </div>
+            <p className="pt-1 text-xs font-medium text-muted-foreground">Or pick a day and time</p>
+            <div className="flex flex-wrap gap-1.5">
+              {DAY_PICKS.map(([label, days]) => (
+                <Button
+                  key={label}
+                  size="sm"
+                  variant={followUp.slice(0, 10) === dayAhead(days) ? "default" : "outline"}
+                  onClick={() => {
+                    setCustom(true);
+                    setFollowUp(`${dayAhead(days)}T${followUp.slice(11, 16) || "10:00"}`);
+                  }}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {TIME_SLOTS.map(([label, hhmm]) => (
+                <Button
+                  key={label}
+                  size="sm"
+                  variant={followUp.slice(11, 16) === hhmm ? "default" : "outline"}
+                  onClick={() => {
+                    setCustom(true);
+                    setFollowUp(`${followUp.slice(0, 10) || dayAhead(1)}T${hhmm}`);
+                  }}
+                >
+                  {label}
+                </Button>
+              ))}
             </div>
             {custom && (
               <div className="flex flex-wrap items-end gap-2">

@@ -42,6 +42,8 @@ import com.usaindiacfo.uicdialer.appContainer
 import com.usaindiacfo.uicdialer.data.api.ActivityType
 import com.usaindiacfo.uicdialer.data.api.OutcomeDto
 import com.usaindiacfo.uicdialer.dialer.OutcomeLogic
+import com.usaindiacfo.uicdialer.dialer.DayPick
+import com.usaindiacfo.uicdialer.dialer.TimeSlot
 import com.usaindiacfo.uicdialer.dialer.OutcomePrompt
 import com.usaindiacfo.uicdialer.data.api.ContactDto
 import com.usaindiacfo.uicdialer.detect.CallLogMatcher
@@ -141,6 +143,9 @@ private fun OutcomeSheet(a: OutcomeAsk, onDone: () -> Unit) {
     /** The tapped outcome that still needs a time (quick picks are showing). */
     var dating by remember { mutableStateOf<OutcomeDto?>(null) }
     var showDetails by remember { mutableStateOf(false) }
+    /** "Pick a day" + "Pick a time" builder under the quick picks. */
+    var day by remember { mutableStateOf<java.time.LocalDate?>(null) }
+    var time by remember { mutableStateOf(java.time.LocalTime.of(TimeSlot.MORNING.hour, 0)) }
     val askName = a.contact?.name.isNullOrBlank()
     val askCompany = a.contact?.company.isNullOrBlank()
 
@@ -282,10 +287,53 @@ private fun OutcomeSheet(a: OutcomeAsk, onDone: () -> Unit) {
                         modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                     ) { Text(p.label, style = MaterialTheme.typography.titleMedium) }
                 }
+                val zone = java.time.ZoneId.systemDefault()
+                Text("Or pick a day", style = MaterialTheme.typography.labelLarge)
+                FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    DayPick.entries.forEach { p ->
+                        val date = OutcomeLogic.dayAhead(p.days, System.currentTimeMillis(), zone)
+                        FilterChip(selected = day == date, onClick = { day = date }, label = { Text(p.label) }, modifier = Modifier.heightIn(min = 48.dp))
+                    }
+                    val custom = day?.takeIf { dd -> DayPick.entries.none { OutcomeLogic.dayAhead(it.days, System.currentTimeMillis(), zone) == dd } }
+                    FilterChip(
+                        selected = custom != null,
+                        onClick = {
+                            val start = day ?: OutcomeLogic.dayAhead(1, System.currentTimeMillis(), zone)
+                            android.app.DatePickerDialog(context, { _, y, m, dd -> day = java.time.LocalDate.of(y, m + 1, dd) }, start.year, start.monthValue - 1, start.dayOfMonth)
+                                .apply { datePicker.minDate = java.time.LocalDate.now(zone).atStartOfDay(zone).toInstant().toEpochMilli() }
+                                .show()
+                        },
+                        label = { Text(custom?.let { "${it.dayOfMonth} ${it.month.getDisplayName(java.time.format.TextStyle.SHORT, java.util.Locale.getDefault())}" } ?: "Date…") },
+                        modifier = Modifier.heightIn(min = 48.dp),
+                    )
+                }
+                if (day != null) {
+                    Text("Time", style = MaterialTheme.typography.labelLarge)
+                    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        TimeSlot.entries.forEach { s ->
+                            val t = java.time.LocalTime.of(s.hour, 0)
+                            FilterChip(selected = time == t, onClick = { time = t }, label = { Text(s.label) }, modifier = Modifier.heightIn(min = 48.dp))
+                        }
+                        val exact = TimeSlot.entries.none { java.time.LocalTime.of(it.hour, 0) == time }
+                        FilterChip(
+                            selected = exact,
+                            onClick = {
+                                android.app.TimePickerDialog(context, { _, h, m -> time = java.time.LocalTime.of(h, m) }, time.hour, time.minute,
+                                    android.text.format.DateFormat.is24HourFormat(context)).show()
+                            },
+                            label = { Text(if (exact) "%d:%02d".format(time.hour, time.minute) else "Time…") },
+                            modifier = Modifier.heightIn(min = 48.dp),
+                        )
+                    }
+                    val at = OutcomeLogic.atMs(day!!, time, zone)
+                    Button(onClick = { save(d, at) }, enabled = !saving, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
+                        Text("Save · ${formatWhen(context, at)}", style = MaterialTheme.typography.titleMedium)
+                    }
+                }
                 OutlinedButton(onClick = { pickCustom(d) }, enabled = !saving, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) {
                     Text("Pick…", style = MaterialTheme.typography.titleMedium)
                 }
-                TextButton(onClick = { dating = null; error = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Back") }
+                TextButton(onClick = { dating = null; day = null; error = null }, modifier = Modifier.heightIn(min = 48.dp)) { Text("Back") }
             }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (showDetails) {

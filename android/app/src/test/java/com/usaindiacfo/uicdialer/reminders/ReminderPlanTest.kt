@@ -97,6 +97,7 @@ class ReminderPlanTest {
     }
 
     @Test fun texts() {
+        assertEquals("Good morning! No follow-ups due today", ReminderPlan.summaryText(0))
         assertEquals("You have 1 follow-up today", ReminderPlan.summaryText(1))
         assertEquals("You have 5 follow-ups today", ReminderPlan.summaryText(5))
         assertEquals("9:00 am", ReminderPlan.hourText(9))

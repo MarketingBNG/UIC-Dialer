@@ -6,6 +6,7 @@ import { requireDevice, requireSession } from "./auth/guards.js";
 import { toE164 } from "./phone.js";
 import { currentUser, HttpError, type Deps } from "./context.js";
 import { recordClientError } from "./routes/clientErrors.js";
+import { LiveCalls } from "./activity/live.js";
 
 /**
  * Live "something changed" notices for the dashboard / Windows app and the phone app.
@@ -17,7 +18,7 @@ import { recordClientError } from "./routes/clientErrors.js";
  * Postgres LISTEN/NOTIFY.
  */
 
-export type Topic = "activity" | "contacts" | "followups" | "calls" | "lists" | "settings" | "ringing" | "dial" | "dialack";
+export type Topic = "activity" | "contacts" | "followups" | "calls" | "lists" | "settings" | "ringing" | "dial" | "dialack" | "presence";
 export interface ChangeEvent {
   topic: Topic;
   /** Owner of the change; null = relevant to everyone. */
@@ -81,7 +82,7 @@ export function topicFor(method: string, route: string): Topic | null {
   return null;
 }
 
-const SCOPED: ReadonlySet<Topic> = new Set(["activity", "followups", "calls"]);
+const SCOPED: ReadonlySet<Topic> = new Set(["activity", "followups", "calls", "presence"]);
 
 interface Stream {
   userId: string;
@@ -100,6 +101,8 @@ export class Realtime {
   private listener: pg.Client | undefined;
   private closed = false;
   private retryMs = 1000;
+  /** Who is ringing / on a call right now (Team page "Live"). */
+  readonly live = new LiveCalls();
 
   constructor(
     private readonly deps: Pick<Deps, "db" | "config">,
@@ -155,7 +158,13 @@ export class Realtime {
       return;
     }
     if (e.topic === "ringing") {
-      for (const s of this.streams) if (e.userId !== null && s.userId === e.userId) s.send(e);
+      if (e.userId === null) return;
+      if (e.ring) this.live.report(e.userId, e.ring.state);
+      for (const s of this.streams) {
+        if (s.userId === e.userId) s.send(e);
+        // Managers / admins get a data-free notice so the Team page's live status refreshes (no caller number).
+        else if (s.seesAll) s.send({ topic: "presence", userId: e.userId });
+      }
       return;
     }
     const scoped = SCOPED.has(e.topic) && e.userId !== null;
