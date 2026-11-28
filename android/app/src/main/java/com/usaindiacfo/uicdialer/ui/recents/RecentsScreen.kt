@@ -140,7 +140,7 @@ fun RecentsScreen(onOpenContact: (phone: String) -> Unit) {
         OutlinedTextField(
             value = state.query,
             onValueChange = { vm.setQuery(it.take(100)) },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp),
             placeholder = { Text("Search name or number") },
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
             singleLine = true,
@@ -200,12 +200,12 @@ private fun RecentRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Avatar(name)
+        Avatar(name, sharedKey = rc.number.takeIf { inCrm })
         Column(Modifier.weight(1f)) {
             Text(
                 name ?: rc.number.ifBlank { "Private number" },
                 style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                color = if (missed) UicColors.overdue else MaterialTheme.colorScheme.onSurface,
+                color = if (missed) UicColors.amber else MaterialTheme.colorScheme.onSurface,
                 fontWeight = if (missed) FontWeight.SemiBold else null,
             )
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -247,8 +247,8 @@ private fun KindIcon(k: CallKind) {
     val (icon, angle, tint) = when (k) {
         CallKind.OUTGOING -> Triple(Icons.AutoMirrored.Filled.ArrowForward, -45f, UicColors.callGreen)
         CallKind.INCOMING -> Triple(Icons.AutoMirrored.Filled.ArrowForward, 135f, UicColors.primary)
-        CallKind.MISSED -> Triple(Icons.AutoMirrored.Filled.ArrowForward, 135f, UicColors.overdue)
-        CallKind.REJECTED -> Triple(Icons.Filled.Clear, 0f, UicColors.overdue)
+        CallKind.MISSED -> Triple(Icons.AutoMirrored.Filled.ArrowForward, 135f, UicColors.amber)
+        CallKind.REJECTED -> Triple(Icons.Filled.Clear, 0f, UicColors.amber)
         CallKind.OTHER -> Triple(Icons.AutoMirrored.Filled.ArrowForward, 0f, Color.Gray)
     }
     Icon(icon, contentDescription = kindLabel(k), tint = tint, modifier = Modifier.size(14.dp).rotate(angle))

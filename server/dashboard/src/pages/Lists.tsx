@@ -493,7 +493,7 @@ export function ListDetailPage() {
                   <TableRow key={it.id}>
                     <TableCell className="tabular-nums text-muted-foreground">{it.position + 1}</TableCell>
                     <TableCell>
-                      <Link to={`/activity/contacts/${it.contact.id}`} className="font-medium hover:underline">
+                      <Link to={`/contacts/${it.contact.id}`} className="font-medium hover:underline">
                         {label}
                       </Link>
                       <div className="text-xs text-muted-foreground">
@@ -799,38 +799,47 @@ export function ListSessionPage() {
                   </div>
                 </div>
               </div>
-              <div className="mt-5 flex flex-wrap gap-2">
+              {/* One big action; the countdown and the small links sit under it. */}
+              <div className="mt-5">
                 {onThisCall ? (
-                  <Button size="lg" className="flex-1" onClick={dialer.openOutcome}>
+                  <Button size="lg" className="w-full" onClick={dialer.openOutcome}>
                     <ListChecks /> Log outcome
                   </Button>
                 ) : (
                   <Button
                     size="lg"
                     variant="call"
-                    className="flex-1"
+                    className="w-full"
                     onClick={() => {
                       setCountdown(null);
                       calledItem.current = it.id;
                       void dialer.call(c!.phoneE164, label, { callListItemId: it.id, listId: id, dncReason: c!.dnc?.reason ?? null, dnc: !!c!.dnc });
                     }}
                   >
-                    <Phone /> {countdown !== null ? `Calling in ${countdown}s` : "Call now"}
+                    <Phone /> Call now
                   </Button>
                 )}
-                {countdown !== null && !onThisCall && (
-                  <Button size="lg" variant="outline" onClick={() => setCountdown(null)}>
+              </div>
+              {countdown !== null && !onThisCall && (
+                <p className="mt-3 text-center text-sm" aria-live="polite">
+                  Calling {label} in {countdown}s ·{" "}
+                  <button type="button" className="font-medium text-primary underline-offset-2 hover:underline" onClick={() => setCountdown(null)}>
                     Cancel
-                  </Button>
-                )}
-                <Button size="lg" variant="outline" disabled={skip.isPending} onClick={() => { setCountdown(null); skip.mutate(it.id); }}>
-                  <SkipForward /> {skip.isPending ? "Skipping…" : "Skip"}
-                </Button>
-                <Button asChild size="lg" variant="ghost">
-                  <Link to={`/activity/contacts/${c!.id}`}>
-                    <UserRound /> Details
-                  </Link>
-                </Button>
+                  </button>
+                </p>
+              )}
+              <div className="mt-3 flex justify-center gap-5 text-sm">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
+                  disabled={skip.isPending}
+                  onClick={() => { setCountdown(null); skip.mutate(it.id); }}
+                >
+                  <SkipForward className="size-4" /> {skip.isPending ? "Skipping…" : "Skip"}
+                </button>
+                <Link to={`/contacts/${c!.id}`} className="inline-flex items-center gap-1 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+                  <UserRound className="size-4" /> Details
+                </Link>
               </div>
               {skip.error && <FormError error={skip.error} />}
               <Hint className="mt-4">Auto-advance: after you save the outcome, the next number is ready.</Hint>

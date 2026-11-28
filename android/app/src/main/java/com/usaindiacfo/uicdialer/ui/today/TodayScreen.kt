@@ -1,6 +1,15 @@
 package com.usaindiacfo.uicdialer.ui.today
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import com.usaindiacfo.uicdialer.ui.common.EmptyState
+import com.usaindiacfo.uicdialer.ui.common.Pill
+import com.usaindiacfo.uicdialer.ui.common.PillTone
+import com.usaindiacfo.uicdialer.ui.common.SectionHeader
+import com.usaindiacfo.uicdialer.ui.common.colors
+import com.usaindiacfo.uicdialer.ui.theme.UicThemeTones
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.tween
@@ -65,7 +74,6 @@ import com.usaindiacfo.uicdialer.dialer.DialLogic
 import com.usaindiacfo.uicdialer.dialer.Dialer
 import com.usaindiacfo.uicdialer.ui.dialer.Avatar
 import com.usaindiacfo.uicdialer.ui.dialer.Caller
-import com.usaindiacfo.uicdialer.ui.dialer.Chip
 import com.usaindiacfo.uicdialer.ui.dialer.GreenCallButton
 import com.usaindiacfo.uicdialer.ui.dialer.rememberCaller
 import com.usaindiacfo.uicdialer.ui.dialer.title
@@ -99,7 +107,6 @@ fun TodayScreen(
     val vm: TodayViewModel = viewModel(factory = viewModelFactory { initializer { TodayViewModel(container) } })
     val state by vm.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val user by container.authRepository.currentUser.collectAsStateWithLifecycle()
     var resumeTick by remember { mutableIntStateOf(0) }
     // One setup banner: the worst problem first, re-checked every time the app comes back.
     val issues = remember(resumeTick) { SetupChecks.issues(context) }
@@ -157,41 +164,37 @@ fun TodayScreen(
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            item(key = "update") { UpdateBanner(checkKey = resumeTick / 10) } // re-check occasionally
-            item(key = "sim") { SimNumberBanner(checkKey = resumeTick / 10) }
-            issues.firstOrNull()?.let { first ->
-                item(key = "setup") {
-                    val more = if (issues.size > 1) " (${issues.size - 1} more)" else ""
-                    val color = if (first.fix == SetupChecks.Fix.NOTIFICATIONS) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.errorContainer
-                    Banner(first.text + more, first.action, color) { fixIssue(first) }
+            // At most one banner: a setup problem (worst first) or recording off; "N more" counts the rest.
+            // Update and SIM banners only show when nothing needs fixing (they hide themselves when not needed).
+            val problemCount = issues.size + (if (recordingOff) 1 else 0)
+            val more = if (problemCount > 1) " (${problemCount - 1} more)" else ""
+            val first = issues.firstOrNull()
+            when {
+                first != null -> item(key = "setup") {
+                    val tone = if (first.fix == SetupChecks.Fix.NOTIFICATIONS) PillTone.WARNING else PillTone.DANGER
+                    Banner(first.text + more, first.action, tone) { fixIssue(first) }
                 }
-            }
-            if (recordingOff) item(key = "recording-off") {
-                Banner(
-                    "Call recording is off. " + com.usaindiacfo.uicdialer.sync.RecordingCheck.TEXT, "Open Phone",
-                    MaterialTheme.colorScheme.errorContainer,
-                ) { runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_DIAL).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }
+                recordingOff -> item(key = "recording-off") {
+                    Banner(
+                        "Call recording is off. " + com.usaindiacfo.uicdialer.sync.RecordingCheck.TEXT + more, "Fix", PillTone.DANGER,
+                    ) { runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_DIAL).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }
+                }
+                else -> {
+                    item(key = "update") { UpdateBanner(checkKey = resumeTick / 10) } // re-check occasionally
+                    item(key = "sim") { SimNumberBanner(checkKey = resumeTick / 10) }
+                }
             }
             item(key = "head") {
-                Column {
-                    Text(
-                        LocalDate.now(DialLogic.IST).format(DateTimeFormatter.ofPattern("EEEE, d MMM", Locale.ENGLISH)),
-                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        greeting() + (user?.name?.substringBefore(' ')?.takeIf { it.isNotBlank() }?.let { ", $it" } ?: ""),
-                        style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold,
-                    )
-                    val toCall = queue.count { it.key !in state.called }
-                    Text(
-                        if (toCall == 0) "Nothing left in your queue"
-                        else "$toCall to call" + (if (state.overdue.isNotEmpty()) " · ${state.overdue.size} overdue" else ""),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (state.overdue.isNotEmpty()) UicColors.overdue else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                // Greeting lives in the top bar (TodayGreeting); here only what's left to do.
+                val toCall = queue.count { it.key !in state.called }
+                Text(
+                    if (toCall == 0) "Nothing left to call"
+                    else "$toCall to call" + (if (state.overdue.isNotEmpty()) " · ${state.overdue.size} overdue" else ""),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (state.overdue.isNotEmpty()) UicColors.overdue else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            state.me?.let { me -> item(key = "targets") { TargetsCard(me) } }
+            state.me?.let { me -> item(key = "targets") { TargetsStrip(me) } }
             if (state.loading) item(key = "loading") { LinearProgressIndicator(Modifier.fillMaxWidth()) }
             state.error?.let { item(key = "error") { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) } }
 
@@ -222,10 +225,7 @@ fun TodayScreen(
                 ListStarter(state.lists, onStart = { id -> sessionNo++; activeListId = id }, onOpenLists = onOpenLists)
             }
             if (upNext.isNotEmpty()) item(key = "h-upnext") {
-                Text(
-                    "UP NEXT", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp),
-                )
+                SectionHeader("Up next")
             }
             val shown = if (showAll) upNext else upNext.take(UP_NEXT_SHOWN)
             items(shown, key = { it.key }) { row -> Box(Modifier.animateItem(com.usaindiacfo.uicdialer.ui.theme.Motion.spec(), com.usaindiacfo.uicdialer.ui.theme.Motion.spec(), com.usaindiacfo.uicdialer.ui.theme.Motion.fast())) { UpNextRow(row, vm, call, onOpenContact) } }
@@ -245,34 +245,39 @@ fun TodayScreen(
     }
 }
 
+/** The one banner: soft tone colour, the problem in plain words, one button. */
 @Composable
-private fun Banner(text: String, action: String, color: Color, onClick: () -> Unit) {
-    Card(Modifier.fillMaxWidth().clickable(onClick = onClick), colors = CardDefaults.cardColors(containerColor = color)) {
+private fun Banner(text: String, action: String, tone: PillTone, onClick: () -> Unit) {
+    val c = tone.colors()
+    Card(
+        Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = c.bg, contentColor = MaterialTheme.colorScheme.onSurface),
+    ) {
         Row(Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(text, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-            TextButton(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp)) { Text(action) }
+            TextButton(onClick = onClick, modifier = Modifier.heightIn(min = 48.dp)) { Text(action, color = c.fg, fontWeight = FontWeight.SemiBold) }
         }
     }
 }
 
 @Composable
 private fun EmptyCard() {
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text("All caught up", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = UicColors.callGreen)
-            Text("Follow-ups you set after a call show up here. Tap Dial to call a new number.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-    }
+    EmptyState(
+        icon = Icons.Filled.Call,
+        title = "All caught up",
+        text = "Dial a number below. Follow-ups you set show up here.",
+    )
 }
 
-/** The one label a queue row shows. */
+/** The one label a queue row shows. Red only when it needs action now (missed, overdue). */
 @Composable
 private fun QueueLabel(row: TodayRow) {
     val text = TodayQueue.label(row)
     when {
-        row.kind == TodayKind.MISSED_CALL || row.overdue -> Chip(text, MaterialTheme.colorScheme.errorContainer, UicColors.overdue)
-        row.kind == TodayKind.NEW_LEAD -> Chip(text, Color(0xFFDDF3E4), Color(0xFF166534))
-        else -> Chip(text, Color(0xFFDCE7F7), UicColors.primary)
+        row.kind == TodayKind.MISSED_CALL || row.overdue -> Pill(text, PillTone.DANGER)
+        row.kind == TodayKind.NEW_LEAD -> Pill(text, PillTone.SUCCESS)
+        else -> Pill(text, PillTone.INFO)
     }
 }
 
@@ -281,11 +286,12 @@ private fun BigCallButton(enabled: Boolean = true, onClick: () -> Unit) {
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+        modifier = Modifier.fillMaxWidth().height(48.dp),
+        shape = RoundedCornerShape(8.dp),
         colors = ButtonDefaults.buttonColors(containerColor = UicColors.callGreen, contentColor = Color.White),
     ) {
         Icon(Icons.Filled.Call, contentDescription = null)
-        Text("Call", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 8.dp))
+        Text("Call", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(start = 8.dp))
     }
 }
 
@@ -313,16 +319,21 @@ private fun RowMenu(row: TodayRow, vm: TodayViewModel, extra: List<Pair<String, 
 
 @Composable
 private fun NextUpFrame(caption: String, menu: @Composable () -> Unit, content: @Composable () -> Unit) {
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    // Hero card: soft primary background so the next call stands out from the list below.
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = UicThemeTones.current.info.bg),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    caption, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                    caption, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
                 menu()
             }
-            Column(Modifier.padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { content() }
+            Column(Modifier.padding(end = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { content() }
         }
     }
 }
@@ -335,7 +346,7 @@ private fun ContactHeader(name: String?, title: String, sub: String?, onClick: (
     ) {
         Avatar(name, size = 52.dp, sharedKey = phone)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
             sub?.takeIf { it.isNotBlank() }?.let {
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
@@ -346,7 +357,7 @@ private fun ContactHeader(name: String?, title: String, sub: String?, onClick: (
 
 @Composable
 private fun RowNextUp(row: TodayRow, vm: TodayViewModel, call: Caller, onOpenContact: (String) -> Unit) {
-    NextUpFrame("NEXT UP", menu = { RowMenu(row, vm, listOf("Details" to { onOpenContact(row.phoneE164) })) }) {
+    NextUpFrame("Next up", menu = { RowMenu(row, vm, listOf("Details" to { onOpenContact(row.phoneE164) })) }) {
         ContactHeader(row.name, row.title, row.company, onClick = { onOpenContact(row.phoneE164) }, phone = row.phoneE164) { QueueLabel(row) }
         row.lastNote?.takeIf { it.isNotBlank() }?.let {
             Text("Last note: $it", style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
@@ -359,7 +370,7 @@ private fun RowNextUp(row: TodayRow, vm: TodayViewModel, call: Caller, onOpenCon
 private fun ListNextUp(vm: ListSessionViewModel, call: Caller, onOpenContact: (String) -> Unit, onStop: () -> Unit) {
     val s by vm.state.collectAsStateWithLifecycle()
     val name = s.list?.name ?: "Call list"
-    val caption = "NEXT UP · ${name.uppercase()}" +
+    val caption = "Next up · $name" +
         if (s.progress.total > 0) " · ${TodayQueue.listProgress(s.progress.done, s.progress.total)}" else ""
     var menuOpen by remember { mutableStateOf(false) }
     val item = s.item
@@ -388,9 +399,9 @@ private fun ListNextUp(vm: ListSessionViewModel, call: Caller, onOpenContact: (S
                 ContactHeader(ct.name, ct.title, ct.company, onClick = { onOpenContact(ct.phoneE164) }, phone = ct.phoneE164) {
                     val last = item.lastOutcome
                     when {
-                        ct.dnc != null -> Chip("Do not call", MaterialTheme.colorScheme.errorContainer, UicColors.overdue)
-                        last != null -> Chip("Last: ${last.label}", Color(0xFFF1F5F9), Color(0xFF475569))
-                        else -> Chip("New", Color(0xFFDCE7F7), UicColors.primary)
+                        ct.dnc != null -> Pill("Do not call", PillTone.DANGER)
+                        last != null -> Pill("Last: ${last.label}", PillTone.NEUTRAL)
+                        else -> Pill("New", PillTone.INFO)
                     }
                 }
                 val waiting = s.phase == SessionPhase.WAIT_SYNC
@@ -405,13 +416,13 @@ private fun ListNextUp(vm: ListSessionViewModel, call: Caller, onOpenContact: (S
                 }
                 s.list?.script?.takeIf { it.sections.isNotEmpty() }?.let { sc ->
                     Text(
-                        "SCRIPT · ${sc.name.uppercase()}", style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        "Script · ${sc.name}", style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     sc.sections.forEach { sec ->
                         Text(
                             buildAnnotatedString {
-                                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(sec.heading.uppercase() + ": ") }
+                                withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { append(sec.heading + ": ") }
                                 append(sec.text)
                             },
                             style = MaterialTheme.typography.bodyMedium,
@@ -434,7 +445,7 @@ private fun ListMessage(text: String, action: String, onAction: () -> Unit) {
 private fun ListStarter(lists: List<MyCallList>, onStart: (String) -> Unit, onOpenLists: () -> Unit) {
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 4.dp)) {
-            Text("CALL LISTS", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("Call lists", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
             lists.forEach { l ->
                 Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -477,41 +488,59 @@ private fun UpNextRow(row: TodayRow, vm: TodayViewModel, call: Caller, onOpenCon
     }
 }
 
-private fun greeting(): String = when (LocalTime.now(DialLogic.IST).hour) {
-    in 0..11 -> "Good morning"
-    in 12..16 -> "Good afternoon"
-    else -> "Good evening"
+/**
+ * Top bar text for Today (AppNavigation shows it): title "Good morning, Asha", subtitle "Friday, 28 Nov".
+ */
+object TodayGreeting {
+    fun title(fullName: String?): String =
+        greeting() + (fullName?.substringBefore(' ')?.takeIf { it.isNotBlank() }?.let { ", $it" } ?: "")
+
+    fun subtitle(): String = LocalDate.now(DialLogic.IST).format(DateTimeFormatter.ofPattern("EEEE, d MMM", Locale.ENGLISH))
+
+    private fun greeting(): String = when (LocalTime.now(DialLogic.IST).hour) {
+        in 0..11 -> "Good morning"
+        in 12..16 -> "Good afternoon"
+        else -> "Good evening"
+    }
 }
 
-/**
- * "Today: 14 / 40 calls · 40 / 60 talk min" with a bar per target; without targets only the counts show.
- */
+/** Targets as a compact strip of two tiles: "14 of 40 calls", "40 of 60 talk min", each with a thin bar. */
 @Composable
-private fun TargetsCard(me: MeToday) {
+private fun TargetsStrip(me: MeToday) {
     val talkMin = me.talkTimeS / 60
     val callsTarget = me.target.callsPerDay
     val talkTarget = me.target.talkMinPerDay
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                "Today: " + (if (callsTarget != null) "${me.calls} / $callsTarget calls" else "${me.calls} calls") +
-                    " · " + (if (talkTarget != null) "$talkMin / $talkTarget talk min" else "$talkMin talk min"),
-                style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
-            )
-            if (callsTarget != null) TargetBar("Calls", me.progress.callsPct)
-            if (talkTarget != null) TargetBar("Talk time", me.progress.talkPct)
-        }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        TargetTile(
+            if (callsTarget != null) "${me.calls} of $callsTarget" else "${me.calls}", "calls",
+            me.progress.callsPct.takeIf { callsTarget != null }, Modifier.weight(1f),
+        )
+        TargetTile(
+            if (talkTarget != null) "$talkMin of $talkTarget" else "$talkMin", "talk min",
+            me.progress.talkPct.takeIf { talkTarget != null }, Modifier.weight(1f),
+        )
     }
 }
 
 @Composable
-private fun TargetBar(label: String, pct: Int?) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text("$label ${pct ?: 0}%", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        LinearProgressIndicator(
-            progress = { ((pct ?: 0) / 100f).coerceIn(0f, 1f) },
-            modifier = Modifier.fillMaxWidth(),
-            color = if ((pct ?: 0) >= 100) UicColors.callGreen else MaterialTheme.colorScheme.primary,
-        )
+private fun TargetTile(value: String, label: String, pct: Int?, modifier: Modifier) {
+    Card(
+        modifier,
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, maxLines = 1)
+                Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            }
+            // No target set: just the count, no bar.
+            if (pct != null) LinearProgressIndicator(
+                progress = { (pct / 100f).coerceIn(0f, 1f) },
+                modifier = Modifier.fillMaxWidth(),
+                color = if (pct >= 100) UicColors.callGreen else MaterialTheme.colorScheme.primary,
+            )
+        }
     }
 }

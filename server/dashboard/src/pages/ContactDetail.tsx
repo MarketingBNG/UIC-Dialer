@@ -7,11 +7,13 @@ import { CONTACT_STATUS_LABEL, OUTCOME_LABEL, formatDuration, formatWhen, fromLo
 import { CallButton } from "../dialer";
 import { MessageCard } from "../components/MessageCard";
 import { OutcomeChip } from "../components/Outcomes";
-import { ArrowLeft, Ban, Save, StickyNote, Undo2 } from "lucide-react";
+import { ArrowLeft, Ban, CalendarClock, MessageCircle, Pencil, Save, StickyNote, Undo2 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,15 +24,22 @@ import { ContactStatusBadge, DirectionTag, ErrorBox, FormError, PageHeader, Spin
 export function ContactDetailPage() {
   const { id = "" } = useParams();
   const detail = useQuery({ queryKey: ["contact", id], queryFn: () => api<ContactDetail>(`/api/contacts/${id}`) });
+  const [editing, setEditing] = useState(false);
 
   if (detail.isPending) return <Spinner label="Loading contact" />;
   if (detail.isError) return <ErrorBox error={detail.error} onRetry={() => void detail.refetch()} />;
   const { contact, timeline } = detail.data;
+  // WhatsApp goes through the message box so the send is still logged on the timeline.
+  const showMessage = () => {
+    const el = document.getElementById("message-card");
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    el?.querySelector<HTMLElement>("textarea, select, button")?.focus({ preventScroll: true });
+  };
 
   return (
     <>
       <Button asChild variant="ghost" size="sm" className="mb-2 -ml-2 text-muted-foreground">
-        <Link to="/activity">
+        <Link to="/contacts">
           <ArrowLeft /> Contacts
         </Link>
       </Button>
@@ -43,12 +52,19 @@ export function ContactDetailPage() {
             {contact.city && <span>· {contact.city}</span>}
             <ContactStatusBadge status={contact.status} />
             {contact.dnc && <Badge variant="red">Do not call</Badge>}
-            {contact.source && <Badge variant="gray">{contact.source === "csv" ? "CSV import" : contact.source === "manual" ? "Manual lead" : contact.source}</Badge>}
+            {contact.owner && <span>· Owner: {personName(contact.owner)}</span>}
           </span>
         }
         actions={
           <>
             <CallButton variant="call" phone={contact.phoneE164} label={contact.name || contact.phoneE164} dncReason={contact.dnc?.reason} dnc={!!contact.dnc} />
+            <Button variant="outline" onClick={showMessage}>
+              <MessageCircle /> WhatsApp
+            </Button>
+            <FollowUpPick contact={contact} />
+            <Button variant="outline" onClick={() => setEditing(true)}>
+              <Pencil /> Edit
+            </Button>
             <DncAction contact={contact} />
           </>
         }
@@ -62,19 +78,144 @@ export function ContactDetailPage() {
           </AlertDescription>
         </Alert>
       )}
-      <div className="grid gap-4 lg:grid-cols-[22rem_1fr]">
-        <div className="space-y-4">
-          <EditCard key={JSON.stringify(contact)} detail={detail.data} />
-          <MessageCard contact={contact} />
-          <NoteCard contactId={contact.id} />
+      <div className="grid gap-4 lg:grid-cols-[1fr_22rem]">
+        <div className="min-w-0 space-y-4">
+          <LastCall items={timeline} />
+          <Timeline items={timeline} contactId={contact.id} />
         </div>
-        <Timeline items={timeline} />
+        <div id="message-card" className="space-y-2">
+          <MessageCard contact={contact} />
+          {contact.source && (
+            <p className="text-xs text-muted-foreground">
+              Added from {contact.source === "csv" ? "a CSV import" : contact.source === "manual" ? "a manual lead" : contact.source}
+            </p>
+          )}
+        </div>
       </div>
+      <Sheet open={editing} onOpenChange={setEditing}>
+        <SheetContent side="right" className="w-96 overflow-y-auto bg-background p-4 pt-5">
+          <SheetTitle className="text-lg font-semibold">Edit contact</SheetTitle>
+          <SheetDescription className="mb-3 text-sm text-muted-foreground">{contact.phoneE164}</SheetDescription>
+          <EditCard key={JSON.stringify(contact)} detail={detail.data} onSaved={() => setEditing(false)} />
+        </SheetContent>
+      </Sheet>
     </>
   );
 }
 
-function EditCard({ detail }: { detail: ContactDetail }) {
+/** Local time `days` from now at 10:00, the usual morning call slot. */
+function daysAt10(days: number) {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  d.setHours(10, 0, 0, 0);
+  return d.toISOString();
+}
+
+/** The one place to set the next follow-up: quick picks, or a date and time. */
+function FollowUpPick({ contact }: { contact: Contact }) {
+  const qc = useQueryClient();
+  const [picking, setPicking] = useState(false);
+  const [when, setWhen] = useState("");
+  const save = useMutation({
+    mutationFn: (nextFollowUpAt: string | null) => api(`/api/contacts/${contact.id}`, { method: "PATCH", body: { nextFollowUpAt } satisfies ContactPatch }),
+    onSuccess: () => {
+      setPicking(false);
+      void qc.invalidateQueries({ queryKey: ["contact", contact.id] });
+      void qc.invalidateQueries({ queryKey: ["contacts"] });
+    },
+  });
+  const fu = contact.nextFollowUpAt;
+  const overdue = isOverdue(fu);
+  return (
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" disabled={save.isPending} className={overdue ? "border-destructive text-destructive" : undefined}>
+            <CalendarClock /> {save.isPending ? "Saving…" : fu ? `Follow up ${formatWhen(fu)}${overdue ? " · overdue" : ""}` : "Set follow-up"}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem onSelect={() => save.mutate(daysAt10(1))}>Tomorrow</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => save.mutate(daysAt10(2))}>In 2 days</DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => save.mutate(daysAt10(7))}>Next week</DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => {
+              setWhen(toLocalInput(fu));
+              setPicking(true);
+            }}
+          >
+            Pick a date…
+          </DropdownMenuItem>
+          {fu && (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => save.mutate(null)}>Clear follow-up</DropdownMenuItem>
+            </>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {save.error && !picking && <span className="self-center text-sm text-destructive">{save.error.message}</span>}
+      <Dialog open={picking} onOpenChange={(o) => !save.isPending && setPicking(o)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Follow up on</DialogTitle>
+            <DialogDescription>Pick when to call {contact.name || contact.phoneE164} next.</DialogDescription>
+          </DialogHeader>
+          <div>
+            <Label htmlFor="fu-when">Date and time</Label>
+            <Input id="fu-when" type="datetime-local" value={when} onChange={(e) => setWhen(e.target.value)} />
+          </div>
+          <FormError error={save.error} />
+          <DialogFooter>
+            <Button variant="outline" disabled={save.isPending} onClick={() => setPicking(false)}>
+              Cancel
+            </Button>
+            <Button disabled={save.isPending || !when} onClick={() => save.mutate(fromLocalInput(when))}>
+              {save.isPending ? "Saving…" : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+type LastCallInfo = { id: string | null; when: string; user: { name: string | null; email: string }; summary: string | null; activity?: Extract<TimelineItem, { kind: "activity" }> };
+
+/** The latest call on top, so the rep sees what was said last before calling again. */
+function LastCall({ items }: { items: TimelineItem[] }) {
+  const calls: LastCallInfo[] = [];
+  for (const t of items) {
+    if (t.kind === "call") calls.push({ id: t.id, when: t.startedAt, user: t.user, summary: t.summary });
+    else if (t.type === "CALL") calls.push({ id: t.call?.id ?? t.callId ?? null, when: t.occurredAt, user: t.user, summary: t.call?.summary ?? null, activity: t });
+  }
+  const latest = calls.sort((a, b) => b.when.localeCompare(a.when))[0];
+  if (!latest) return null;
+  const a = latest.activity;
+  return (
+    <Card className="p-4">
+      <section aria-labelledby="lc-h">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 id="lc-h" className="font-semibold">
+            Last call
+          </h2>
+          {a?.outcome && a.outcomeLabel && <OutcomeChip label={a.outcomeLabel} color={a.outcomeColor} />}
+          {a?.outcome && !a.outcomeLabel && <Badge variant="gray">{OUTCOME_LABEL[a.outcome]}</Badge>}
+          {latest.id && (
+            <Link to={`/calls/${latest.id}`} className="ml-auto text-sm text-primary hover:underline">
+              Open call
+            </Link>
+          )}
+        </div>
+        <Meta when={latest.when} user={latest.user} />
+        {a?.note && <p className="mt-2 whitespace-pre-line text-sm">{a.note}</p>}
+        {latest.summary ? <Summary text={latest.summary} /> : !a?.note && <p className="mt-2 text-sm text-muted-foreground">No summary for this call.</p>}
+      </section>
+    </Card>
+  );
+}
+
+function EditCard({ detail, onSaved }: { detail: ContactDetail; onSaved: () => void }) {
   const me = useMe();
   const manager = isManager(me.role);
   const qc = useQueryClient();
@@ -83,7 +224,6 @@ function EditCard({ detail }: { detail: ContactDetail }) {
   const [company, setCompany] = useState(c.company ?? "");
   const [city, setCity] = useState(c.city ?? "");
   const [status, setStatus] = useState<ContactStatus>(c.status);
-  const [followUp, setFollowUp] = useState(toLocalInput(c.nextFollowUpAt));
   const [ownerId, setOwnerId] = useState(c.owner?.id ?? "");
   const users = useQuery({ queryKey: ["users"], queryFn: () => api<User[]>("/api/users"), enabled: manager });
   // Managers may only assign to themselves or their own team (the server enforces the same rule).
@@ -94,6 +234,7 @@ function EditCard({ detail }: { detail: ContactDetail }) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["contact", c.id] });
       void qc.invalidateQueries({ queryKey: ["contacts"] });
+      onSaved();
     },
   });
 
@@ -104,18 +245,13 @@ function EditCard({ detail }: { detail: ContactDetail }) {
     if (company.trim() !== (c.company ?? "")) body.company = company.trim() || null;
     if (city.trim() !== (c.city ?? "")) body.city = city.trim() || null;
     if (status !== c.status) body.status = status;
-    const fu = fromLocalInput(followUp);
-    if (followUp !== toLocalInput(c.nextFollowUpAt)) body.nextFollowUpAt = fu;
     if (manager && ownerId && ownerId !== (c.owner?.id ?? "")) body.ownerId = ownerId;
     if (Object.keys(body).length) save.mutate(body);
+    else onSaved();
   };
 
   return (
-    <Card className="p-4">
-    <form onSubmit={submit} className="space-y-3" aria-labelledby="edit-h">
-      <h2 id="edit-h" className="font-semibold">
-        Details
-      </h2>
+    <form onSubmit={submit} className="space-y-3" aria-label="Contact details">
       <div>
         <Label htmlFor="ct-name">
           Name
@@ -146,18 +282,6 @@ function EditCard({ detail }: { detail: ContactDetail }) {
           ))}
         </NativeSelect>
       </div>
-      <div>
-        <Label htmlFor="ct-fu">
-          Next follow-up
-        </Label>
-        <Input id="ct-fu" type="datetime-local" value={followUp} onChange={(e) => setFollowUp(e.target.value)} />
-        {isOverdue(c.nextFollowUpAt) && <p className="mt-1 text-xs text-muted-foreground font-medium text-destructive">Overdue since {formatWhen(c.nextFollowUpAt)}</p>}
-        {followUp && (
-          <Button variant="link" size="sm" className="h-auto min-h-9 px-0 text-xs" onClick={() => setFollowUp("")}>
-            Clear follow-up
-          </Button>
-        )}
-      </div>
       {manager ? (
         <div>
           <Label htmlFor="ct-owner">
@@ -178,63 +302,45 @@ function EditCard({ detail }: { detail: ContactDetail }) {
       )}
       <FormError error={save.error} />
       <Button type="submit" className="w-full" disabled={save.isPending}>
-        <Save /> {save.isPending ? "Saving…" : "Save details"}
+        <Save /> {save.isPending ? "Saving…" : "Save"}
       </Button>
     </form>
-    </Card>
   );
 }
 
-function NoteCard({ contactId }: { contactId: string }) {
+/** Inline note box at the top of the timeline. Follow-ups are set from the header, not here. */
+function NoteBox({ contactId }: { contactId: string }) {
   const qc = useQueryClient();
   const [note, setNote] = useState("");
-  const [followUp, setFollowUp] = useState("");
-  const followUpAt = fromLocalInput(followUp);
   const add = useMutation({
-    mutationFn: () =>
-      api<Activity>(`/api/contacts/${contactId}/notes`, {
-        method: "POST",
-        body: { note: note.trim(), ...(followUpAt ? { followUpAt } : {}) },
-      }),
+    mutationFn: () => api<Activity>(`/api/contacts/${contactId}/notes`, { method: "POST", body: { note: note.trim() } }),
     onSuccess: () => {
       setNote("");
-      setFollowUp("");
       void qc.invalidateQueries({ queryKey: ["contact", contactId] });
       void qc.invalidateQueries({ queryKey: ["contacts"] });
     },
   });
   return (
-    <Card className="p-4">
     <form
-      className="space-y-3"
-      aria-labelledby="note-h"
-      onSubmit={(e) => {
+      className="mb-4 space-y-2"
+      onSubmit={(e: FormEvent) => {
         e.preventDefault();
         if (note.trim()) add.mutate();
       }}
     >
-      <h2 id="note-h" className="font-semibold">
+      <Label className="sr-only" htmlFor="nt-text">
         Add a note
-      </h2>
-      <div>
-        <Label className="sr-only" htmlFor="nt-text">
-          Note
-        </Label>
-        <Textarea id="nt-text" className="min-h-24 py-2" maxLength={2000} required value={note} onChange={(e) => setNote(e.target.value)} />
-      </div>
-      <div>
-        <Label htmlFor="nt-fu">
-          Follow up on (optional)
-        </Label>
-        <Input id="nt-fu" type="datetime-local" value={followUp} onChange={(e) => setFollowUp(e.target.value)} />
-        <p className="mt-1 text-xs text-muted-foreground">Setting a date marks the contact as Call back.</p>
-      </div>
+      </Label>
+      <Textarea id="nt-text" className="min-h-16 py-2" maxLength={2000} placeholder="Add a note…" value={note} onChange={(e) => setNote(e.target.value)} />
       <FormError error={add.error} />
-      <Button type="submit" variant="outline" className="w-full" disabled={add.isPending || !note.trim()}>
-        <StickyNote /> {add.isPending ? "Adding…" : "Add note"}
-      </Button>
+      {note.trim() && (
+        <div className="flex justify-end">
+          <Button type="submit" size="sm" disabled={add.isPending}>
+            <StickyNote /> {add.isPending ? "Adding…" : "Add note"}
+          </Button>
+        </div>
+      )}
     </form>
-    </Card>
   );
 }
 
@@ -319,13 +425,14 @@ function DncAction({ contact }: { contact: Contact }) {
   );
 }
 
-function Timeline({ items }: { items: TimelineItem[] }) {
+function Timeline({ items, contactId }: { items: TimelineItem[]; contactId: string }) {
   return (
     <Card className="p-4">
     <section aria-labelledby="tl-h">
       <h2 id="tl-h" className="mb-3 font-semibold">
         Timeline
       </h2>
+      <NoteBox contactId={contactId} />
       {items.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nothing yet. Calls, messages and notes for this number will show up here.</p>
       ) : (

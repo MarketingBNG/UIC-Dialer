@@ -1,12 +1,12 @@
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { api, isManager, qs, type ContactFilter, type ContactFilterKey, type ContactListItem, type ContactPage, type ContactStatus, type User } from "../api";
 import { useMe } from "../App";
 import { CONTACT_STATUS_LABEL, formatShortWhen, isOverdue, personName } from "../format";
 import { CallButton } from "../dialer";
 import { ImportDialog, NewLeadDialog } from "../components/ContactDialogs";
-import { FileUp, ListPlus, Search, UserPlus, X } from "lucide-react";
+import { ChevronDown, FileUp, ListPlus, Search, SlidersHorizontal, UserPlus, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -15,7 +15,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { tabLinkClass, tabsListClass } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ContactStatusBadge, Empty, ErrorBox, PageHeader, Spinner } from "../ui";
 import type { NewListState } from "./Lists";
@@ -29,45 +28,21 @@ function useDebounced<T>(value: T, ms: number) {
   return v;
 }
 
-/** Sub-navigation shared by the Activity Tracker pages. */
-export function TrackerTabs() {
-  const me = useMe();
-  const [params] = useSearchParams();
-  const due = params.get("due");
-  const path = useLocation().pathname;
-  const cls = (active: boolean) => tabLinkClass({ isActive: active });
-  return (
-    <nav aria-label="Activity tracker" className={`${tabsListClass} mb-4`}>
-      <Link to="/activity" className={cls(path === "/activity" && !due)}>
-        All contacts
-      </Link>
-      <Link to="/activity?due=today" className={cls(path === "/activity" && due === "today")}>
-        Due today
-      </Link>
-      <Link to="/activity?due=overdue" className={cls(path === "/activity" && due === "overdue")}>
-        Overdue follow-ups
-      </Link>
-      {isManager(me.role) && (
-        <Link to="/team" className={cls(path === "/team")}>
-          Per rep
-        </Link>
-      )}
-    </nav>
-  );
-}
-
 const FILTER_KEYS = ["q", "ownerId", "status", "due", "filter"] as const;
-/** Quick buttons set the same params as the dropdowns, so the two can never disagree. */
-type Chip = { label: string; status?: ContactStatus; mine?: true; filter?: ContactFilterKey };
+/** Quick chips set the same params as the "More filters" dropdowns, so the two can never disagree. One chip at a time. */
+type Chip = { label: string; status?: ContactStatus; mine?: true; filter?: ContactFilterKey; due?: "today" | "overdue" };
 const CHIPS: Chip[] = [
   { label: "All" },
+  { label: "Due today", due: "today" },
+  { label: "Overdue", due: "overdue" },
   { label: "Interested", status: "INTERESTED" },
   { label: "Call back", status: "CALL_BACK" },
   { label: "Never called", filter: "never" },
-  { label: "Mine", mine: true },
+  { label: "My leads", mine: true },
 ];
+const DNC_CHIP: Chip = { label: "Do not call", filter: "dnc" };
 // Old links used ?filter= for these; read them as the matching status/owner.
-const LEGACY: Partial<Record<ContactFilterKey, Chip>> = { interested: CHIPS[1], callback: CHIPS[2], mine: CHIPS[4] };
+const LEGACY: Partial<Record<ContactFilterKey, Chip>> = { interested: CHIPS[3], callback: CHIPS[4], mine: CHIPS[6] };
 
 export function ContactsPage() {
   const me = useMe();
@@ -151,12 +126,16 @@ export function ContactsPage() {
 
   // A chip is lit when the current filters are exactly what it would set.
   const chipOn = (c: Chip) =>
-    (filters.status || "") === (c.status ?? "") && (filters.filter || "") === (c.filter ?? "") && (filters.ownerId || "") === (c.mine ? me.id : "");
+    (filters.status || "") === (c.status ?? "") &&
+    (filters.filter || "") === (c.filter ?? "") &&
+    (filters.ownerId || "") === (c.mine ? me.id : "") &&
+    (filters.due || "") === (c.due ?? "");
   const pickChip = (c: Chip) =>
     setParams(
       (p) => {
         const n = new URLSearchParams(p);
-        for (const k of ["status", "ownerId", "filter"]) n.delete(k);
+        for (const k of ["status", "ownerId", "filter", "due"]) n.delete(k);
+        if (c.due) n.set("due", c.due);
         if (c.status) n.set("status", c.status);
         if (c.filter) n.set("filter", c.filter);
         if (c.mine) n.set("ownerId", me.id);
@@ -172,6 +151,9 @@ export function ContactsPage() {
     filters.due && { key: "due", label: filters.due === "today" ? "Due today" : "Overdue", clear: () => set("due", "") },
     filters.filter && { key: "filter", label: filters.filter === "never" ? "Never called" : "Do not call", clear: () => set("filter", "") },
   ].filter(Boolean) as { key: string; label: string; clear: () => void }[];
+
+  // Owner/Status live behind "More filters"; open it when a link already uses them.
+  const [more, setMore] = useState(() => !!(params.get("status") || (params.get("ownerId") && params.get("ownerId") !== me.id)));
 
   const followUp = (iso: string | null) =>
     iso ? <span className={isOverdue(iso, now) ? "font-medium text-destructive" : ""}>{formatShortWhen(iso)}{isOverdue(iso, now) ? " · overdue" : ""}</span> : "—";
@@ -209,60 +191,57 @@ export function ContactsPage() {
           </>
         }
       />
-      <TrackerTabs />
-      <div role="group" aria-label="Quick filters" className="mb-3 flex flex-wrap gap-2">
-        {[...CHIPS, ...(manager ? [{ label: "Do not call", filter: "dnc" } as Chip] : [])].map((c) => {
-          const on = chipOn(c);
-          return (
-            <Button key={c.label} size="sm" variant={on ? "default" : "outline"} aria-pressed={on} className="rounded-full" onClick={() => pickChip(c)}>
-              {c.label}
-            </Button>
-          );
-        })}
-      </div>
-
       <Card className="mb-4 p-3 sm:p-4">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="sm:col-span-2 lg:col-span-1">
-            <Label htmlFor="c-q">Search</Label>
-            <div className="relative">
-              <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-              <Input id="c-q" type="search" className="pl-9" placeholder="Name, number, company, notes" value={q} onChange={(e) => setQ(e.target.value)} />
-            </div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative flex-1">
+            <Label htmlFor="c-q" className="sr-only">
+              Search
+            </Label>
+            <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input id="c-q" type="search" className="pl-9" placeholder="Search name, number, company, notes" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
-          {manager && (
+          <Button variant="outline" aria-expanded={more} aria-controls="c-more" onClick={() => setMore((m) => !m)}>
+            <SlidersHorizontal /> More filters <ChevronDown className={more ? "rotate-180 transition-transform" : "transition-transform"} />
+          </Button>
+        </div>
+        <div role="group" aria-label="Quick filters" className="mt-3 flex flex-wrap gap-2">
+          {[...CHIPS, ...(manager ? [DNC_CHIP] : [])].map((c) => {
+            const on = chipOn(c);
+            return (
+              <Button key={c.label} size="sm" variant={on ? "default" : "outline"} aria-pressed={on} className="rounded-full" onClick={() => pickChip(c)}>
+                {c.label}
+              </Button>
+            );
+          })}
+        </div>
+        {more && (
+          <div id="c-more" className="mt-3 grid grid-cols-1 gap-3 border-t pt-3 sm:grid-cols-2 lg:grid-cols-3">
+            {manager && (
+              <div>
+                <Label htmlFor="c-owner">Owner</Label>
+                <NativeSelect id="c-owner" value={get("ownerId")} onChange={(e) => set("ownerId", e.target.value)}>
+                  <option value="">Everyone</option>
+                  {users.data?.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {personName(u)}
+                    </option>
+                  ))}
+                </NativeSelect>
+              </div>
+            )}
             <div>
-              <Label htmlFor="c-owner">Customer owned by</Label>
-              <NativeSelect id="c-owner" value={get("ownerId")} onChange={(e) => set("ownerId", e.target.value)}>
-                <option value="">Everyone</option>
-                {users.data?.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {personName(u)}
+              <Label htmlFor="c-status">Status</Label>
+              <NativeSelect id="c-status" value={get("status")} onChange={(e) => set("status", e.target.value)}>
+                <option value="">Any status</option>
+                {(Object.keys(CONTACT_STATUS_LABEL) as ContactStatus[]).map((s) => (
+                  <option key={s} value={s}>
+                    {CONTACT_STATUS_LABEL[s]}
                   </option>
                 ))}
               </NativeSelect>
             </div>
-          )}
-          <div>
-            <Label htmlFor="c-status">Status</Label>
-            <NativeSelect id="c-status" value={get("status")} onChange={(e) => set("status", e.target.value)}>
-              <option value="">Any status</option>
-              {(Object.keys(CONTACT_STATUS_LABEL) as ContactStatus[]).map((s) => (
-                <option key={s} value={s}>
-                  {CONTACT_STATUS_LABEL[s]}
-                </option>
-              ))}
-            </NativeSelect>
           </div>
-          <div>
-            <Label htmlFor="c-due">Follow-up</Label>
-            <NativeSelect id="c-due" value={get("due")} onChange={(e) => set("due", e.target.value)}>
-              <option value="">Any time</option>
-              <option value="today">Due today</option>
-              <option value="overdue">Overdue</option>
-            </NativeSelect>
-          </div>
-        </div>
+        )}
         {activeChips.length > 0 && (
           <div className="mt-3 flex flex-wrap items-center gap-2" aria-label="Active filters">
             {activeChips.map((c) => (
@@ -297,7 +276,7 @@ export function ContactsPage() {
           <ul className="space-y-2 md:hidden">
             {items.map((c) => (
               <li key={c.id}>
-                <Link to={`/activity/contacts/${c.id}`} className="block rounded-xl border bg-card p-3 shadow-sm active:bg-muted">
+                <Link to={`/contacts/${c.id}`} className="block rounded-xl border bg-card p-3 shadow-sm active:bg-muted">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <div className="truncate font-medium">{c.name || c.phoneE164}</div>
@@ -328,7 +307,7 @@ export function ContactsPage() {
                       />
                     </TableHead>
                   )}
-                  {["Phone", "Name", "Company", "City", "Owner", "Status", "Last activity", "Next follow-up", ""].map((h, i) => (
+                  {["Contact", "Status", "Next follow-up", "Last activity", ""].map((h, i) => (
                     <TableHead key={i} scope="col">
                       {h || <span className="sr-only">Call</span>}
                     </TableHead>
@@ -343,20 +322,19 @@ export function ContactsPage() {
                         <Checkbox aria-label={`Select ${c.name || c.phoneE164}`} checked={selected.has(c.id)} onCheckedChange={(v) => toggle(c.id, v === true)} />
                       </TableCell>
                     )}
-                    <TableCell className="whitespace-nowrap">
-                      <Link to={`/activity/contacts/${c.id}`} className="font-medium text-primary hover:underline">
-                        {c.phoneE164}
+                    <TableCell className="max-w-80">
+                      <Link to={`/contacts/${c.id}`} className="block truncate font-medium text-primary hover:underline">
+                        {c.name || c.phoneE164}
                       </Link>
+                      <div className="truncate text-xs text-muted-foreground">
+                        {[c.name ? c.phoneE164 : null, c.company, c.city, manager && c.owner ? personName(c.owner) : null].filter(Boolean).join(" · ")}
+                      </div>
                     </TableCell>
-                    <TableCell className="max-w-48 truncate">{c.name || "—"}</TableCell>
-                    <TableCell className="max-w-48 truncate">{c.company || "—"}</TableCell>
-                    <TableCell className="max-w-32 truncate">{c.city || "—"}</TableCell>
-                    <TableCell className="max-w-40 truncate">{c.owner ? personName(c.owner) : "—"}</TableCell>
                     <TableCell>
                       <RowLabel c={c} />
                     </TableCell>
-                    <TableCell className="whitespace-nowrap">{c.lastActivityAt ? formatShortWhen(c.lastActivityAt) : "—"}</TableCell>
                     <TableCell className="whitespace-nowrap">{followUp(c.nextFollowUpAt)}</TableCell>
+                    <TableCell className="whitespace-nowrap">{c.lastActivityAt ? formatShortWhen(c.lastActivityAt) : "—"}</TableCell>
                     <TableCell className="py-1.5 text-right">
                       <CallButton phone={c.phoneE164} label={c.name || c.phoneE164} dncReason={c.dnc?.reason} dnc={!!c.dnc} />
                     </TableCell>

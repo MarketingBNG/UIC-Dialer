@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Call
-import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -66,7 +65,6 @@ import com.usaindiacfo.uicdialer.ui.admin.FirefliesBanner
 import com.usaindiacfo.uicdialer.ui.admin.ServerSettingsScreen
 import com.usaindiacfo.uicdialer.ui.admin.UsersScreen
 import com.usaindiacfo.uicdialer.ui.calls.CallDetailScreen
-import com.usaindiacfo.uicdialer.ui.calls.CallsScreen
 import com.usaindiacfo.uicdialer.ui.contacts.ContactsScreen
 import com.usaindiacfo.uicdialer.ui.dialer.Avatar
 import com.usaindiacfo.uicdialer.ui.dialer.ContactDetailScreen
@@ -147,9 +145,9 @@ private data class NavTab(val route: String, val label: String, val icon: ImageV
 
 private val TABS = listOf(
     NavTab(Routes.TODAY, "Today", Icons.Filled.Home),
-    NavTab(Routes.RECENTS, "Recents", Icons.Filled.DateRange),
-    NavTab(Routes.CONTACTS, "Contacts", Icons.Filled.Person),
+    // One Calls tab: "My phone" (call log) and "Recorded" (server) inside it.
     NavTab(Routes.CALLS, "Calls", Icons.Filled.Call),
+    NavTab(Routes.CONTACTS, "Contacts", Icons.Filled.Person),
 )
 private val TAB_ROUTES = TABS.map { it.route }.toSet()
 
@@ -202,11 +200,12 @@ fun AppNavigation(
         onOpenHandled()
     }
 
+    // No bottom bar on the keypad: dialling is a focused flow, Back returns to the tabs.
     val showBottom = route in TAB_ROUTES || route == Routes.CONTACT || route == Routes.CALL_DETAIL ||
-        route == Routes.LIST_SESSION || route == Routes.DIALER
+        route == Routes.LIST_SESSION || route == Routes.RECENTS
     val selectedTab = when (route) {
         in TAB_ROUTES -> route
-        Routes.CALL_DETAIL -> Routes.CALLS
+        Routes.CALL_DETAIL, Routes.RECENTS -> Routes.CALLS
         Routes.DIALER -> Routes.TODAY
         Routes.CONTACT, Routes.LIST_SESSION -> lastTab
         else -> null
@@ -305,7 +304,10 @@ fun AppNavigation(
                             DialerScreen(onOpenContact = { nav.navigate(Routes.contact(it)) })
                         }
                     }
-                    screen(Routes.RECENTS) { com.usaindiacfo.uicdialer.ui.recents.RecentsScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
+                    // Old "recents" route kept so a restored back stack still opens; it shows the merged Calls tab.
+                    screen(Routes.RECENTS) {
+                        com.usaindiacfo.uicdialer.ui.calls.CallsTab(onOpenCall = { nav.navigate(Routes.callDetail(it)) }, onOpenContact = { nav.navigate(Routes.contact(it)) })
+                    }
                     screen(Routes.CONTACTS) { ContactsScreen(onOpenContact = { nav.navigate(Routes.contact(it)) }) }
                     screen(Routes.CONTACT, arguments = listOf(navArgument("phone") { type = NavType.StringType })) {
                         ContactDetailScreen(phone = it.arguments?.getString("phone").orEmpty(), onBack = { nav.popBackStack() })
@@ -320,7 +322,9 @@ fun AppNavigation(
                             onOpenContact = { phone -> nav.navigate(Routes.contact(phone)) },
                         )
                     }
-                    screen(Routes.CALLS) { CallsScreen(onOpenCall = { nav.navigate(Routes.callDetail(it)) }) }
+                    screen(Routes.CALLS) {
+                        com.usaindiacfo.uicdialer.ui.calls.CallsTab(onOpenCall = { nav.navigate(Routes.callDetail(it)) }, onOpenContact = { nav.navigate(Routes.contact(it)) })
+                    }
                     screen(Routes.CALL_DETAIL, arguments = listOf(navArgument("id") { type = NavType.StringType })) {
                         CallDetailScreen(id = it.arguments?.getString("id").orEmpty(), onBack = { nav.popBackStack() })
                     }

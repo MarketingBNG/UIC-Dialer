@@ -33,6 +33,8 @@ data class ListSessionState(
     val error: String? = null,
     /** Outcome queued but not on the server yet for a while: show "Waiting for network". */
     val offline: Boolean = false,
+    /** The next contact came after a saved outcome: the screen counts down 5 s and dials it unless cancelled. */
+    val autoDial: Boolean = false,
 )
 
 /** Power-dial session over one call list: claim next, call, wait for the outcome to reach the server, advance. */
@@ -58,7 +60,11 @@ class ListSessionViewModel(private val c: AppContainer, val listId: String) : Vi
         apply { c.apiClient.nextInList(listId) }
     }
 
+    /** "Cancel" on the countdown: stay on this contact and wait for the rep. */
+    fun cancelAutoDial() = _state.update { it.copy(autoDial = false) }
+
     fun skip() {
+        _state.update { it.copy(autoDial = false) }
         val item = _state.value.item ?: run { next(); return }
         awaiting = null
         watch?.cancel()
@@ -95,7 +101,7 @@ class ListSessionViewModel(private val c: AppContainer, val listId: String) : Vi
 
     fun onDialed(clientId: String) {
         awaiting = clientId
-        _state.update { it.copy(phase = SessionPhase.WAIT_SHEET) }
+        _state.update { it.copy(phase = SessionPhase.WAIT_SHEET, autoDial = false) }
         watchOutcome()
     }
 
@@ -136,7 +142,10 @@ class ListSessionViewModel(private val c: AppContainer, val listId: String) : Vi
                     SessionAction.FETCH_NEXT -> {
                         awaiting = null
                         _state.update { it.copy(offline = false) }
+                        val prevId = _state.value.item?.id
                         apply { c.apiClient.nextInList(listId) }
+                        // Only a new contact after a finished call gets the countdown (a skipped sheet returns the same one).
+                        _state.update { it.copy(autoDial = it.phase == SessionPhase.READY && it.item != null && it.item.id != prevId && it.item.contact.dnc == null) }
                         return@launch
                     }
                 }

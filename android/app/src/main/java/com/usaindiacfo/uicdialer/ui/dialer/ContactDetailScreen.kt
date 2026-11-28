@@ -10,6 +10,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -76,6 +80,8 @@ data class ContactDetailState(
     val saving: Boolean = false,
     /** On the local hashed do-not-call list (covers contacts the server doesn't know yet). */
     val localDnc: Boolean = false,
+    /** AI summary of the newest transcribed call; shown first. */
+    val lastSummary: String? = null,
 )
 
 class ContactDetailViewModel(private val c: AppContainer, val phone: String) : ViewModel() {
@@ -85,12 +91,12 @@ class ContactDetailViewModel(private val c: AppContainer, val phone: String) : V
     fun load() = viewModelScope.launch {
         // Show the last saved copy at once; the network refresh then replaces it quietly.
         if (_state.value.contact == null) c.contactCache.contact(phone)?.let { saved ->
-            _state.update { it.copy(contact = saved.contact, activities = saved.activities) }
+            _state.update { it.copy(contact = saved.contact, activities = saved.activities, lastSummary = saved.lastSummary) }
         }
         _state.update { it.copy(loading = true, localDnc = c.dncCheck.isDnc(phone)) }
         try {
             val r = c.apiClient.contactByPhone(phone)
-            _state.update { it.copy(loading = false, contact = r.contact, activities = r.activities, error = null) }
+            _state.update { it.copy(loading = false, contact = r.contact, activities = r.activities, lastSummary = r.lastSummary, error = null) }
             c.contactCache.putContact(listOfNotNull(phone, r.contact?.phoneE164), r)
         } catch (e: IOException) {
             _state.update { it.copy(loading = false, error = friendlyError(e)) }
@@ -114,6 +120,14 @@ class ContactDetailViewModel(private val c: AppContainer, val phone: String) : V
         c.activityRepository.log(phone, ActivityType.NOTE, note = note, followUpAtMs = followUpAtMs)
         _state.update { it.copy(message = "Note saved; it syncs when online") }
         delay(2500) // let the worker send it, then show it in the list
+        load()
+    }
+
+    /** Quick follow-up from the header: logged as a short note so it syncs offline like any note. */
+    fun setFollowUp(atMs: Long) = viewModelScope.launch {
+        c.activityRepository.log(phone, ActivityType.NOTE, note = "Follow-up set", followUpAtMs = atMs)
+        _state.update { it.copy(message = "Follow-up set") }
+        delay(2500)
         load()
     }
 
@@ -155,7 +169,7 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
     var dncReason by remember { mutableStateOf("") }
     var templates by remember { mutableStateOf(false) }
     var note by remember { mutableStateOf("") }
-    var noteFollowUp by remember { mutableStateOf<Long?>(null) }
+    var editing by remember { mutableStateOf(false) }
     val contact = state.contact
     val number = contact?.phoneE164 ?: phone
 
@@ -166,6 +180,8 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
             actions = {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "More") }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                    if (contact != null) DropdownMenuItem(text = { Text("Edit name and company") }, onClick = { menu = false; editing = true })
+                    DropdownMenuItem(text = { Text("Send a message") }, onClick = { menu = false; templates = true })
                     DropdownMenuItem(
                         text = { Text("Mark do-not-call") },
                         enabled = state.contact?.dnc == null && !state.localDnc,
@@ -244,10 +260,14 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
                             onClick = { if (Dialer.whatsApp(context, number)) vm.logWhatsApp() },
                             modifier = Modifier.weight(1f).heightIn(min = 48.dp),
                         ) { Text("WhatsApp") }
-                        OutlinedButton(
-                            onClick = { templates = true },
-                            modifier = Modifier.weight(1f).heightIn(min = 48.dp),
-                        ) { Text("Message") }
+                    }
+                    // Follow-up quick pick: one tap for the usual gaps, Pick for an exact time.
+                    Text("Follow up", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("Tomorrow" to 1L, "2 days" to 2L, "Next week" to 7L).forEach { (label, days) ->
+                            AssistChip(onClick = { vm.setFollowUp(followUpInDays(days)) }, label = { Text(label) })
+                        }
+                        AssistChip(onClick = { pickFollowUp(context, null) { vm.setFollowUp(it) } }, label = { Text("Pick") })
                     }
                 }
             }
@@ -256,30 +276,22 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
 
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Add note", style = MaterialTheme.typography.titleSmall)
-                    OutlinedTextField(note, { note = it.take(2000) }, Modifier.fillMaxWidth(), label = { Text("Note") }, minLines = 2)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { pickFollowUp(context, noteFollowUp) { noteFollowUp = it } }) {
-                            Text(noteFollowUp?.let { "Follow up: ${formatWhen(context, it)}" } ?: "Follow-up (optional)")
-                        }
-                        if (noteFollowUp != null) TextButton(onClick = { noteFollowUp = null }) { Text("Clear") }
+            // Last call summary first: what the rep needs before calling back.
+            state.lastSummary?.takeIf { it.isNotBlank() }?.let { summary ->
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Last call", style = MaterialTheme.typography.titleSmall)
+                        Text(summary, style = MaterialTheme.typography.bodyMedium)
                     }
-                    Button(
-                        onClick = {
-                            vm.addNote(note, noteFollowUp)
-                            note = ""
-                            noteFollowUp = null
-                        },
-                        enabled = note.isNotBlank(),
-                    ) { Text("Save note") }
                 }
             }
 
             Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
                 Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Activity", style = MaterialTheme.typography.titleSmall)
+                    // Inline note box at the top of the timeline.
+                    OutlinedTextField(note, { note = it.take(2000) }, Modifier.fillMaxWidth(), placeholder = { Text("Add a note") }, minLines = 1)
+                    if (note.isNotBlank()) Button(onClick = { vm.addNote(note, null); note = "" }) { Text("Save note") }
                     if (state.activities.isEmpty() && !state.loading) Text("Nothing yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     state.activities.forEachIndexed { i, a ->
                         if (i > 0) HorizontalDivider()
@@ -304,18 +316,27 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
                 }
             }
 
-            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Details", style = MaterialTheme.typography.titleSmall)
-                    if (contact == null) {
-                        Text("Name and company can be added after the first call or note.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    } else {
-                        OutlinedTextField(name, { name = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("Name") }, singleLine = true)
-                        OutlinedTextField(company, { company = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("Company") }, singleLine = true)
-                        Button(onClick = { vm.save(name, company) }, enabled = !state.saving) { Text("Save details") }
-                    }
-                }
-            }
         }
     }
+    if (editing && contact != null) ModalBottomSheet(
+        onDismissRequest = { editing = false },
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Edit contact", style = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(name, { name = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("Name") }, singleLine = true)
+            OutlinedTextField(company, { company = it.take(200) }, Modifier.fillMaxWidth(), label = { Text("Company") }, singleLine = true)
+            Button(
+                onClick = { vm.save(name, company); editing = false },
+                enabled = !state.saving,
+                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            ) { Text("Save") }
+        }
+    }
+}
+
+/** [days] from today at 11:00 local, the same default time the date picker uses. */
+private fun followUpInDays(days: Long): Long {
+    val zone = java.time.ZoneId.systemDefault()
+    return java.time.LocalDate.now(zone).plusDays(days).atTime(11, 0).atZone(zone).toInstant().toEpochMilli()
 }

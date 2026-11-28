@@ -19,11 +19,14 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
+import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -63,7 +66,6 @@ import android.content.Context
 import android.net.Uri
 import android.os.Environment
 import android.widget.Toast
-import androidx.compose.material3.AssistChip
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import com.usaindiacfo.uicdialer.AppContainer
@@ -74,6 +76,26 @@ import kotlinx.coroutines.launch
 import com.usaindiacfo.uicdialer.data.api.ApiException
 import com.usaindiacfo.uicdialer.data.api.CallStatus
 import com.usaindiacfo.uicdialer.data.api.Direction
+
+/** The Calls tab: the phone's own call log ("My phone") and server calls ("Recorded") behind one switch. */
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+fun CallsTab(onOpenCall: (id: String) -> Unit, onOpenContact: (phone: String) -> Unit) {
+    var recorded by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    Column(Modifier.fillMaxSize()) {
+        androidx.compose.material3.SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+            listOf("My phone", "Recorded").forEachIndexed { i, label ->
+                SegmentedButton(
+                    selected = recorded == (i == 1),
+                    onClick = { recorded = i == 1 },
+                    shape = androidx.compose.material3.SegmentedButtonDefaults.itemShape(i, 2),
+                ) { Text(label) }
+            }
+        }
+        if (recorded) CallsScreen(onOpenCall)
+        else com.usaindiacfo.uicdialer.ui.recents.RecentsScreen(onOpenContact = onOpenContact)
+    }
+}
 
 @Composable
 fun CallsScreen(onOpenCall: (id: String) -> Unit) {
@@ -96,10 +118,11 @@ fun CallsScreen(onOpenCall: (id: String) -> Unit) {
     val list = if (offline || warming) cached else items
 
     Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = if (showPerson) 4.dp else 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         OutlinedTextField(
             value = filter.search,
             onValueChange = vm::setSearch,
-            modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 12.dp),
+            modifier = Modifier.weight(1f),
             placeholder = { Text("Name, company, number or words said") },
             leadingIcon = { Icon(Icons.Default.Search, null) },
             trailingIcon = {
@@ -108,10 +131,16 @@ fun CallsScreen(onOpenCall: (id: String) -> Unit) {
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
         )
-        FilterRow(filter, vm, showPerson, people.map { it.id to (it.name ?: it.email) }) {
-            // Managers / admins: CSV of the current filters, saved to Downloads (the server audit-logs it).
-            scope.launch { exportCsv(context, container, filter.toApi()) }
+        // Managers / admins: CSV of the current filters, saved to Downloads (the server audit-logs it). Rarely used, so in a menu.
+        if (showPerson) Box {
+            var more by remember { mutableStateOf(false) }
+            IconButton(onClick = { more = true }) { Icon(Icons.Default.MoreVert, "More") }
+            DropdownMenu(more, { more = false }) {
+                DropdownMenuItem({ Text("Export to CSV") }, { more = false; scope.launch { exportCsv(context, container, filter.toApi()) } })
+            }
         }
+        }
+        FilterRow(filter, vm, showPerson, people.map { it.id to (it.name ?: it.email) })
 
         if (offline) Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
             Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -139,7 +168,7 @@ fun CallsScreen(onOpenCall: (id: String) -> Unit) {
 }
 
 @Composable
-private fun FilterRow(f: CallsFilterState, vm: CallsViewModel, showPerson: Boolean, people: List<Pair<String, String>>, onExport: () -> Unit) {
+private fun FilterRow(f: CallsFilterState, vm: CallsViewModel, showPerson: Boolean, people: List<Pair<String, String>>) {
     var dirOpen by remember { mutableStateOf(false) }
     var dateOpen by remember { mutableStateOf(false) }
     var personOpen by remember { mutableStateOf(false) }
@@ -172,7 +201,6 @@ private fun FilterRow(f: CallsFilterState, vm: CallsViewModel, showPerson: Boole
         if (f.search.isNotEmpty() || f.direction != null || f.date != DatePreset.ALL || f.userId != null) {
             IconButton(onClick = vm::clearFilters) { Icon(Icons.Default.Close, "Clear filters") }
         }
-        if (showPerson) AssistChip(onClick = onExport, label = { Text("Export CSV") })
     }
 }
 
@@ -206,8 +234,12 @@ private fun CallList(
 ) {
     LazyColumn(Modifier.fillMaxSize()) {
         items(items.itemCount, key = items.itemKey { it.id }, contentType = { "call" }) { i ->
-            items[i]?.let { CallRowItem(it, showPerson) { onOpenCall(it.id) } }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            val row = items[i]
+            // Day header above the first call of each day (peek: no extra page loads).
+            val prev = if (i > 0) items.peek(i - 1) else null
+            if (row != null && (prev == null || dayOf(prev.startedAtMs) != dayOf(row.startedAtMs))) DayHeader(row.startedAtMs)
+            else HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            row?.let { CallRowItem(it, showPerson) { onOpenCall(it.id) } }
         }
         if (items.loadState.append is LoadState.Loading) item(key = "loading", contentType = "footer") {
             Box(Modifier.fillMaxWidth().padding(16.dp), Alignment.Center) { CircularProgressIndicator(Modifier.size(24.dp)) }
@@ -218,21 +250,53 @@ private fun CallList(
     }
 }
 
+private fun dayOf(ms: Long): LocalDate = java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+
+@Composable
+private fun DayHeader(ms: Long) {
+    val context = LocalContext.current
+    val day = dayOf(ms)
+    val today = LocalDate.now()
+    val label = when (day) {
+        today -> "Today"
+        today.minusDays(1) -> "Yesterday"
+        else -> DateUtils.formatDateTime(context, ms, DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_WEEKDAY or DateUtils.FORMAT_ABBREV_ALL)
+    }
+    Text(
+        label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp),
+    )
+}
+
 @Composable
 private fun CallRowItem(row: CallRow, showPerson: Boolean, onClick: () -> Unit) {
+    val context = LocalContext.current
     ListItem(
         modifier = Modifier.clickable(onClick = onClick),
         colors = androidx.compose.material3.ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.background),
         leadingContent = { DirectionIcon(row.direction) },
+        // Name on top, number under it (title is the number itself when there is no name).
         headlineContent = { Text(row.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
-            val parts = listOfNotNull(
-                row.subtitle,
-                DateUtils.getRelativeTimeSpanString(row.startedAtMs, System.currentTimeMillis(), DateUtils.MINUTE_IN_MILLIS).toString(),
-                row.durationS?.let(::formatDuration),
-                row.person.takeIf { showPerson },
-            )
-            Text(parts.joinToString(" · "), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Column {
+                row.subtitle?.let { Text(it, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                val parts = listOfNotNull(
+                    DateUtils.formatDateTime(context, row.startedAtMs, DateUtils.FORMAT_SHOW_TIME),
+                    row.durationS?.takeIf { it > 0 }?.let(::formatDuration),
+                    row.person.takeIf { showPerson },
+                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        parts.joinToString(" · "), style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+                    )
+                    // Small grey mark when the words of the call are ready to read.
+                    if (row.status == CallStatus.TRANSCRIBED) Icon(
+                        Icons.AutoMirrored.Filled.List, "Has transcript",
+                        tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
         },
         trailingContent = {
             Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {

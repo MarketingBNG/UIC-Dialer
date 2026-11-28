@@ -24,13 +24,12 @@ import {
   SkipForward,
   User,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ContactStatusBadge, Empty, ErrorBox, FormError, Hint, PageHeader, Spinner } from "../ui";
+import { CardSkeleton, ContactStatusBadge, EmptyState, ErrorBox, FormError, Hint, PageHeader, Pill } from "../ui";
 import { progressText } from "./Lists";
 
 const timeFmt = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
@@ -94,10 +93,11 @@ const remaining = (l: MyList) => l.progress.pending + l.progress.inProgress;
 /** The single label a queue entry shows ("3 missed calls" when merged), plus "+N more" for other merged items. */
 function GroupLabel({ group }: { group: Group }) {
   const { item, count, more } = group;
-  const variant = item.overdue || item.kind === "MISSED_CALL" ? "red" : item.kind === "NEW_LEAD" ? "green" : "blue";
+  // Red only for overdue (act now); a missed call is amber.
+  const tone = item.overdue ? "danger" : item.kind === "MISSED_CALL" ? "warning" : item.kind === "NEW_LEAD" ? "success" : "info";
   return (
     <>
-      {count ? <Badge variant={variant}>{count}</Badge> : <ItemLabel item={item} />}
+      {count ? <Pill tone={tone}>{count}</Pill> : <ItemLabel item={item} />}
       {more > 0 && <span className="text-xs text-muted-foreground">+{more} more</span>}
     </>
   );
@@ -105,11 +105,11 @@ function GroupLabel({ group }: { group: Group }) {
 
 /** The single label an item shows (overdue > missed call > due today > new lead). */
 function ItemLabel({ item }: { item: FollowUpItem }) {
-  if (item.overdue && item.kind !== "MISSED_CALL") return <Badge variant="red">Overdue</Badge>;
-  if (item.kind === "MISSED_CALL") return <Badge variant="red">Missed call</Badge>;
-  if (item.kind === "NEW_LEAD") return <Badge variant="green">New lead</Badge>;
+  if (item.overdue && item.kind !== "MISSED_CALL") return <Pill tone="danger">Overdue</Pill>;
+  if (item.kind === "MISSED_CALL") return <Pill tone="warning">Missed call</Pill>;
+  if (item.kind === "NEW_LEAD") return <Pill tone="success">New lead</Pill>;
   if (item.status) return <ContactStatusBadge status={item.status} />;
-  return <Badge variant="blue">Follow-up</Badge>;
+  return <Pill tone="info">Follow-up</Pill>;
 }
 
 function dueText(item: FollowUpItem) {
@@ -168,49 +168,43 @@ export function TodayPage() {
   const [next, ...rest] = queue;
 
   return (
-    <>
+    <div className="mx-auto max-w-3xl">
       <PageHeader title={greeting(me.name)} subtitle={`Today · ${dateFmt.format(new Date())}`} />
-      <div className="grid gap-5 lg:grid-cols-[1fr_20rem]">
-        <div className="min-w-0 space-y-5">
-          {fu.isPending || lists.isPending ? (
-            <Spinner label="Getting your next call" />
-          ) : fu.isError ? (
-            <ErrorBox error={fu.error} onRetry={() => void fu.refetch()} />
-          ) : !next ? (
-            <Empty
-              icon={<PartyPopper />}
-              action={
-                <Button variant="outline" asChild>
-                  <Link to="/activity">
-                    <User /> Browse contacts
-                  </Link>
-                </Button>
-              }
-            >
-              <h2 className="text-lg font-semibold text-foreground">All caught up</h2>
-              <p className="mt-1">
-                Follow-ups you set after a call, missed calls, new leads and your call lists show up here. Dial any number on the right, or pick someone from Contacts.
-              </p>
-            </Empty>
-          ) : next.kind === "fu" ? (
-            <FollowUpNext key={next.key} group={next.group} onCall={() => startCall(next.key)} onSkip={() => handle(next.key)} />
-          ) : (
-            <ListNext key={next.key} list={next.list} onFinished={() => handle(next.key)} />
-          )}
-          {rest.length > 0 && <UpNext entries={rest} onCall={startCall} onSkip={handle} />}
-        </div>
-        <div className="space-y-5">
-          <DialBox />
-          <TargetsCard />
-        </div>
+      <div className="space-y-6">
+        <DialBox />
+        <TargetsStrip />
+        {fu.isPending || lists.isPending ? (
+          <CardSkeleton lines={4} label="Getting your next call" />
+        ) : fu.isError ? (
+          <ErrorBox error={fu.error} onRetry={() => void fu.refetch()} />
+        ) : !next ? (
+          <EmptyState
+            icon={<PartyPopper />}
+            title="All caught up"
+            action={
+              <Button variant="outline" asChild>
+                <Link to="/contacts">
+                  <User /> Browse contacts
+                </Link>
+              </Button>
+            }
+          >
+            Dial a number above. Follow-ups, missed calls, new leads and call lists show up here.
+          </EmptyState>
+        ) : next.kind === "fu" ? (
+          <FollowUpNext key={next.key} group={next.group} onCall={() => startCall(next.key)} onSkip={() => handle(next.key)} />
+        ) : (
+          <ListNext key={next.key} list={next.list} onFinished={() => handle(next.key)} />
+        )}
+        {rest.length > 0 && <UpNext entries={rest} onCall={startCall} onSkip={handle} />}
       </div>
-    </>
+    </div>
   );
 }
 
 function Avatar({ name, phone }: { name: string | null; phone: string }) {
   return (
-    <span aria-hidden className="grid size-14 shrink-0 place-items-center rounded-full bg-secondary text-lg font-semibold text-secondary-foreground">
+    <span aria-hidden className="grid size-14 shrink-0 place-items-center rounded-full bg-card text-lg font-semibold text-primary ring-1 ring-border">
       {initials(name, phone)}
     </span>
   );
@@ -218,9 +212,9 @@ function Avatar({ name, phone }: { name: string | null; phone: string }) {
 
 function NextCard({ children, aside }: { children: ReactNode; aside?: ReactNode }) {
   return (
-    <Card role="region" aria-labelledby="next-h" className="border-primary/30 p-5 shadow-md ring-1 ring-primary/10 sm:p-6">
+    <Card role="region" aria-labelledby="next-h" className="gap-0 border-primary/20 bg-primary-soft p-4 shadow-sm sm:p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 id="next-h" className="text-xs font-semibold uppercase tracking-wide text-primary">
+        <h2 id="next-h" className="text-sm font-semibold text-primary">
           Next up
         </h2>
         {aside}
@@ -232,7 +226,7 @@ function NextCard({ children, aside }: { children: ReactNode; aside?: ReactNode 
 
 function BigCall({ onClick, text = "Call" }: { onClick: () => void; text?: string }) {
   return (
-    <Button variant="call" size="lg" className="min-h-14 w-full text-lg" onClick={onClick}>
+    <Button variant="call" size="lg" className="h-12 w-full" onClick={onClick}>
       <Phone className="size-5" aria-hidden />
       {text}
     </Button>
@@ -265,11 +259,11 @@ function FollowUpNext({ group, onCall, onSkip }: { group: Group; onCall: () => v
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             {item.contactId ? (
-              <Link to={`/activity/contacts/${item.contactId}`} className="truncate text-xl font-semibold hover:underline">
+              <Link to={`/contacts/${item.contactId}`} className="truncate text-2xl font-semibold tracking-tight hover:underline">
                 {label}
               </Link>
             ) : (
-              <span className="truncate text-xl font-semibold">{label}</span>
+              <span className="truncate text-2xl font-semibold tracking-tight">{label}</span>
             )}
             <GroupLabel group={group} />
           </div>
@@ -277,14 +271,14 @@ function FollowUpNext({ group, onCall, onSkip }: { group: Group; onCall: () => v
         </div>
       </div>
       {item.lastNote && (
-        <div className="mt-4 rounded-lg bg-muted p-3 text-sm">
-          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Last note</div>
+        <div className="mt-4 rounded-lg bg-card p-3 text-sm ring-1 ring-border">
+          <div className="text-xs font-medium text-muted-foreground">Last note</div>
           <p className="mt-1 whitespace-pre-line">{item.lastNote}</p>
         </div>
       )}
       <div className="mt-5">
         {onThisCall ? (
-          <Button size="lg" className="min-h-14 w-full text-lg" onClick={dialer.openOutcome}>
+          <Button size="lg" className="h-12 w-full" onClick={dialer.openOutcome}>
             <ClipboardCheck className="size-5" /> Log outcome
           </Button>
         ) : (
@@ -359,7 +353,7 @@ function ListNext({ list, onFinished }: { list: MyList; onFinished: () => void }
   if (next.isPending)
     return (
       <NextCard aside={aside}>
-        <Spinner label="Getting the next number" />
+        <p className="mt-3 text-sm text-muted-foreground" role="status">Getting the next number…</p>
       </NextCard>
     );
   if (next.isError) {
@@ -392,10 +386,10 @@ function ListNext({ list, onFinished }: { list: MyList; onFinished: () => void }
         <Avatar name={c.name} phone={c.phoneE164} />
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <Link to={`/activity/contacts/${c.id}`} className="truncate text-xl font-semibold hover:underline">
+            <Link to={`/contacts/${c.id}`} className="truncate text-2xl font-semibold tracking-tight hover:underline">
               {label}
             </Link>
-            {c.dnc ? <Badge variant="red">Do not call</Badge> : <ContactStatusBadge status={c.status} />}
+            {c.dnc ? <Pill tone="danger">Do not call</Pill> : <ContactStatusBadge status={c.status} />}
           </div>
           <div className="truncate text-sm text-muted-foreground">
             {[c.name ? c.phoneE164 : null, c.company, c.city].filter(Boolean).join(" · ")}
@@ -404,13 +398,13 @@ function ListNext({ list, onFinished }: { list: MyList; onFinished: () => void }
         </div>
       </div>
       {it.lastOutcome && (
-        <div className="mt-4 rounded-lg bg-muted p-3 text-sm">
-          <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Last outcome</span> {it.lastOutcome.label}
+        <div className="mt-4 rounded-lg bg-card p-3 text-sm ring-1 ring-border">
+          <span className="text-xs font-medium text-muted-foreground">Last outcome:</span> {it.lastOutcome.label}
         </div>
       )}
       <div className="mt-5">
         {onThisCall ? (
-          <Button size="lg" className="min-h-14 w-full text-lg" onClick={dialer.openOutcome}>
+          <Button size="lg" className="h-12 w-full" onClick={dialer.openOutcome}>
             <ClipboardCheck className="size-5" /> Log outcome
           </Button>
         ) : (
@@ -431,12 +425,12 @@ function ListNext({ list, onFinished }: { list: MyList; onFinished: () => void }
       </div>
       <FormError error={skip.error} />
       {script && script.sections.length > 0 && (
-        <details className="mt-4 rounded-lg border p-3" open>
+        <details className="mt-4 rounded-lg border bg-card p-3" open>
           <summary className="flex min-h-11 cursor-pointer items-center font-semibold">Script · {script.name}</summary>
           <div className="mt-2 space-y-3">
             {script.sections.map((s, i) => (
               <div key={i}>
-                <div className="text-xs font-bold uppercase tracking-wide text-primary">{s.heading}</div>
+                <div className="text-sm font-semibold text-primary">{s.heading}</div>
                 <p className="mt-1 whitespace-pre-line text-sm">{s.text}</p>
               </div>
             ))}
@@ -453,10 +447,10 @@ function UpNext({ entries, onCall, onSkip }: { entries: Entry[]; onCall: (key: s
   const shown = all ? entries : entries.slice(0, SHORT_LIST);
   return (
     <section aria-labelledby="upnext-h">
-      <h2 id="upnext-h" className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+      <h2 id="upnext-h" className="mb-3 text-h2 font-semibold">
         Up next · {entries.length}
       </h2>
-      <Card className="divide-y overflow-hidden p-0">
+      <Card className="gap-0 overflow-hidden p-0">
         <ul className="divide-y">
           <AnimatePresence initial={false}>
           {shown.map((e) => (e.kind === "fu" ? <FollowUpRow key={e.key} group={e.group} onCall={() => onCall(e.key)} onSkip={() => onSkip(e.key)} /> : <ListRow key={e.key} list={e.list} />))}
@@ -486,7 +480,7 @@ function FollowUpRow({ group, onCall, onSkip }: { group: Group; onCall: () => vo
     actions.push({ label: "Snooze 1 hour", icon: BellOff, onSelect: () => patch.mutate({ action: "snooze", until: new Date(Date.now() + SNOOZE_MS).toISOString() }) });
   }
   actions.push({ label: "Skip for now", icon: SkipForward, onSelect: onSkip });
-  if (item.contactId) actions.push({ label: "Open contact", icon: User, to: `/activity/contacts/${item.contactId}` });
+  if (item.contactId) actions.push({ label: "Open contact", icon: User, to: `/contacts/${item.contactId}` });
 
   return (
     <RowShell>
@@ -535,7 +529,7 @@ function ListRow({ list }: { list: MyList }) {
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate font-medium">{list.name}</span>
-          <Badge variant="blue">Call list</Badge>
+          <Pill tone="info">Call list</Pill>
         </div>
         <div className="text-sm tabular-nums text-muted-foreground">{progressText(list.progress)} done</div>
       </div>
@@ -602,36 +596,33 @@ function DialBox() {
   };
   const matches = q.length >= 3 ? (search.data?.items ?? []) : [];
   return (
-    <Card role="region" aria-labelledby="dial-h">
-      <CardHeader className="pb-0">
-        <CardTitle id="dial-h" className="flex items-center gap-2 text-base">
-          <Phone aria-hidden className="size-4 text-muted-foreground" /> Dial a number
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="pt-3">
+    <Card role="search" aria-label="Dial a number" className="gap-0 p-3 sm:p-4">
       <form onSubmit={submit} className="flex gap-2">
         <Label htmlFor="dial-num" className="sr-only">
           Number or name
         </Label>
-        <Input
-          id="dial-num"
-          className="min-w-0 flex-1"
-          inputMode="tel"
-          autoComplete="off"
-          maxLength={40}
-          placeholder="Number or name"
-          value={number}
-          onChange={(e) => setNumber(e.target.value)}
-        />
-        <Button type="submit" variant="outline" disabled={!cleanNumber(number)}>
-          <Phone className="text-success" /> Call
+        <div className="relative min-w-0 flex-1">
+          <Phone aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            id="dial-num"
+            className="h-12 pl-9 text-base"
+            inputMode="tel"
+            autoComplete="off"
+            maxLength={40}
+            placeholder="Dial a number or search a name"
+            value={number}
+            onChange={(e) => setNumber(e.target.value)}
+          />
+        </div>
+        <Button type="submit" variant="call" size="lg" className="h-12" disabled={!cleanNumber(number)}>
+          <Phone /> Call
         </Button>
       </form>
       {matches.length > 0 && (
         <ul className="mt-2 divide-y" aria-label="Matching contacts">
           {matches.map((c) => (
             <li key={c.id} className="flex items-center gap-2 py-1">
-              <Link to={`/activity/contacts/${c.id}`} className="min-w-0 flex-1 truncate text-sm hover:underline">
+              <Link to={`/contacts/${c.id}`} className="min-w-0 flex-1 truncate text-sm hover:underline">
                 <span className="font-medium">{c.name || c.phoneE164}</span>
                 {c.name && <span className="text-muted-foreground"> · {c.phoneE164}</span>}
               </Link>
@@ -641,45 +632,44 @@ function DialBox() {
         </ul>
       )}
       {!isDesktopApp() && <Hint className="mt-2">In a browser, calls need Windows Phone Link set as the app for phone links.</Hint>}
-      </CardContent>
     </Card>
   );
 }
 
-function TargetBar({ label, value, target, pct }: { label: string; value: string; target: number | null; pct: number | null }) {
+/** One small stat tile: "14 of 40", with a thin bar when a target is set. */
+function StatTile({ label, value, target, pct }: { label: string; value: number; target: number | null; pct: number | null }) {
   return (
-    <div>
-      <div className="flex items-baseline justify-between text-sm">
-        <span className="text-muted-foreground">{label}</span>
-        <span className="font-semibold tabular-nums">
-          {value}
-          {target != null && <span className="font-normal text-muted-foreground"> / {target}</span>}
-        </span>
+    <Card className="gap-1 p-4">
+      <div className="text-sm text-muted-foreground">{label}</div>
+      <div className="text-2xl font-semibold tabular-nums">
+        {value}
+        {target != null && <span className="text-base font-normal text-muted-foreground"> of {target}</span>}
       </div>
       {pct != null && (
-        <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={label} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
-          <div className={`h-full rounded-full ${pct >= 100 ? "bg-call" : "bg-brand-600"}`} style={{ width: `${Math.min(100, pct)}%` }} />
+        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={label} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+          <div className={`h-full rounded-full ${pct >= 100 ? "bg-success" : "bg-primary"}`} style={{ width: `${Math.min(100, pct)}%` }} />
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
-/** My numbers today against my daily targets (bars only when a target is set). */
-function TargetsCard() {
+/** My numbers today against my daily targets, as a small strip above the queue. */
+function TargetsStrip() {
   const q = useQuery({ queryKey: ["me-today"], queryFn: () => api<MeToday>("/api/me/today"), refetchInterval: 60_000 });
   if (!q.data) return null;
   const d = q.data;
   return (
-    <Card role="region" aria-labelledby="targets-h" className="space-y-3 p-5">
-      <h2 id="targets-h" className="font-semibold">
-        My day
-      </h2>
-      <TargetBar label="Calls" value={String(d.calls)} target={d.target.callsPerDay} pct={d.progress.callsPct} />
-      <TargetBar label="Talk time (min)" value={String(Math.floor(d.talkTimeS / 60))} target={d.target.talkMinPerDay} pct={d.progress.talkPct} />
-      <p className="text-xs text-muted-foreground">
-        {d.connected} connected · {formatDuration(d.talkTimeS)} talk · {d.messages} messages
-      </p>
-    </Card>
+    <section aria-label="My day" className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <StatTile label="Calls" value={d.calls} target={d.target.callsPerDay} pct={d.progress.callsPct} />
+      <StatTile label="Talk time (min)" value={Math.floor(d.talkTimeS / 60)} target={d.target.talkMinPerDay} pct={d.progress.talkPct} />
+      <Card className="col-span-2 gap-1 p-4 sm:col-span-1">
+        <div className="text-sm text-muted-foreground">Connected</div>
+        <div className="text-2xl font-semibold tabular-nums">{d.connected}</div>
+        <div className="text-xs text-muted-foreground">
+          {formatDuration(d.talkTimeS)} talk · {d.messages} messages
+        </div>
+      </Card>
+    </section>
   );
 }
