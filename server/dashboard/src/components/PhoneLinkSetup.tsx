@@ -49,6 +49,7 @@ function Row({ label, value, ok }: { label: string; value: string; ok: boolean }
 export function PhoneStatusCard() {
   const d = desktop();
   const [open, setOpen] = useState(false);
+  const [showSteps, setShowSteps] = useState(false);
   const me = useQuery({ queryKey: ["me-phone"], queryFn: () => api<PhoneStatus>("/api/me/phone"), refetchInterval: 60_000 });
   const status = useQuery({
     queryKey: ["phone-link-status"],
@@ -67,7 +68,9 @@ export function PhoneStatusCard() {
   const p = me.data;
   const installed = status.data?.installed;
   const connected = (phone.data?.phones ?? 0) > 0;
-  const phoneText = !p.lastSeenAt ? "Not signed in" : p.online ? `Online · seen ${shortAgo(p.lastSeenAt)}` : `Offline · ${shortAgo(p.lastSeenAt)}`;
+  // Set up: phone listens for laptop calls, and (in the Windows app) Phone Link is installed.
+  const ready = connected && (!d || installed === true);
+  const phoneText =!p.lastSeenAt ? "Not signed in" : p.online ? `Online · seen ${shortAgo(p.lastSeenAt)}` : `Offline · ${shortAgo(p.lastSeenAt)}`;
 
   return (
     <>
@@ -91,9 +94,11 @@ export function PhoneStatusCard() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Call from this PC</DialogTitle>
+            <DialogTitle>{ready ? "Calling from this PC is ready" : "Call from this PC"}</DialogTitle>
             <DialogDescription>
-              Phone Link dials on your work phone and brings the call to this PC. Set it up once on each PC.
+              {ready
+                ? "Your work phone dials, and Phone Link brings the call to this PC."
+                : "Phone Link dials on your work phone and brings the call to this PC. Set it up once on each PC."}
             </DialogDescription>
           </DialogHeader>
           <div className="flex items-center gap-2 text-sm">
@@ -115,15 +120,26 @@ export function PhoneStatusCard() {
               </>
             )}
           </div>}
-          <ol className="list-decimal space-y-2 pl-5 text-sm">
-            {STEPS.map((s) => (
-              <li key={s}>{s}</li>
-            ))}
-          </ol>
-          <p className="text-xs text-muted-foreground">
-            Incoming calls: Phone Link shows Answer on this PC, and this app shows who is calling from your contacts.
-          </p>
-          <DialogFooter>
+          {ready && !showSteps ? (
+            <p className="text-sm text-muted-foreground">You're all set. Press Call on any contact and your phone dials it.</p>
+          ) : (
+            <>
+              <ol className="list-decimal space-y-2 pl-5 text-sm">
+                {STEPS.map((s) => (
+                  <li key={s}>{s}</li>
+                ))}
+              </ol>
+              <p className="text-xs text-muted-foreground">
+                Incoming calls: Phone Link shows Answer on this PC, and this app shows who is calling from your contacts.
+              </p>
+            </>
+          )}
+          <DialogFooter className="gap-2">
+            {ready && (
+              <Button variant="ghost" onClick={() => setShowSteps((v) => !v)}>
+                {showSteps ? "Hide setup steps" : "Show setup steps"}
+              </Button>
+            )}
             {!d ? null : installed ? (
               <Button onClick={() => void d.openPhoneLink()}>Open Phone Link</Button>
             ) : (
