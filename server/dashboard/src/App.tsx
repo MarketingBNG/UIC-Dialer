@@ -6,7 +6,7 @@ import { useReducedMotion } from "motion/react";
 import { animate } from "motion/mini";
 import { BASE } from "@/lib/motion";
 import type * as React from "react";
-import { Download, History, LogOut, PhoneCall, Settings2, Users, type LucideIcon } from "lucide-react";
+import { Download, History, ListChecks, LogOut, PhoneCall, Settings2, Users, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import {
   Sidebar,
@@ -21,7 +21,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { NavLink, Navigate, Route, Routes, useLocation } from "react-router";
+import { NavLink, Navigate, Route, Routes, useLocation, useParams } from "react-router";
 import { ApiError, api, isManager, type Me } from "./api";
 import { FirefliesBanner } from "./components/Fireflies";
 import { QuickSearch, QuickSearchButton, useQuickSearchShortcut } from "./components/QuickSearch";
@@ -88,21 +88,29 @@ export function App() {
   );
 }
 
-/** Reps see three pages; admins and managers get one more entry, Admin, that holds everything else. */
+/** Everyone sees Today, Contacts, Calls and Lists; admins and managers get one more entry, Admin, that holds everything else. */
 function navItems(me: Me) {
   const items: { to: string; label: string; end?: boolean; also?: string[] }[] = [
     { to: "/today", label: "Today" },
-    { to: "/activity", label: "Contacts", end: true },
+    { to: "/contacts", label: "Contacts" },
     { to: "/calls", label: "Calls" },
+    { to: "/lists", label: "Call lists" },
   ];
   if (isManager(me.role)) items.push({ to: "/admin", label: "Admin", also: ADMIN_PATHS });
   return items;
 }
 
 /** Pages that live under Admin (the Admin entry stays highlighted on them). */
-const ADMIN_PATHS = ["/lists", "/team", "/health", "/users", "/settings", "/audit"];
+const ADMIN_PATHS = ["/team", "/health", "/users", "/settings", "/audit"];
 
-const NAV_ICON: Record<string, LucideIcon> = { "/today": PhoneCall, "/activity": Users, "/calls": History, "/admin": Settings2 };
+const NAV_ICON: Record<string, LucideIcon> = { "/today": PhoneCall, "/contacts": Users, "/calls": History, "/lists": ListChecks, "/admin": Settings2 };
+
+/** Old /activity links (bookmarks, other pages) keep working: same page under /contacts, filters kept. */
+function ActivityRedirect() {
+  const { id } = useParams();
+  const { search } = useLocation();
+  return <Navigate to={`/contacts${id ? `/${id}` : ""}${search}`} replace />;
+}
 
 function Shell({ me }: { me: Me }) {
   const qc = useQueryClient();
@@ -130,8 +138,8 @@ function Shell({ me }: { me: Me }) {
   const { pathname } = useLocation();
   const role = me.role.charAt(0) + me.role.slice(1).toLowerCase();
   const logo = (
-    <span className="flex items-center gap-2 font-semibold text-white">
-      <span aria-hidden className="grid size-8 place-items-center rounded-lg bg-sidebar-primary text-xs">
+    <span className="flex items-center gap-2 font-semibold text-foreground">
+      <span aria-hidden className="grid size-8 place-items-center rounded-md bg-sidebar-primary text-xs text-sidebar-primary-foreground">
         UIC
       </span>
       UIC Dialer
@@ -140,7 +148,7 @@ function Shell({ me }: { me: Me }) {
 
   return (
     <SidebarProvider>
-      <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-white focus:p-2">
+      <a href="#main" className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded focus:bg-card focus:p-2">
         Skip to content
       </a>
       <AppSidebar me={me} role={role} items={items} pathname={pathname} logo={logo} logout={() => logout.mutate()} loggingOut={logout.isPending} onSearch={() => setSearchOpen(true)} />
@@ -153,11 +161,11 @@ function Shell({ me }: { me: Me }) {
         }}
       />
       <SidebarInset>
-        {/* Small screens: navy top bar; the menu opens the sidebar as a sheet. */}
-        <header className="sticky top-0 z-30 bg-sidebar pt-[env(safe-area-inset-top)] md:hidden">
+        {/* Small screens: light top bar; the menu opens the sidebar as a sheet. */}
+        <header className="sticky top-0 z-30 border-b bg-sidebar pt-[env(safe-area-inset-top)] md:hidden">
           <div className="flex h-14 items-center gap-3 px-4">
             {logo}
-            <SidebarTrigger className="ml-auto text-white hover:bg-white/10 hover:text-white" />
+            <SidebarTrigger className="ml-auto text-foreground hover:bg-muted" />
           </div>
         </header>
         <div id="main" className="mx-auto w-full max-w-6xl px-4 py-6 pb-[max(1.5rem,env(safe-area-inset-bottom))] md:px-8">
@@ -169,8 +177,10 @@ function Shell({ me }: { me: Me }) {
           <Route path="/dialer" element={<Navigate to="/today" replace />} />
           <Route path="/calls" element={<CallsPage />} />
           <Route path="/calls/:id" element={<CallDetailPage />} />
-          <Route path="/activity" element={<ContactsPage />} />
-          <Route path="/activity/contacts/:id" element={<ContactDetailPage />} />
+          <Route path="/contacts" element={<ContactsPage />} />
+          <Route path="/contacts/:id" element={<ContactDetailPage />} />
+          <Route path="/activity" element={<ActivityRedirect />} />
+          <Route path="/activity/contacts/:id" element={<ActivityRedirect />} />
           <Route path="/lists" element={<ListsPage />} />
           <Route path="/lists/:id" element={<ListDetailPage />} />
           <Route path="/lists/:id/work" element={<ListSessionPage />} />
@@ -232,7 +242,9 @@ function AppSidebar({
     <Sidebar title="UIC Dialer menu">
       <SidebarHeader>
         {logo}
-        <PhoneStatusCard />
+        <div className="sidebar-ink">
+          <PhoneStatusCard />
+        </div>
         <QuickSearchButton
           onOpen={() => {
             setOpenMobile(false);
@@ -262,8 +274,8 @@ function AppSidebar({
         </nav>
       </SidebarContent>
       <SidebarFooter>
-        <div className="px-3 text-xs text-white/80">
-          <div className="truncate font-medium text-white">{me.name || me.email}</div>
+        <div className="px-3 text-xs text-muted-foreground">
+          <div className="truncate font-medium text-foreground">{me.name || me.email}</div>
           <div>
             {role}
             {me.team ? ` · ${me.team}` : ""}

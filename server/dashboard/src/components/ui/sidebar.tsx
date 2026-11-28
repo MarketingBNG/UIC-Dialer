@@ -44,7 +44,7 @@ function Sidebar({ className, children, title = "Menu", ...props }: React.Compon
       <div className="hidden w-(--sidebar-width) shrink-0 md:block" aria-hidden />
       <div
         data-slot="sidebar"
-        className={cn("fixed inset-y-0 left-0 z-30 hidden w-(--sidebar-width) flex-col bg-sidebar text-sidebar-foreground md:flex", className)}
+        className={cn("fixed inset-y-0 left-0 z-30 hidden w-(--sidebar-width) flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground md:flex", className)}
         {...props}
       >
         {children}
@@ -106,7 +106,7 @@ function SidebarMenuButton({ asChild = false, isActive = false, className, ...pr
       data-slot="sidebar-menu-button"
       data-active={isActive}
       className={cn(
-        "flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-sidebar-foreground outline-none transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground [&>svg]:size-4 [&>svg]:shrink-0",
+        "flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-lg px-3 text-left text-sm font-medium text-sidebar-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:opacity-50 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground data-[active=true]:font-semibold data-[active=true]:shadow-[inset_3px_0_0_var(--sidebar-primary)] [&>svg]:size-4 [&>svg]:shrink-0",
         className,
       )}
       {...props}

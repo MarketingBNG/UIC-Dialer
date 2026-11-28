@@ -4,11 +4,11 @@ import { CALL_STATUSES, callRowStatusText, callStatusText } from "../dashboard/s
 describe("dashboard call status words", () => {
   it("maps every server state to a plain label with an explanation", () => {
     expect(CALL_STATUSES.map((s) => callStatusText(s).label)).toEqual([
-      "Waiting for phone",
-      "Uploaded",
-      "Transcribing",
+      "Waiting to upload",
+      "Working on transcript",
+      "Working on transcript",
       "Transcript ready",
-      "No transcript",
+      "No transcript – audio kept",
       "No recording",
     ]);
     for (const s of CALL_STATUSES) {
@@ -20,7 +20,7 @@ describe("dashboard call status words", () => {
   it("says what happened to a call with no recording", () => {
     expect(callRowStatusText("NO_RECORDING", "MISSED").label).toBe("Missed");
     expect(callRowStatusText("NO_RECORDING", "REJECTED").label).toBe("Rejected");
-    expect(callRowStatusText("NO_RECORDING", "OUTGOING", "OUTGOING", 0).label).toBe("Not answered");
+    expect(callRowStatusText("NO_RECORDING", "OUTGOING", "OUTGOING", 0).label).toBe("No answer");
     expect(callRowStatusText("NO_RECORDING", "INCOMING", "INCOMING", 40).label).toBe("No recording");
     expect(callRowStatusText("TRANSCRIBED", "MISSED").label).toBe("Transcript ready");
   });

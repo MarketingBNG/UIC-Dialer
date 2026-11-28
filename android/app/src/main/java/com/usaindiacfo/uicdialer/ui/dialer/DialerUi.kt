@@ -29,6 +29,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.usaindiacfo.uicdialer.data.api.ContactStatus
+import com.usaindiacfo.uicdialer.ui.common.Pill
+import com.usaindiacfo.uicdialer.ui.common.PillTone
 import com.usaindiacfo.uicdialer.ui.theme.UicColors
 
 /** Initials circle. With [onClick] the hit area is at least 48 dp. */
@@ -75,16 +77,17 @@ fun Chip(text: String, bg: Color, fg: Color, modifier: Modifier = Modifier) {
     }
 }
 
+/** Contact status with the shared colour table (same as the web): New grey, Interested green, Call back amber, Not interested red, No answer slate. */
 @Composable
 fun StatusChip(status: ContactStatus) {
-    val (bg, fg) = when (status) {
-        ContactStatus.INTERESTED -> Color(0xFFDDF3E4) to Color(0xFF166534)
-        ContactStatus.CALL_BACK -> Color(0xFFFEF3C7) to UicColors.amber
-        ContactStatus.NOT_INTERESTED -> Color(0xFFF1F5F9) to Color(0xFF475569)
-        ContactStatus.NO_ANSWER -> Color(0xFFFCE7D6) to Color(0xFF9A3412)
-        ContactStatus.NEW -> Color(0xFFDCE7F7) to UicColors.primary
+    val tone = when (status) {
+        ContactStatus.INTERESTED -> PillTone.SUCCESS
+        ContactStatus.CALL_BACK -> PillTone.WARNING
+        ContactStatus.NOT_INTERESTED -> PillTone.DANGER
+        ContactStatus.NO_ANSWER -> PillTone.SLATE
+        ContactStatus.NEW -> PillTone.NEUTRAL
     }
-    Chip(status.label, bg, fg)
+    Pill(status.label, tone)
 }
 
 /** "via laptop" etc.; renders nothing for null. */

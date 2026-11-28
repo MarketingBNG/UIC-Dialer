@@ -11,6 +11,8 @@ import { LazyMotion, MotionConfig } from "motion/react";
 
 const loadMotionFeatures = () => import("@/lib/motionFeatures").then((r) => r.default);
 import { TooltipProvider } from "@/components/ui/tooltip";
+// Inter, bundled with the app (no font CDN).
+import "@fontsource-variable/inter";
 import "./index.css";
 
 const queryClient = new QueryClient({

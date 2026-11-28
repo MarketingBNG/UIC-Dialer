@@ -55,6 +55,8 @@ export const DIRECTION_LABEL: Record<Direction, string> = {
 };
 /** Plain call-status labels; the mapping itself lives in ./callStatus. */
 export const STATUS_LABEL = Object.fromEntries(CALL_STATUSES.map((s) => [s, callStatusText(s).label])) as Record<CallStatus, string>;
+// Filter menus need one distinct word per state (the badge shows both of these as "Working on transcript").
+STATUS_LABEL.UPLOADED = "Uploaded, transcript next";
 
 export const JOB_STATUS_LABEL: Record<string, string> = { WAITING_BUDGET: "Waiting for budget" };
 export const jobStatusLabel = (k: string) => JOB_STATUS_LABEL[k] ?? k.charAt(0) + k.slice(1).toLowerCase();

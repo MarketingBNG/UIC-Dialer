@@ -29,7 +29,7 @@ function DropdownMenuItem({ className, variant = "default", ...props }: React.Co
       data-slot="dropdown-menu-item"
       className={cn(
         "relative flex min-h-10 cursor-pointer select-none items-center gap-2 rounded-md px-2 text-sm outline-none focus:bg-accent data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground",
-        variant === "destructive" && "text-destructive focus:bg-red-50 [&_svg]:!text-destructive",
+        variant === "destructive" && "text-destructive focus:bg-danger-soft [&_svg]:!text-destructive",
         className,
       )}
       {...props}
