@@ -1,9 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
-import { CheckCircle2, Smartphone, XCircle } from "lucide-react";
+import { CheckCircle2, Home, Link2, ListChecks, Phone, Smartphone, Users, XCircle } from "lucide-react";
 import { useState } from "react";
+import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, type PhoneStatus } from "../api";
+import { api, type CallPage, type PhoneStatus } from "../api";
+import { useMe } from "../App";
+import { useDialer } from "../dialer";
+import { ago, DIRECTION_LABEL } from "../format";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 /** Exposed by the Windows app (desktop/src/preload.js); absent in a normal browser. */
@@ -38,6 +42,91 @@ function Row({ label, value, ok }: { label: string; value: string; ok: boolean }
       <span className="text-white/70">{label}:</span>
       <span className={`truncate font-medium ${ok ? "text-white/90" : "text-amber-300"}`}>{value}</span>
     </span>
+  );
+}
+
+const SHORTCUTS = [
+  { to: "/", label: "Today", icon: Home },
+  { to: "/calls", label: "Calls", icon: Phone },
+  { to: "/contacts", label: "Contacts", icon: Users },
+  { to: "/lists", label: "Call lists", icon: ListChecks },
+];
+
+/** Connected view: the phone, its status, shortcuts and the rep's last few calls with call-back. */
+function ConnectedPhone({ model, online, phoneLink, onClose, onHelp, openPhoneLink }: {
+  model: string | null; online: boolean; phoneLink: boolean | null;
+  onClose: () => void; onHelp: () => void; openPhoneLink?: () => void;
+}) {
+  const me = useMe();
+  const dialer = useDialer();
+  const navigate = useNavigate();
+  const recent = useQuery({
+    queryKey: ["my-recent-calls", me.id],
+    queryFn: () => api<CallPage>(`/api/calls?userId=${encodeURIComponent(me.id)}&limit=3`),
+    staleTime: 30_000,
+  });
+  const go = (to: string) => { onClose(); void navigate(to); };
+  return (
+    <div className="flex flex-col gap-5">
+      <DialogTitle className="sr-only">Your phone</DialogTitle>
+      <DialogDescription className="sr-only">Connected. Calls dial on your phone.</DialogDescription>
+      <div className="flex flex-col items-center gap-2 pt-2">
+        <div aria-hidden className="flex h-24 w-12 items-end justify-center rounded-xl border-4 border-foreground/80 bg-gradient-to-b from-sky-400 to-blue-700 pb-1">
+          <span className="h-0.5 w-4 rounded-full bg-white/60" />
+        </div>
+        <p className="text-lg font-semibold">{model ?? "Your phone"}</p>
+        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+          <span className="flex items-center gap-1" title="Calls from this PC dial on your phone">
+            <CheckCircle2 className="size-4 text-green-600" /> Connected
+          </span>
+          <span className="flex items-center gap-1">
+            <span aria-hidden className={`size-2 rounded-full ${online ? "bg-green-500" : "bg-amber-500"}`} />
+            {online ? "Online" : "Offline"}
+          </span>
+          {phoneLink !== null && (
+            <span className="flex items-center gap-1" title={phoneLink ? "Phone Link installed" : "Phone Link not installed"}>
+              <Link2 className={`size-4 ${phoneLink ? "text-green-600" : "text-amber-600"}`} /> Phone Link
+            </span>
+          )}
+        </div>
+      </div>
+      <nav className="flex flex-col">
+        {SHORTCUTS.map(({ to, label, icon: Icon }) => (
+          <button key={to} type="button" onClick={() => go(to)} className="flex items-center gap-3 rounded-md px-2 py-2 text-left text-sm hover:bg-muted">
+            <Icon className="size-4 text-muted-foreground" /> {label}
+          </button>
+        ))}
+        {openPhoneLink && (
+          <button type="button" onClick={openPhoneLink} className="flex items-center gap-3 rounded-md px-2 py-2 text-left text-sm hover:bg-muted">
+            <Link2 className="size-4 text-muted-foreground" /> Open Phone Link
+          </button>
+        )}
+      </nav>
+      <div className="flex flex-col gap-1">
+        <p className="px-2 text-sm font-semibold">Recent</p>
+        {recent.isLoading && <Skeleton className="h-24 w-full" />}
+        {recent.data?.items.length === 0 && <p className="px-2 text-sm text-muted-foreground">No calls yet.</p>}
+        {recent.data?.items.map((c) => {
+          const num = c.phoneE164 ?? c.phoneRaw;
+          return (
+            <div key={c.id} className="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-muted">
+              <button type="button" onClick={() => go(`/calls/${c.id}`)} className="flex min-w-0 flex-1 flex-col text-left">
+                <span className="truncate text-sm font-medium">{c.contactName || c.lead?.name || num || "Unknown"}</span>
+                <span className="text-xs text-muted-foreground">{DIRECTION_LABEL[c.direction]} · {ago(c.startedAt)}</span>
+              </button>
+              {num && (
+                <Button size="icon" variant="ghost" aria-label={`Call ${num}`} onClick={() => { onClose(); void dialer.call(num, c.contactName ?? undefined); }}>
+                  <Phone className="size-4" />
+                </Button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <button type="button" onClick={onHelp} className="self-center text-xs text-muted-foreground underline-offset-2 hover:underline">
+        Setup help
+      </button>
+    </div>
   );
 }
 
@@ -92,6 +181,11 @@ export function PhoneStatusCard() {
         </span>
       </button>
       <Dialog open={open} onOpenChange={setOpen}>
+        {ready && !showSteps ? (
+          <DialogContent className="max-w-sm">
+            <ConnectedPhone model={p.model} online={!!p.online} phoneLink={d ? !!installed : null} onClose={() => setOpen(false)} onHelp={() => setShowSteps(true)} openPhoneLink={d ? () => void d.openPhoneLink() : undefined} />
+          </DialogContent>
+        ) : (
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{ready ? "Calling from this PC is ready" : "Call from this PC"}</DialogTitle>
@@ -120,24 +214,18 @@ export function PhoneStatusCard() {
               </>
             )}
           </div>}
-          {ready && !showSteps ? (
-            <p className="text-sm text-muted-foreground">You're all set. Press Call on any contact and your phone dials it.</p>
-          ) : (
-            <>
-              <ol className="list-decimal space-y-2 pl-5 text-sm">
-                {STEPS.map((s) => (
-                  <li key={s}>{s}</li>
-                ))}
-              </ol>
-              <p className="text-xs text-muted-foreground">
-                Incoming calls: Phone Link shows Answer on this PC, and this app shows who is calling from your contacts.
-              </p>
-            </>
-          )}
+          <ol className="list-decimal space-y-2 pl-5 text-sm">
+            {STEPS.map((s) => (
+              <li key={s}>{s}</li>
+            ))}
+          </ol>
+          <p className="text-xs text-muted-foreground">
+            Incoming calls: Phone Link shows Answer on this PC, and this app shows who is calling from your contacts.
+          </p>
           <DialogFooter className="gap-2">
             {ready && (
-              <Button variant="ghost" onClick={() => setShowSteps((v) => !v)}>
-                {showSteps ? "Hide setup steps" : "Show setup steps"}
+              <Button variant="ghost" onClick={() => setShowSteps(false)}>
+                Back
               </Button>
             )}
             {!d ? null : installed ? (
@@ -149,6 +237,7 @@ export function PhoneStatusCard() {
             )}
           </DialogFooter>
         </DialogContent>
+        )}
       </Dialog>
     </>
   );
