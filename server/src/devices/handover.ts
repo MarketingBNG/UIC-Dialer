@@ -8,7 +8,7 @@ import type { Db } from "../db.js";
 export async function takeOverBlockedDevices(db: Db, userId: string, installId: string): Promise<number> {
   const old = await db.device.findMany({
     where: { installId, userId: { not: userId }, user: { active: false } },
-    select: { id: true, user: { select: { email: true } } },
+    select: { id: true, userId: true, user: { select: { email: true } } },
   });
   let moved = 0;
   for (const d of old) {
@@ -16,7 +16,7 @@ export async function takeOverBlockedDevices(db: Db, userId: string, installId: 
     if (!blocked) continue;
     moved += await db.$executeRaw`
       update calls c set user_id = ${userId}::uuid, updated_at = now()
-      where c.device_id = ${d.id}::uuid
+      where c.device_id = ${d.id}::uuid and c.user_id = ${d.userId}::uuid
         and not exists (select 1 from calls x where x.user_id = ${userId}::uuid and x.original_sha256 = c.original_sha256)
         and (c.call_log_key is null or not exists (select 1 from calls x where x.user_id = ${userId}::uuid and x.call_log_key = c.call_log_key))`;
   }

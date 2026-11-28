@@ -119,14 +119,18 @@ fun CallsScreen(onOpenCall: (id: String) -> Unit) {
 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = if (showPerson) 4.dp else 16.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        // Local text so typing never waits on the filter flow (dropped letters, cursor jumps).
+        var search by remember { mutableStateOf(filter.search) }
+        // Follow changes made elsewhere (e.g. "Clear filters"); the VM's current value is never stale.
+        androidx.compose.runtime.LaunchedEffect(filter.search) { vm.filter.value.search.let { if (it != search) search = it } }
         OutlinedTextField(
-            value = filter.search,
-            onValueChange = vm::setSearch,
+            value = search,
+            onValueChange = { search = it; vm.setSearch(it) },
             modifier = Modifier.weight(1f),
             placeholder = { Text("Name, company, number or words said") },
             leadingIcon = { Icon(Icons.Default.Search, null) },
             trailingIcon = {
-                if (filter.search.isNotEmpty()) IconButton(onClick = { vm.setSearch("") }) { Icon(Icons.Default.Clear, "Clear search") }
+                if (search.isNotEmpty()) IconButton(onClick = { search = ""; vm.setSearch("") }) { Icon(Icons.Default.Clear, "Clear search") }
             },
             singleLine = true,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),

@@ -29,7 +29,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -54,7 +53,6 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -122,14 +120,16 @@ fun DialerScreen(onOpenContact: (phone: String) -> Unit) {
                 } else {
                     BasicTextField(
                         value = state.number,
-                        onValueChange = { vm.setNumber(it.take(40)) },
+                        onValueChange = {},
+                        // The on-screen keypad is the only input (T9 finds names). Tapping here used to pop
+                        // the system keyboard, which pushed the keypad up and out of place mid-typing.
+                        readOnly = true,
                         singleLine = true,
                         textStyle = TextStyle(
                             fontSize = if (state.number.length > 13) 26.sp else 34.sp, fontWeight = FontWeight.Medium,
                             textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onBackground,
                         ),
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }

@@ -36,6 +36,8 @@ object CallLogMatcher {
     /** Max gap between the file's time and the call's start or end. */
     const val TOLERANCE_MS = 120_000L
     private const val WINDOW_BEFORE_MS = 6 * 3600_000L
+    /** Clock skew allowed between a file name's start time and the call log. */
+    const val NAME_SLACK_MS = 30_000L
 
     /**
      * Pure matching. Recorders name files with the call start and write the file until the call ends,
@@ -44,6 +46,9 @@ object CallLogMatcher {
     fun bestMatch(entries: List<CallLogEntry>, fileModifiedMs: Long, nameStartMs: Long?): CallLogEntry? =
         entries.asSequence()
             .filter { it.type != CallLog.Calls.MISSED_TYPE && it.type != CallLog.Calls.REJECTED_TYPE }
+            // A recording can't start well before its call or after it ended: without this, the previous call's
+            // file (finished just as this call started) matched this call and became a duplicate row.
+            .filter { e -> nameStartMs == null || nameStartMs in (e.dateMs - NAME_SLACK_MS)..(e.endMs + NAME_SLACK_MS) }
             .map { e ->
                 val gaps = buildList {
                     add(abs(e.endMs - fileModifiedMs))

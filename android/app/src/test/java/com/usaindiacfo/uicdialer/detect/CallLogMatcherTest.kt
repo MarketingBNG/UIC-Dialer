@@ -31,6 +31,15 @@ class CallLogMatcherTest {
         assertSame(b, CallLogMatcher.bestMatch(listOf(a, b), t0 + 660_000 + 1_000, null))
     }
 
+    @Test fun previousCallsFileDoesNotMatchNextCall() {
+        // Prod case: 129 s call at 12:40:30, file named 12:40:38 but last written as the next call began at 12:42:49.
+        val prev = CallLogEntry("+916304399850", INCOMING, t0, 129, null)
+        val next = CallLogEntry("+916304399850", INCOMING, t0 + 139_400, 33, null)
+        assertSame(prev, CallLogMatcher.bestMatch(listOf(prev, next), t0 + 140_000, t0 + 8_000))
+        // Only the next call in the log: the file still must not attach to it.
+        assertNull(CallLogMatcher.bestMatch(listOf(next), t0 + 140_000, t0 + 8_000))
+    }
+
     @Test fun noMatchOutsideTolerance() {
         assertNull(CallLogMatcher.bestMatch(listOf(a), t0 + 300_000 + CallLogMatcher.TOLERANCE_MS + 1, null))
     }

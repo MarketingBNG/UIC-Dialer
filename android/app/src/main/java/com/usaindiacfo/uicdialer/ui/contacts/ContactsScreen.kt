@@ -180,10 +180,15 @@ fun ContactsScreen(onOpenContact: (phone: String) -> Unit) {
     val phoneMatches = if (!hasPerm || state.query.isBlank()) emptyList()
     else phoneState.all.filter { PhoneBookLogic.numberKey(it.number) !in crmKeys }.take(30)
 
+    // The box owns its text: echoing it back through a StateFlow made typing drop letters and jump the cursor.
+    var search by rememberSaveable { mutableStateOf(state.query) }
+    // New results start at the top instead of keeping the old scroll position.
+    LaunchedEffect(state.query) { listState.scrollToItem(0) }
+
     Column(Modifier.fillMaxSize()) {
         if (!onPhone) OutlinedTextField(
-            value = state.query,
-            onValueChange = { val q = it.take(100); vm.setQuery(q); phoneVm.setQuery(q) },
+            value = search,
+            onValueChange = { val q = it.take(100); search = q; vm.setQuery(q); phoneVm.setQuery(q) },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             placeholder = { Text("Search name, number or company") },
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },

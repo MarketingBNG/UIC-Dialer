@@ -64,6 +64,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -82,7 +83,9 @@ class PhoneContactsViewModel(app: Context) : ViewModel() {
     private val query = MutableStateFlow("")
     private val contacts = permTick.flatMapLatest { PhoneBook.contactsFlow(app) }
 
-    val state: StateFlow<PhoneContactsState> = combine(contacts, query) { list, q ->
+    // Short pause so thousands of contacts aren't re-filtered on every key press.
+    @OptIn(kotlinx.coroutines.FlowPreview::class)
+    val state: StateFlow<PhoneContactsState> = combine(contacts, query.debounce { if (it.isEmpty()) 0L else 150L }) { list, q ->
         val shown = list.filter { PhoneBookLogic.contactMatches(it, q) }
         PhoneContactsState(
             favourites = if (q.isBlank()) shown.filter { it.starred } else emptyList(),
@@ -91,6 +94,7 @@ class PhoneContactsViewModel(app: Context) : ViewModel() {
     }.flowOn(kotlinx.coroutines.Dispatchers.Default).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PhoneContactsState())
 
     fun setQuery(q: String) { query.value = q }
+    val currentQuery: String get() = query.value
     fun recheck() { permTick.value++ }
 }
 
@@ -135,9 +139,11 @@ fun PhoneContactsTab(onOpenContact: (phone: String) -> Unit) {
             }
             return@Column
         }
+        // Local text: the list is filtered on a background thread, so its echoed query lags the keyboard.
+        var search by rememberSaveable { mutableStateOf(vm.currentQuery) }
         OutlinedTextField(
-            value = state.query,
-            onValueChange = { vm.setQuery(it.take(100)) },
+            value = search,
+            onValueChange = { search = it.take(100); vm.setQuery(search) },
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             placeholder = { Text("Search name or number") },
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },

@@ -690,6 +690,11 @@ export function ListSessionPage() {
   }, [nextItem, dialer.pending]);
   useEffect(() => {
     if (countdown === null) return;
+    // A call started some other way (search, keyboard) cancels the countdown instead of dialling twice.
+    if (dialer.pending) {
+      setCountdown(null);
+      return;
+    }
     if (countdown <= 0) {
       setCountdown(null);
       const c = nextItem?.contact;

@@ -86,9 +86,11 @@ object Reminders {
     fun runMorningNow(context: Context) {
         WorkManager.getInstance(context).enqueueUniqueWork(
             "$MORNING-now", ExistingWorkPolicy.KEEP,
-            OneTimeWorkRequestBuilder<MorningSummaryWorker>().build(),
+            OneTimeWorkRequestBuilder<MorningSummaryWorker>().setInputData(androidx.work.workDataOf(FROM_ALARM to true)).build(),
         )
     }
+
+    const val FROM_ALARM = "fromAlarm"
 
     /** Signed out: no reminders, no queued missed calls for the next rep. */
     suspend fun clearSession(context: Context) {
@@ -229,7 +231,9 @@ class MorningSummaryWorker(ctx: Context, params: WorkerParameters) : CoroutineWo
             }
         } finally {
             // KEEP would be dropped while this run is active; APPEND_OR_REPLACE queues the next one after it.
-            Reminders.scheduleMorning(ctx, ExistingWorkPolicy.APPEND_OR_REPLACE)
+            // The alarm run is outside the MORNING chain: REPLACE its pending backup, else the chain grows daily.
+            val fromAlarm = inputData.getBoolean(Reminders.FROM_ALARM, false)
+            Reminders.scheduleMorning(ctx, if (fromAlarm) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.APPEND_OR_REPLACE)
         }
         return Result.success()
     }

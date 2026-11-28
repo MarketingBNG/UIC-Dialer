@@ -37,7 +37,7 @@ class DialerViewModel(private val c: AppContainer, private val app: android.cont
 
     init {
         viewModelScope.launch {
-            query.debounce(350).distinctUntilChanged().collectLatest { lookup(it) }
+            query.debounce(250).distinctUntilChanged().collectLatest { lookup(it) }
         }
         if (app != null) {
             viewModelScope.launch { com.usaindiacfo.uicdialer.phonebook.PhoneBook.contactsFlow(app).collect { phoneContacts = it; suggest() } }
@@ -76,13 +76,13 @@ class DialerViewModel(private val c: AppContainer, private val app: android.cont
     fun logWhatsApp(phone: String) = viewModelScope.launch { c.activityRepository.log(phone, ActivityType.WHATSAPP) }
 
     private suspend fun lookup(q: String) {
-        // Short input matches too much; wait for a few digits or letters.
-        if (q.trim().length < 3) {
+        val term = lookupTerm(q)
+        if (term == null) {
             _state.update { it.copy(matches = emptyList()) }
             return
         }
         val found = try {
-            c.apiClient.contacts(q = q.trim(), limit = 5).items
+            c.apiClient.contacts(q = term, limit = 5).items
         } catch (e: IOException) {
             c.contactCache.recent.filter { matchesQuery(it, q) } // offline: the saved list
         }
@@ -90,6 +90,9 @@ class DialerViewModel(private val c: AppContainer, private val app: android.cont
         suggest()
     }
 }
+
+/** What to send to the server search, or null when the input is too short (it would match too much). */
+internal fun lookupTerm(q: String): String? = q.trim().takeIf { it.length >= 3 }
 
 /** Local search over the saved list: name, company or digits of the number. */
 internal fun matchesQuery(c: ContactDto, q: String): Boolean {

@@ -211,9 +211,16 @@ export function DialerProvider({ children }: { children: ReactNode }) {
   // Ask for the outcome when the phone reports the call ended (not when the window gets focus back: Phone Link's
   // own popup takes focus, and the rep may switch windows mid-call). The "Log outcome" bar stays as a fallback.
   useEffect(() => {
+    // Outgoing calls send answered/ended without a ringing first. A "ringing" is an incoming call: if it isn't
+    // the pending number, ignore its answered/ended so it doesn't drive the pending call's bar or outcome.
+    const digits = (n: string | null | undefined) => (n ?? "").replace(/\D/g, "").slice(-10);
+    let foreign = false;
     const onRing = (e: Event) => {
-      const state = (e as CustomEvent<{ state?: string }>).detail?.state;
+      const detail = (e as CustomEvent<{ state?: string; phone?: string | null }>).detail;
+      const state = detail?.state;
       const p = loadPending();
+      if (state === "ringing") { foreign = !p || digits(detail?.phone) !== digits(p.phone); return; }
+      if (foreign) { if (state === "ended") foreign = false; return; }
       if (!p) return;
       if (state === "answered") setLive({ state: "on", since: Date.now() });
       if (state !== "ended") return;

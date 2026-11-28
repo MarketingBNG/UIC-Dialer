@@ -137,9 +137,11 @@ fun RecentsScreen(onOpenContact: (phone: String) -> Unit) {
             }
             return@Column
         }
+        // Local text: the list is rebuilt on a background thread, so its echoed query lags the keyboard.
+        var search by rememberSaveable { mutableStateOf(state.query) }
         OutlinedTextField(
-            value = state.query,
-            onValueChange = { vm.setQuery(it.take(100)) },
+            value = search,
+            onValueChange = { search = it.take(100); vm.setQuery(search) },
             modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp),
             placeholder = { Text("Search name or number") },
             leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
