@@ -83,10 +83,15 @@ class ContactDetailViewModel(private val c: AppContainer, val phone: String) : V
     val state: StateFlow<ContactDetailState> = _state.asStateFlow()
 
     fun load() = viewModelScope.launch {
+        // Show the last saved copy at once; the network refresh then replaces it quietly.
+        if (_state.value.contact == null) c.contactCache.contact(phone)?.let { saved ->
+            _state.update { it.copy(contact = saved.contact, activities = saved.activities) }
+        }
         _state.update { it.copy(loading = true, localDnc = c.dncCheck.isDnc(phone)) }
         try {
             val r = c.apiClient.contactByPhone(phone)
             _state.update { it.copy(loading = false, contact = r.contact, activities = r.activities, error = null) }
+            c.contactCache.putContact(listOfNotNull(phone, r.contact?.phoneE164), r)
         } catch (e: IOException) {
             _state.update { it.copy(loading = false, error = friendlyError(e)) }
         }
@@ -246,7 +251,8 @@ fun ContactDetailScreen(phone: String, onBack: () -> Unit) {
                     }
                 }
             }
-            if (state.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+            // Bar only when there's nothing saved to show; otherwise refresh quietly.
+            if (state.loading && state.contact == null && state.activities.isEmpty()) LinearProgressIndicator(Modifier.fillMaxWidth())
             state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             state.message?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
 

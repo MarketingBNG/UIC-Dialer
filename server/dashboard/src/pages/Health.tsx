@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api, type CallStatus, type CompressionStats, type CrmStats, type TranslateBackfillResult, type Device, type Stats, type Throughput } from "../api";
+import { api, type CallStatus, type ClientErrorDto, type CompressionStats, type CrmStats, type TranslateBackfillResult, type Device, type Stats, type Throughput } from "../api";
 import { useMe } from "../App";
 import { STATUS_LABEL, ago, jobStatusLabel, formatBytes, formatWhen, personName } from "../format";
 import { FirefliesPanel } from "../components/Fireflies";
@@ -78,6 +78,7 @@ export function HealthPage() {
       {isAdmin && stats.data?.compression && <CompressBackfill c={stats.data.compression} />}
       {isAdmin && <TestAlert enabled={stats.data?.alertsEnabled} />}
       <CrmPanel isAdmin={isAdmin} />
+      <ClientErrors />
 
       {devices.isPending ? (
         <Spinner label="Loading devices" />
@@ -302,6 +303,44 @@ function ThroughputTiles({ t, tile }: { t: Throughput; tile: (label: string, val
 }
 
 /** Admin: post a test message to the Zoho Cliq alert channel. */
+const SOURCE_LABEL: Record<ClientErrorDto["source"], string> = { android: "Phone", desktop: "Windows app", web: "Browser" };
+
+/** Problems staff phones / laptops reported in the last 7 days, newest first. */
+function ClientErrors() {
+  const q = useQuery({ queryKey: ["client-errors"], queryFn: () => api<{ items: ClientErrorDto[] }>("/api/client-errors?days=7") });
+  return (
+    <Card role="region" aria-labelledby="client-errors-h" className="mb-4 p-4">
+      <h2 id="client-errors-h" className="font-semibold">
+        Problems on staff devices
+      </h2>
+      <p className="text-sm text-muted-foreground">Last 7 days.</p>
+      {q.isPending ? (
+        <Spinner label="Loading problems" />
+      ) : q.isError ? (
+        <ErrorBox error={q.error} onRetry={() => void q.refetch()} />
+      ) : q.data.items.length === 0 ? (
+        <p className="mt-2 text-sm text-muted-foreground">No problems reported</p>
+      ) : (
+        <ul className="mt-2 max-h-80 divide-y overflow-y-auto text-sm">
+          {q.data.items.map((e) => (
+            <li key={e.id} className="py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">{e.user.name}</span>
+                <Badge variant="outline">{e.device ?? SOURCE_LABEL[e.source]}</Badge>
+                <span className="font-mono text-xs">{e.kind}</span>
+                <span className="ml-auto text-xs text-muted-foreground" title={formatWhen(e.createdAt)}>
+                  {ago(e.createdAt)}
+                </span>
+              </div>
+              {e.message && <p className="mt-0.5 break-words text-muted-foreground">{e.message}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 function TestAlert({ enabled }: { enabled: boolean | undefined }) {
   const run = useMutation({ mutationFn: () => api<{ sent: boolean }>("/api/admin/test-alert", { method: "POST", body: {} }) });
   return (

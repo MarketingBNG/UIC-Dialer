@@ -1,11 +1,12 @@
-import { PhoneLinkSetup } from "./components/PhoneLinkSetup";
+import { PhoneStatusCard } from "./components/PhoneLinkSetup";
+import { useKeyboardDial } from "./useKeyboardDial";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "motion/react";
 import { animate } from "motion/mini";
 import { BASE } from "@/lib/motion";
 import type * as React from "react";
-import { Download, History, LogOut, PhoneCall, Settings2, Smartphone, Users, type LucideIcon } from "lucide-react";
+import { Download, History, LogOut, PhoneCall, Settings2, Users, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import {
   Sidebar,
@@ -20,10 +21,8 @@ import {
   SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { NavLink, Navigate, Route, Routes, useLocation } from "react-router";
-import { ApiError, api, isManager, type Me, type PhoneStatus } from "./api";
+import { ApiError, api, isManager, type Me } from "./api";
 import { FirefliesBanner } from "./components/Fireflies";
 import { QuickSearch, QuickSearchButton, useQuickSearchShortcut } from "./components/QuickSearch";
 import { CallDetailPage } from "./pages/CallDetail";
@@ -103,47 +102,6 @@ function navItems(me: Me) {
 /** Pages that live under Admin (the Admin entry stays highlighted on them). */
 const ADMIN_PATHS = ["/lists", "/team", "/health", "/users", "/settings", "/audit"];
 
-/** "2m ago" style, for the phone status box. */
-function shortAgo(iso: string, now = Date.now()) {
-  const m = Math.max(0, Math.floor((now - new Date(iso).getTime()) / 60_000));
-  if (m < 1) return "just now";
-  if (m < 60) return `${m}m ago`;
-  if (m < 24 * 60) return `${Math.floor(m / 60)}h ago`;
-  return new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(new Date(iso));
-}
-
-/** The rep's Android phone heartbeat (the app reports in at least hourly). Says nothing about Phone Link. */
-function PhoneStatusBox() {
-  const q = useQuery({ queryKey: ["me-phone"], queryFn: () => api<PhoneStatus>("/api/me/phone"), refetchInterval: 60_000 });
-  if (!q.data) return <Skeleton className="h-12 w-full bg-white/10" />;
-  const p = q.data;
-  const text = !p.lastSeenAt
-    ? "No phone signed in"
-    : p.online
-      ? `Phone online · seen ${shortAgo(p.lastSeenAt)}`
-      : `Phone offline since ${shortAgo(p.lastSeenAt)}`;
-  const box = (
-    <div role="status" tabIndex={p.model ? 0 : undefined} className="rounded-lg bg-white/10 px-3 py-2 text-xs text-white/90 outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring">
-      <span className="flex items-center gap-2 font-medium">
-        <Smartphone aria-hidden className="size-4 shrink-0" />
-        <span aria-hidden className={`size-2 shrink-0 rounded-full ${p.online ? "bg-green-400" : "bg-slate-400"}`} />
-        {text}
-      </span>
-      {p.model && <span className="mt-0.5 block truncate text-white/60">{p.model} · calls use its SIM</span>}
-    </div>
-  );
-  if (!p.model) return box;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{box}</TooltipTrigger>
-      <TooltipContent side="right">
-        {p.model}
-        {p.appVersion ? ` · app ${p.appVersion}` : ""}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
 const NAV_ICON: Record<string, LucideIcon> = { "/today": PhoneCall, "/activity": Users, "/calls": History, "/admin": Settings2 };
 
 function Shell({ me }: { me: Me }) {
@@ -161,7 +119,14 @@ function Shell({ me }: { me: Me }) {
   });
   const items = navItems(me);
   const [searchOpen, setSearchOpen] = useState(false);
+  // Text to prefill quick search with (the digit typed for keyboard dialing); empty for Ctrl+K / the button.
+  const [searchInit, setSearchInit] = useState("");
   useQuickSearchShortcut(setSearchOpen);
+  const startKeyboardDial = useCallback((ch: string) => {
+    setSearchInit(ch);
+    setSearchOpen(true);
+  }, []);
+  useKeyboardDial(startKeyboardDial);
   const { pathname } = useLocation();
   const role = me.role.charAt(0) + me.role.slice(1).toLowerCase();
   const logo = (
@@ -179,7 +144,14 @@ function Shell({ me }: { me: Me }) {
         Skip to content
       </a>
       <AppSidebar me={me} role={role} items={items} pathname={pathname} logo={logo} logout={() => logout.mutate()} loggingOut={logout.isPending} onSearch={() => setSearchOpen(true)} />
-      <QuickSearch open={searchOpen} onOpenChange={setSearchOpen} />
+      <QuickSearch
+        open={searchOpen}
+        initialQuery={searchInit}
+        onOpenChange={(o) => {
+          setSearchOpen(o);
+          if (!o) setSearchInit("");
+        }}
+      />
       <SidebarInset>
         {/* Small screens: navy top bar; the menu opens the sidebar as a sheet. */}
         <header className="sticky top-0 z-30 bg-sidebar pt-[env(safe-area-inset-top)] md:hidden">
@@ -260,8 +232,7 @@ function AppSidebar({
     <Sidebar title="UIC Dialer menu">
       <SidebarHeader>
         {logo}
-        <PhoneStatusBox />
-        <PhoneLinkSetup />
+        <PhoneStatusCard />
         <QuickSearchButton
           onOpen={() => {
             setOpenMobile(false);

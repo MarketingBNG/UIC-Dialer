@@ -13,7 +13,9 @@ import androidx.core.content.FileProvider
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -39,6 +41,16 @@ object AutoUpdate {
             WORK, ExistingPeriodicWorkPolicy.KEEP,
             PeriodicWorkRequestBuilder<AutoUpdateWorker>(4, TimeUnit.HOURS)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.UNMETERED).setRequiresBatteryNotLow(true).build())
+                .build(),
+        )
+    }
+
+    /** "Check now" in Settings: one run of the worker, any network. */
+    fun checkNow(context: Context) {
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "$WORK-now", ExistingWorkPolicy.REPLACE,
+            OneTimeWorkRequestBuilder<AutoUpdateWorker>()
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .build(),
         )
     }
@@ -92,14 +104,35 @@ object AutoUpdate {
 class AutoUpdateWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val ctx = applicationContext
+        UpdateStatus.noteCurrentVersion(ctx)
         val updater = AppUpdater(ctx, ctx.container.apiClient)
-        val latest = runCatching { updater.check() }.getOrElse { return Result.success() } ?: return Result.success()
-        val apk = runCatching { updater.download(latest) }.getOrElse { return Result.retry() }
+        val latest = runCatching { updater.check() }.getOrElse {
+            UpdateStatus.record(ctx, "Check failed: ${it.message ?: "no connection"}")
+            return Result.success()
+        }
+        if (latest == null) {
+            UpdateStatus.record(ctx, "Up to date")
+            return Result.success()
+        }
+        val v = "v${latest.versionName ?: latest.versionCode}"
+        UpdateStatus.record(ctx, "Downloading $v")
+        val apk = runCatching { updater.download(latest) }.getOrElse {
+            UpdateStatus.record(ctx, "Download of $v failed: ${it.message ?: "error"}")
+            return Result.retry()
+        }
+        val waiting = "$v ready, waiting for you to tap Install"
         when {
-            !updater.canInstall() -> AutoUpdate.notifyReady(ctx, ctx.packageManager.getLaunchIntentForPackage(ctx.packageName) ?: return Result.success())
+            !updater.canInstall() -> {
+                UpdateStatus.record(ctx, "$v ready, allow installs from this app")
+                AutoUpdate.notifyReady(ctx, ctx.packageManager.getLaunchIntentForPackage(ctx.packageName) ?: return Result.success())
+            }
             Build.VERSION.SDK_INT >= 31 -> runCatching { AutoUpdate.installSession(ctx, apk) }
-                .onFailure { AutoUpdate.notifyReady(ctx, AutoUpdate.viewIntent(ctx, apk)) }
-            else -> AutoUpdate.notifyReady(ctx, AutoUpdate.viewIntent(ctx, apk))
+                .onSuccess { UpdateStatus.record(ctx, "Installing $v") }
+                .onFailure { UpdateStatus.record(ctx, waiting); AutoUpdate.notifyReady(ctx, AutoUpdate.viewIntent(ctx, apk)) }
+            else -> {
+                UpdateStatus.record(ctx, waiting)
+                AutoUpdate.notifyReady(ctx, AutoUpdate.viewIntent(ctx, apk))
+            }
         }
         return Result.success()
     }
@@ -114,6 +147,7 @@ class UpdateStatusReceiver : BroadcastReceiver() {
         else intent.getParcelableExtra(Intent.EXTRA_INTENT)) ?: return
         // From the Update button the app is on screen, so the install prompt opens right away; in the background
         // Android blocks that, and the notification is the way in.
+        UpdateStatus.record(context, "Update ready, waiting for you to tap Install")
         runCatching { context.startActivity(Intent(confirm).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
         AutoUpdate.notifyReady(context, confirm)
     }

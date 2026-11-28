@@ -91,7 +91,9 @@ fun CallsScreen(onOpenCall: (id: String) -> Unit) {
 
     val refresh = items.loadState.refresh
     val offline = refresh is LoadState.Error && items.itemCount == 0 && refresh.error !is ApiException
-    val list = if (offline) cached else items
+    // First load: show the last saved list at once (only when unfiltered, since the cache is unfiltered).
+    val warming = refresh is LoadState.Loading && items.itemCount == 0 && cached.itemCount > 0 && filter.toApi() == CallFilter()
+    val list = if (offline || warming) cached else items
 
     Column(Modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -119,18 +121,18 @@ fun CallsScreen(onOpenCall: (id: String) -> Unit) {
         }
 
         PullToRefreshBox(
-            isRefreshing = items.loadState.refresh is LoadState.Loading && items.itemCount > 0,
+            isRefreshing = items.loadState.refresh is LoadState.Loading && (items.itemCount > 0 || warming),
             onRefresh = items::refresh,
             modifier = Modifier.fillMaxSize(),
         ) {
             when {
-                refresh is LoadState.Loading && items.itemCount == 0 ->
+                refresh is LoadState.Loading && list.itemCount == 0 ->
                     Box(Modifier.fillMaxSize(), Alignment.Center) { CircularProgressIndicator() }
                 refresh is LoadState.Error && list.itemCount == 0 ->
                     Message(refresh.error.message ?: "Could not load calls", "Retry", items::retry)
                 refresh is LoadState.NotLoading && list.itemCount == 0 ->
                     Message("No calls found", null) {}
-                else -> CallList(list, showPerson, onOpenCall, appendError = !offline && items.loadState.append is LoadState.Error, onRetry = items::retry)
+                else -> CallList(list, showPerson, onOpenCall, appendError = !offline && !warming && items.loadState.append is LoadState.Error, onRetry = items::retry)
             }
         }
     }

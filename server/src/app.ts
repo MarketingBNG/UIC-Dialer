@@ -11,6 +11,7 @@ import { ZodError } from "zod";
 import { HttpError, type Deps } from "./context.js";
 import { activityRoutes } from "./routes/activity.js";
 import { authRoutes } from "./routes/auth.js";
+import { clientErrorRoutes } from "./routes/clientErrors.js";
 import { callRoutes } from "./routes/calls.js";
 import { dashboardRoutes } from "./routes/dashboard.js";
 import { deviceRoutes } from "./routes/device.js";
@@ -107,6 +108,7 @@ export async function buildApp(deps: Deps, opts: FastifyServerOptions = {}) {
   await app.register(async (s) => dncRoutes(s, deps));
   await app.register(async (s) => leadRoutes(s, deps));
   await app.register(async (s) => teamRoutes(s, deps));
+  await app.register(async (s) => clientErrorRoutes(s, deps));
 
   if (publicDir) {
     await app.register(fastifyStatic, {

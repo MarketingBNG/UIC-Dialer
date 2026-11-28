@@ -141,6 +141,32 @@ object SetupChecks {
     fun requiredPermissionsMissing(context: Context, businessOnly: Boolean): Boolean =
         !requiredGranted(context) || (businessOnly && !granted(context, Manifest.permission.READ_CONTACTS))
 
+    /** One thing the phone still needs, most important first. [Fix] says what the single "Fix" button does. */
+    enum class Fix { OPEN_SETUP, CALL_PHONE, CALLS_FROM_PC, NOTIFICATIONS }
+    data class Issue(val text: String, val fix: Fix, val action: String = "Fix")
+
+    /** Everything wrong with this phone's setup, ordered so the Today banner shows the worst first. */
+    fun issues(context: Context): List<Issue> = buildList {
+        if (!requiredGranted(context)) add(Issue("Setup needs attention: calls can't be synced.", Fix.OPEN_SETUP))
+        if (!callPhoneGranted(context)) add(Issue("Allow \"Make calls\" so Call on your laptop dials this phone.", Fix.CALL_PHONE, "Allow"))
+        if (!com.usaindiacfo.uicdialer.dialer.RemoteDialService.isEnabled(context)) {
+            add(Issue("Calls from your laptop are off.", Fix.CALLS_FROM_PC, "Turn on"))
+        }
+        if (!com.usaindiacfo.uicdialer.reminders.Notifications.canNotify(context)) {
+            add(Issue("Notifications are off, so you won't get follow-up reminders.", Fix.NOTIFICATIONS, "Turn on"))
+        }
+    }
+
+    /** Direct dialling (laptop Call, one-tap call lists) needs CALL_PHONE; without it we fall back to the keypad. */
+    fun callPhoneGranted(context: Context) = granted(context, Manifest.permission.CALL_PHONE)
+
+    /** App notification settings (covers both the permission and a channel/app switch turned off). */
+    fun openNotificationSettings(context: Context) {
+        val i = if (Build.VERSION.SDK_INT >= 26) Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
+        else null
+        if (i == null || !tryStart(context, i)) openAppDetails(context)
+    }
+
     val audioPermission: String =
         if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
 

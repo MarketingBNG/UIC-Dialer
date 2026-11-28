@@ -236,6 +236,10 @@ class ApiClient(
     suspend fun postDialAck(id: String, ok: Boolean, error: String? = null): RingResponse =
         post("/v1/remote-dial/ack", DialAckRequest(id, ok, error))
 
+    /** Reports a problem on this phone so admins see it on the Health page. Callers should ignore failures. */
+    suspend fun postClientError(kind: String, message: String): ClientErrorResponse =
+        post("/v1/client-errors", ClientErrorRequest(kind.take(60), message.take(300)))
+
     suspend fun postMissed(items: List<MissedCallItem>): MissedCallResponse =
         post("/v1/followups/missed", MissedCallBatch(items))
 

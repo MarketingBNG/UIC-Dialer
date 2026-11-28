@@ -5,6 +5,7 @@ import { z } from "zod";
 import { requireDevice, requireSession } from "./auth/guards.js";
 import { toE164 } from "./phone.js";
 import { currentUser, HttpError, type Deps } from "./context.js";
+import { recordClientError } from "./routes/clientErrors.js";
 
 /**
  * Live "something changed" notices for the dashboard / Windows app and the phone app.
@@ -250,6 +251,8 @@ export async function realtimeRoutes(app: FastifyInstance, deps: Deps) {
   app.post("/v1/remote-dial/ack", device, async (req) => {
     const body = DialAckBody.parse(req.body);
     await rt.publish({ topic: "dialack", userId: currentUser(req).id, ack: { id: body.id, ok: body.ok, ...(body.error ? { error: body.error } : {}) } });
+    // A failed laptop dial is a staff problem admins should see on the Health page.
+    if (!body.ok) await recordClientError(deps, req, "remote_dial_failed", body.error ?? "Phone could not place the call");
     return { ok: true };
   });
 

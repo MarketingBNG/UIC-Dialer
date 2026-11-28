@@ -58,7 +58,16 @@ export function useQuickSearchShortcut(setOpen: (fn: (o: boolean) => boolean) =>
 
 const contactName = (c: ContactListItem) => c.name || c.company || c.phoneE164;
 
-export function QuickSearch({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+export function QuickSearch({
+  open,
+  onOpenChange,
+  initialQuery = "",
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  /** Prefill, e.g. the digit typed on the page (keyboard dialing). */
+  initialQuery?: string;
+}) {
   const me = useMe();
   const navigate = useNavigate();
   const dialer = useDialer();
@@ -67,8 +76,8 @@ export function QuickSearch({ open, onOpenChange }: { open: boolean; onOpenChang
   const term = useDebounced(q.trim(), 250);
 
   useEffect(() => {
-    if (!open) setQ("");
-  }, [open]);
+    setQ(open ? initialQuery : "");
+  }, [open, initialQuery]);
 
   const results = useQuery({
     queryKey: ["contacts", "quick-search", term],

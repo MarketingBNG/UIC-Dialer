@@ -101,8 +101,26 @@ fun TodayScreen(
     val context = LocalContext.current
     val user by container.authRepository.currentUser.collectAsStateWithLifecycle()
     var resumeTick by remember { mutableIntStateOf(0) }
-    val setupOk = remember(resumeTick) { SetupChecks.requiredGranted(context) }
-    val notifOk = remember(resumeTick) { com.usaindiacfo.uicdialer.reminders.Notifications.canNotify(context) }
+    // One setup banner: the worst problem first, re-checked every time the app comes back.
+    val issues = remember(resumeTick) { SetupChecks.issues(context) }
+    val callPermLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { ok ->
+        // Denied with "don't ask again": Android won't show the dialog, so send them to App settings.
+        val activity = context as? android.app.Activity
+        if (!ok && activity != null && !activity.shouldShowRequestPermissionRationale(android.Manifest.permission.CALL_PHONE)) {
+            SetupChecks.openAppDetails(context)
+        }
+        resumeTick++
+    }
+    val fixIssue: (SetupChecks.Issue) -> Unit = { issue ->
+        when (issue.fix) {
+            SetupChecks.Fix.OPEN_SETUP -> onOpenSetup()
+            SetupChecks.Fix.CALL_PHONE -> callPermLauncher.launch(android.Manifest.permission.CALL_PHONE)
+            SetupChecks.Fix.CALLS_FROM_PC -> { com.usaindiacfo.uicdialer.dialer.RemoteDialService.set(context, true); resumeTick++ }
+            SetupChecks.Fix.NOTIFICATIONS -> SetupChecks.openNotificationSettings(context)
+        }
+    }
     var recordingOff by remember { mutableStateOf(com.usaindiacfo.uicdialer.sync.RecordingCheck.isOff(context)) }
     LaunchedEffect(resumeTick) {
         recordingOff = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -141,17 +159,18 @@ fun TodayScreen(
         ) {
             item(key = "update") { UpdateBanner(checkKey = resumeTick / 10) } // re-check occasionally
             item(key = "sim") { SimNumberBanner(checkKey = resumeTick / 10) }
-            if (!setupOk) item(key = "setup") {
-                Banner("Setup needs attention: calls can't be synced.", "Fix", MaterialTheme.colorScheme.errorContainer, onOpenSetup)
+            issues.firstOrNull()?.let { first ->
+                item(key = "setup") {
+                    val more = if (issues.size > 1) " (${issues.size - 1} more)" else ""
+                    val color = if (first.fix == SetupChecks.Fix.NOTIFICATIONS) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.errorContainer
+                    Banner(first.text + more, first.action, color) { fixIssue(first) }
+                }
             }
             if (recordingOff) item(key = "recording-off") {
                 Banner(
                     "Call recording is off. " + com.usaindiacfo.uicdialer.sync.RecordingCheck.TEXT, "Open Phone",
                     MaterialTheme.colorScheme.errorContainer,
                 ) { runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_DIAL).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }
-            }
-            if (!notifOk) item(key = "notif") {
-                Banner("Notifications are off, so you won't get follow-up reminders.", "Turn on", MaterialTheme.colorScheme.surface, onOpenSetup)
             }
             item(key = "head") {
                 Column {

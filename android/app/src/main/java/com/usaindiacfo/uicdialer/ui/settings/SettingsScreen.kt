@@ -35,6 +35,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.usaindiacfo.uicdialer.BuildConfig
 import com.usaindiacfo.uicdialer.appContainer
@@ -42,7 +43,10 @@ import com.usaindiacfo.uicdialer.data.api.DeviceConfig
 import com.usaindiacfo.uicdialer.data.api.Me
 import com.usaindiacfo.uicdialer.ui.dialer.Avatar
 import com.usaindiacfo.uicdialer.ui.home.SyncStatus
+import com.usaindiacfo.uicdialer.update.AutoUpdate
 import com.usaindiacfo.uicdialer.update.UpdateBanner
+import com.usaindiacfo.uicdialer.update.UpdateStatus
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -106,6 +110,7 @@ fun SettingsScreen(onOpenSetup: () -> Unit, onOpenGuide: () -> Unit, onOpenAdmin
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.align(Alignment.CenterHorizontally),
             )
+            UpdateStatusLines(Modifier.align(Alignment.CenterHorizontally))
         }
     }
 
@@ -197,6 +202,28 @@ private fun NavRow(title: String, subtitle: String, onClick: () -> Unit) {
                 Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null)
+        }
+    }
+}
+
+/** Shows what background auto-update last did, so a rep can tell it is working. */
+@Composable
+private fun UpdateStatusLines(modifier: Modifier) {
+    val context = LocalContext.current
+    var status by remember { mutableStateOf(UpdateStatus.read(context)) }
+    // The worker writes in the background; re-read now and then so "Check now" shows its result.
+    LaunchedEffect(Unit) { while (true) { delay(3_000); status = UpdateStatus.read(context) } }
+    val small = MaterialTheme.typography.bodySmall
+    val muted = MaterialTheme.colorScheme.onSurfaceVariant
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        status.updatedTo?.let { Text("Updated to v$it on ${UpdateStatus.date(status.updatedAt)}", style = small, color = muted) }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (status.lastCheckAt == 0L) "Not checked yet"
+                else "Last checked ${UpdateStatus.ago(status.lastCheckAt)}: ${status.lastResult.orEmpty()}",
+                style = small, color = muted, modifier = Modifier.weight(1f, fill = false),
+            )
+            TextButton(onClick = { AutoUpdate.checkNow(context) }) { Text("Check now") }
         }
     }
 }

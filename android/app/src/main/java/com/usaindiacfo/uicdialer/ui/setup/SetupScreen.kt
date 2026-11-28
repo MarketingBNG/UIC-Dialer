@@ -63,6 +63,7 @@ fun SetupScreen(onDone: () -> Unit) {
     val contactsOk = remember(tick) { SetupChecks.granted(context, android.Manifest.permission.READ_CONTACTS) }
     val notifOk = remember(tick) { SetupChecks.notificationsGranted(context) }
     val phoneStateOk = remember(tick) { SetupChecks.phoneStateGranted(context) }
+    val callPhoneOk = remember(tick) { SetupChecks.callPhoneGranted(context) }
     val overlayOk = remember(tick) { SetupChecks.canDrawOverlays(context) }
     val exactOk = remember(tick) { SetupChecks.canExactAlarms(context) }
     val batteryOk = remember(tick) { SetupChecks.ignoringBatteryOptimizations(context) }
@@ -110,6 +111,17 @@ fun SetupScreen(onDone: () -> Unit) {
         ) {
             Button(onClick = { permLauncher.launch(SetupChecks.requiredPermissions.toTypedArray()) }) { Text("Allow") }
             if (!requiredOk) TextButton(onClick = { SetupChecks.openAppDetails(context) }) { Text("App settings") }
+        }
+
+        Step(
+            done = callPhoneOk,
+            title = "Make calls",
+            body = "Lets Call on your laptop and in the app dial straight away.",
+        ) {
+            if (!callPhoneOk) {
+                Button(onClick = { permLauncher.launch(arrayOf(android.Manifest.permission.CALL_PHONE)) }) { Text("Allow") }
+                TextButton(onClick = { SetupChecks.openAppDetails(context) }) { Text("App settings") }
+            }
         }
 
         if (needsRestrictedSettings) {

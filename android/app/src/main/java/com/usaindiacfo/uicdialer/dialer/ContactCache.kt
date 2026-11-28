@@ -2,7 +2,10 @@ package com.usaindiacfo.uicdialer.dialer
 
 import android.content.Context
 import com.usaindiacfo.uicdialer.data.api.ContactDto
+import com.usaindiacfo.uicdialer.data.api.ContactByPhone
 import com.usaindiacfo.uicdialer.data.api.ContactList
+import com.usaindiacfo.uicdialer.data.api.MyCallLists
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
 /**
@@ -31,6 +34,29 @@ class ContactCache(context: Context) {
             if (v == null) remove(KEY_TODAY) else putString(KEY_TODAY, json.encodeToString(com.usaindiacfo.uicdialer.data.api.FollowUpsToday.serializer(), v))
         }.apply()
 
+    /** Last GET /v1/call-lists, so Call lists opens instantly. */
+    var myLists: MyCallLists?
+        get() = prefs.getString(KEY_MY_LISTS, null)?.let { runCatching { json.decodeFromString(MyCallLists.serializer(), it) }.getOrNull() }
+        set(v) = prefs.edit().apply {
+            if (v == null) remove(KEY_MY_LISTS) else putString(KEY_MY_LISTS, json.encodeToString(MyCallLists.serializer(), v))
+        }.apply()
+
+    /** Last contact detail for this number (keyed by E.164), so the contact screen opens instantly. */
+    fun contact(phone: String): ContactByPhone? = readContacts().firstOrNull { it.phone == phone }?.data
+
+    /** Saves under each given key (raw and E.164); keeps the newest [MAX_CONTACTS] numbers. */
+    @Synchronized
+    fun putContact(keys: Collection<String>, data: ContactByPhone) {
+        val fresh = keys.filter { it.isNotBlank() }.distinct().map { CachedContact(it, data) }
+        if (fresh.isEmpty()) return
+        val rest = readContacts().filter { old -> fresh.none { it.phone == old.phone } }
+        val all = (fresh + rest).take(MAX_CONTACTS)
+        prefs.edit().putString(KEY_CONTACTS, json.encodeToString(CachedContacts.serializer(), CachedContacts(all))).apply()
+    }
+
+    private fun readContacts(): List<CachedContact> =
+        prefs.getString(KEY_CONTACTS, null)?.let { runCatching { json.decodeFromString(CachedContacts.serializer(), it).items }.getOrNull() } ?: emptyList()
+
     /** Also drops the cached outcomes and templates (OutcomeCatalog). */
     fun clear() {
         prefs.edit().clear().apply()
@@ -47,5 +73,11 @@ class ContactCache(context: Context) {
         const val KEY_RECENT = "recent"
         const val KEY_FOLLOW_UPS = "follow_ups"
         const val KEY_TODAY = "today"
+        const val KEY_MY_LISTS = "my_lists"
+        const val KEY_CONTACTS = "contacts_by_phone"
+        const val MAX_CONTACTS = 50
     }
 }
+
+@Serializable private data class CachedContact(val phone: String, val data: ContactByPhone)
+@Serializable private data class CachedContacts(val items: List<CachedContact> = emptyList())

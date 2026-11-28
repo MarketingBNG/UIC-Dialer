@@ -368,6 +368,22 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
 }
 
 /** Builds a query string, dropping empty values (the server rejects e.g. "direction="). */
+/** One problem a staff phone / laptop / browser reported (Health page). */
+export interface ClientErrorDto {
+  id: string;
+  user: { id: string; name: string };
+  source: "android" | "desktop" | "web";
+  device: string | null;
+  kind: string;
+  message: string;
+  createdAt: string;
+}
+
+/** Tells admins about a problem on this computer. Fire-and-forget: a failed report is ignored. */
+export function reportClientError(kind: string, message: string) {
+  api("/v1/client-errors", { method: "POST", body: { kind, message: message.slice(0, 300) } }).catch(() => {});
+}
+
 export function qs(params: Record<string, string | number | undefined | null>) {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== null && v !== "") p.set(k, String(v));

@@ -69,13 +69,16 @@ import java.io.IOException
 fun ListsScreen(onOpenList: (id: String) -> Unit, onBack: () -> Unit) {
     val c = appContainer()
     val scope = rememberCoroutineScope()
-    var lists by remember { mutableStateOf<List<MyCallList>?>(null) }
+    // Start from the last saved lists so the screen opens instantly; refresh in the background.
+    var lists by remember { mutableStateOf<List<MyCallList>?>(c.contactCache.myLists?.items) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     fun load() = scope.launch {
         loading = true
         try {
-            lists = c.apiClient.myCallLists().items
+            val fresh = c.apiClient.myCallLists()
+            lists = fresh.items
+            c.contactCache.myLists = fresh
             error = null
         } catch (e: IOException) {
             error = friendlyError(e)
@@ -90,7 +93,7 @@ fun ListsScreen(onOpenList: (id: String) -> Unit, onBack: () -> Unit) {
             navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         )
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+        if (loading && lists == null) LinearProgressIndicator(Modifier.fillMaxWidth())
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 16.dp)) }
         if (lists?.isEmpty() == true) {
             Text("No call lists yet. Lists your manager assigns to you show up here.", color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp))

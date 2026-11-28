@@ -407,6 +407,24 @@ function updateMenuItems() {
 // ---- startup ------------------------------------------------------------
 
 /**
+ * First run of the installed app: turn "Start with Windows" on, so reps are ready for calls after a reboot.
+ * A marker file records that we did it once, so a rep who turns it off keeps it off.
+ */
+function startWithWindowsByDefault() {
+  if (!app.isPackaged) return;
+  const marker = path.join(app.getPath("userData"), "autostart-default-set");
+  try {
+    if (fs.existsSync(marker)) return;
+    app.setLoginItemSettings({ openAtLogin: true, args: ["--hidden"] });
+    fs.writeFileSync(marker, new Date().toISOString());
+    log("start with Windows turned on (first run)");
+  } catch (e) {
+    log(`could not set start with Windows: ${e}`);
+  }
+  refreshTray();
+}
+
+/**
  * One copy only: a second launch (a desktop shortcut, or Windows delivering a uicdialer:// link) hands its
  * arguments to this one. After an update the new copy may start while the old one still holds the lock, so
  * --updated retries briefly.
@@ -445,6 +463,7 @@ function main() {
     );
     session.defaultSession.setPermissionCheckHandler((wc, perm, origin) => rules.allowPermission(perm, origin || wc?.getURL() || "", APP_URL));
     Menu.setApplicationMenu(null);
+    startWithWindowsByDefault();
     createWindow();
     void createTray();
     updater = startUpdater({ log, onChange: refreshTray, isIdle: () => !win || win.isDestroyed() || !win.isVisible() });

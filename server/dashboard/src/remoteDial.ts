@@ -1,4 +1,4 @@
-import { api } from "./api";
+import { api, reportClientError } from "./api";
 
 /**
  * One-click calling from the laptop: the server asks the UIC app on the rep's phone to dial (it holds a live
@@ -34,11 +34,19 @@ export async function dialOnPhone(clientId: string): Promise<{ result: "placed" 
   window.addEventListener(DIAL_ACK_EVENT, onAck);
   try {
     const { phones } = await api<{ phones: number }>("/api/remote-dial", { method: "POST", body: { clientId } });
-    if (phones === 0) return { result: "unavailable" };
+    // The laptop falls back to its own dialer; let admins see the phone isn't answering.
+    if (phones === 0) {
+      reportClientError("remote_dial_unavailable", "No phone listening for laptop calls");
+      return { result: "unavailable" };
+    }
     const ack = await Promise.race([acked, new Promise<null>((r) => setTimeout(() => r(null), ACK_WAIT_MS))]);
-    if (!ack) return { result: "unavailable" };
+    if (!ack) {
+      reportClientError("remote_dial_unavailable", "Phone did not answer the laptop call in time");
+      return { result: "unavailable" };
+    }
     return ack.ok ? { result: "placed" } : { result: "failed", ...(ack.error ? { error: ack.error } : {}) };
-  } catch {
+  } catch (e) {
+    reportClientError("remote_dial_unavailable", `Could not reach the phone: ${e instanceof Error ? e.message : "error"}`);
     return { result: "unavailable" };
   } finally {
     window.removeEventListener(DIAL_ACK_EVENT, onAck);
