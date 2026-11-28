@@ -22,21 +22,25 @@ const FILTER_KEYS = ["q", "phone", "userId", "ownerId", "direction", "status", "
 const DIR_WORD: Record<string, string> = { INCOMING: "Incoming", OUTGOING: "Outgoing", MISSED: "Missed", UNKNOWN: "Unknown" };
 
 /**
- * The quick chips. Each maps onto the server's filters; ?show=answered|noanswer becomes the
+ * "Show" choices. Each maps onto the server's filters; ?show=answered|noanswer becomes the
  * server's answered=true|false, so old links keep working.
  */
-type Chip = { key: string; label: string; direction?: string; status?: string; show?: string };
-const CHIPS: Chip[] = [
-  { key: "all", label: "All" },
-  { key: "answered", label: "Answered", show: "answered" },
-  { key: "missed", label: "Missed", direction: "MISSED" },
-  { key: "noanswer", label: "No answer", direction: "OUTGOING", show: "noanswer" },
-  { key: "in", label: "Incoming", direction: "INCOMING" },
-  { key: "out", label: "Outgoing", direction: "OUTGOING" },
-  { key: "transcript", label: "Has transcript", status: "TRANSCRIBED" },
-];
-const chipMatches = (c: Chip, direction: string, status: string, show: string) =>
-  (c.direction ?? "") === direction && (c.status ?? "") === status && (c.show ?? "") === show;
+const SHOW_OPTS = [
+  { key: "all", label: "All calls" },
+  { key: "answered", label: "Answered" },
+  { key: "missed", label: "Missed" },
+  { key: "noanswer", label: "No answer" },
+  { key: "transcript", label: "Has transcript" },
+] as const;
+type ShowKey = (typeof SHOW_OPTS)[number]["key"];
+/** Which "Show" choice the URL matches; anything else stays "all" and appears as its own chip. */
+function showKeyOf(direction: string, status: string, show: string): ShowKey {
+  if (show === "answered" && !status) return "answered";
+  if (show === "noanswer" && direction === "OUTGOING" && !status) return "noanswer";
+  if (direction === "MISSED" && !status && !show) return "missed";
+  if (status === "TRANSCRIBED" && !show) return "transcript";
+  return "all";
+}
 
 /** Picked up by the other side: it has a recording, or a call-log entry with talk time. */
 function wasAnswered(c: CallItem) {
@@ -58,8 +62,8 @@ const PRESETS = [
   { key: "any", label: "Any time" },
   { key: "today", label: "Today" },
   { key: "yesterday", label: "Yesterday" },
-  { key: "7", label: "7 days" },
-  { key: "30", label: "30 days" },
+  { key: "7", label: "Last 7 days" },
+  { key: "30", label: "Last 30 days" },
 ];
 
 // Day headers and times are India time, like the date filters.
@@ -144,8 +148,18 @@ export function CallsPage() {
     v: "2",
   };
   const show = get("show");
-  const activeChip = CHIPS.find((c) => chipMatches(c, filters.direction, filters.status, show));
-  const pickChip = (c: Chip) => setMany({ direction: c.direction ?? "", status: c.status ?? "", show: c.show ?? "" });
+  const showKey = showKeyOf(filters.direction, filters.status, show);
+  // Missed and No answer already fix the direction.
+  const dirLocked = showKey === "missed" || showKey === "noanswer";
+  const dirKey = !dirLocked && (filters.direction === "INCOMING" || filters.direction === "OUTGOING") ? filters.direction : "";
+  const pickShow = (k: string) => {
+    // Incoming/Outgoing survives a Show change.
+    if (k === "answered") setMany({ show: "answered", direction: dirKey, status: "" });
+    else if (k === "missed") setMany({ show: "", direction: "MISSED", status: "" });
+    else if (k === "noanswer") setMany({ show: "noanswer", direction: "OUTGOING", status: "" });
+    else if (k === "transcript") setMany({ show: "", direction: dirKey, status: "TRANSCRIBED" });
+    else setMany({ show: "", direction: dirKey, status: showKey === "all" ? filters.status : "" });
+  };
 
   const activePreset = PRESETS.find((p) => {
     const r = presetRange(p.key);
@@ -153,10 +167,16 @@ export function CallsPage() {
   });
   const [customDates, setCustomDates] = useState(false);
   const showDates = customDates || (!activePreset && !!(get("from") || get("to")));
+  const whenKey = showDates ? "custom" : (activePreset?.key ?? "any");
+  const pickWhen = (k: string) => {
+    if (k === "custom") return setCustomDates(true);
+    setCustomDates(false);
+    setMany(presetRange(k));
+  };
 
   const activeCount = [get("phone"), filters.userId, filters.ownerId, filters.direction, filters.status, show, filters.tag, get("from"), get("to")].filter(Boolean).length;
   // Only what sits behind "More filters".
-  const moreCount = [filters.userId, filters.ownerId, filters.tag, admin && !activeChip ? filters.status : ""].filter(Boolean).length;
+  const moreCount = [filters.userId, filters.ownerId, filters.tag, admin && showKey === "all" ? filters.status : ""].filter(Boolean).length;
   const [showFilters, setShowFilters] = useState(() => moreCount > 0);
 
   const users = useQuery({ queryKey: ["users"], queryFn: () => api<User[]>("/api/users"), enabled: manager });
@@ -187,84 +207,96 @@ export function CallsPage() {
 
   const userName = (id: string) => (id === me.id ? "Me" : personName(users.data?.find((u) => u.id === id) ?? { name: null, email: "Someone" }));
   const TAG_LABEL: Record<string, string> = { ANY: "Voicemail or no talk", VOICEMAIL: "Voicemail", NO_SPEECH: "No talk" };
-  // The chip row and date buttons already show their own choice; list the rest here.
+  const SHOW_LABEL = Object.fromEntries(SHOW_OPTS.map((o) => [o.key, o.label])) as Record<ShowKey, string>;
+  const whenLabel = activePreset && !showDates ? activePreset.label : "";
+  // Every active filter as a removable chip, so one glance shows what is narrowing the list.
   const activeChips = [
     search && { key: "q", label: `Search: ${search}`, clear: () => { setQ(""); set("q", ""); } },
     get("phone") && { key: "phone", label: `Number: ${get("phone")}`, clear: () => set("phone", "") },
+    showKey !== "all" && { key: "show", label: `Show: ${SHOW_LABEL[showKey]}`, clear: () => setMany({ show: "", status: "", direction: dirLocked ? "" : dirKey }) },
+    dirKey && { key: "dir", label: `Direction: ${DIR_WORD[dirKey]}`, clear: () => set("direction", "") },
+    showKey === "all" && filters.direction && !dirKey && { key: "dir2", label: DIR_WORD[filters.direction] ?? filters.direction, clear: () => set("direction", "") },
+    showKey === "all" && filters.status && { key: "status", label: STATUS_LABEL[filters.status as CallStatus] ?? filters.status, clear: () => set("status", "") },
+    showKey === "all" && show && { key: "show2", label: show === "answered" ? "Answered" : "No answer", clear: () => set("show", "") },
     filters.userId && { key: "user", label: `Called by: ${userName(filters.userId)}`, clear: () => set("userId", "") },
     filters.ownerId && { key: "owner", label: `Owned by: ${userName(filters.ownerId)}`, clear: () => set("ownerId", "") },
-    !activeChip && filters.direction && { key: "dir", label: DIR_WORD[filters.direction] ?? filters.direction, clear: () => set("direction", "") },
-    !activeChip && filters.status && { key: "status", label: STATUS_LABEL[filters.status as CallStatus] ?? filters.status, clear: () => set("status", "") },
-    !activeChip && show && { key: "show", label: show === "answered" ? "Answered" : "No answer", clear: () => set("show", "") },
     filters.tag && { key: "tag", label: TAG_LABEL[filters.tag] ?? filters.tag, clear: () => set("tag", "") },
-    !activePreset && get("from") && { key: "from", label: `From ${get("from")}`, clear: () => set("from", "") },
-    !activePreset && get("to") && { key: "to", label: `To ${get("to")}`, clear: () => set("to", "") },
+    whenLabel && whenKey !== "any" && { key: "when", label: `When: ${whenLabel}`, clear: () => pickWhen("any") },
+    !whenLabel && get("from") && { key: "from", label: `From ${get("from")}`, clear: () => set("from", "") },
+    !whenLabel && get("to") && { key: "to", label: `To ${get("to")}`, clear: () => set("to", "") },
   ].filter(Boolean) as { key: string; label: string; clear: () => void }[];
 
-  const chipClass = (on: boolean) =>
+  // The label sits inside each control so it reads "Show: Answered", "When: Today".
+  const pickerWrap = (on: boolean) =>
     cn(
-      "min-h-9 shrink-0 rounded-full border px-3 text-sm transition-colors",
-      on ? "border-primary bg-primary-soft font-medium text-primary" : "bg-card text-foreground hover:bg-muted",
+      "flex min-h-11 items-center rounded-md border pl-3 text-sm focus-within:ring-2 focus-within:ring-ring",
+      on ? "border-primary bg-primary-soft text-primary" : "bg-card",
     );
+  const pickerSelect = "min-h-11 cursor-pointer bg-transparent pl-1 pr-2 font-medium outline-none disabled:cursor-not-allowed disabled:opacity-60";
 
   return (
     <>
       <PageHeader title="Calls" subtitle={me.role === "ADMIN" ? "All calls" : me.role === "MANAGER" && me.team ? `Calls from team ${me.team}` : "Your calls"} />
 
       <Card className="mb-4 gap-0 p-3 sm:p-4">
-        <div className="flex flex-wrap gap-2">
-          <Label className="sr-only" htmlFor="q">
-            Search calls
-          </Label>
-          <div className="relative min-w-48 flex-1">
-            <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input id="q" type="search" className="min-h-11 pl-9" placeholder="Name, company, number or words said" value={q} onChange={(e) => setQ(e.target.value)} />
-          </div>
-          <Button variant="outline" className="min-h-11 shrink-0" aria-expanded={showFilters} aria-controls="filters" onClick={() => setShowFilters((s) => !s)}>
+        <Label className="sr-only" htmlFor="q">
+          Search calls
+        </Label>
+        <div className="relative">
+          <Search aria-hidden className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input id="q" type="search" className="min-h-11 pl-9" placeholder="Name, company, number or words said" value={q} onChange={(e) => setQ(e.target.value)} />
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <label className={pickerWrap(showKey !== "all")}>
+            <span className="text-muted-foreground">Show:</span>
+            <select className={pickerSelect} value={showKey} onChange={(e) => pickShow(e.target.value)}>
+              {SHOW_OPTS.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={pickerWrap(!!dirKey)} title={dirLocked ? `${SHOW_LABEL[showKey]} already picks the direction` : undefined}>
+            <span className="text-muted-foreground">Direction:</span>
+            <select className={pickerSelect} value={dirKey} disabled={dirLocked} onChange={(e) => set("direction", e.target.value)}>
+              <option value="">{dirLocked ? (showKey === "missed" ? "Incoming" : "Outgoing") : "All"}</option>
+              <option value="INCOMING">Incoming</option>
+              <option value="OUTGOING">Outgoing</option>
+            </select>
+          </label>
+          <label className={pickerWrap(whenKey !== "any")}>
+            <span className="text-muted-foreground">When:</span>
+            <select className={pickerSelect} value={whenKey} onChange={(e) => pickWhen(e.target.value)}>
+              {PRESETS.map((p) => (
+                <option key={p.key} value={p.key}>
+                  {p.label}
+                </option>
+              ))}
+              <option value="custom">Custom range…</option>
+            </select>
+          </label>
+          <Button variant="outline" className="min-h-11" aria-expanded={showFilters} aria-controls="filters" onClick={() => setShowFilters((s) => !s)}>
             <SlidersHorizontal /> More filters{moreCount ? ` (${moreCount})` : ""}
           </Button>
           {manager && (
             // Same filters as the list; the server caps the file at 10,000 calls and audit-logs the export.
-            <Button asChild variant="outline" className="min-h-11 shrink-0">
-              <a href={`/api/calls/export${qs(filters)}`} download>
-                <Download /> Export CSV
-              </a>
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button asChild variant="ghost" size="icon" className="ml-auto size-11 shrink-0">
+                  <a href={`/api/calls/export${qs(filters)}`} download aria-label="Export these calls as CSV">
+                    <Download />
+                  </a>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Export these calls (CSV)</TooltipContent>
+            </Tooltip>
           )}
         </div>
 
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Show">
-          {CHIPS.map((c) => (
-            <button key={c.key} type="button" aria-pressed={activeChip?.key === c.key} className={chipClass(activeChip?.key === c.key)} onClick={() => pickChip(c)}>
-              {c.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="mt-2 flex gap-2 overflow-x-auto pb-1" role="group" aria-label="Date">
-          {PRESETS.map((p) => {
-            const on = !showDates && activePreset?.key === p.key;
-            return (
-              <button
-                key={p.key}
-                type="button"
-                aria-pressed={on}
-                className={chipClass(on)}
-                onClick={() => {
-                  setCustomDates(false);
-                  setMany(presetRange(p.key));
-                }}
-              >
-                {p.label}
-              </button>
-            );
-          })}
-          <button type="button" aria-pressed={showDates} className={chipClass(showDates)} onClick={() => setCustomDates(true)}>
-            Custom
-          </button>
-        </div>
         {showDates && (
-          <div className="mt-2 grid grid-cols-2 gap-3 sm:max-w-md">
+          <div className="mt-3 grid grid-cols-2 gap-3 sm:max-w-md">
             <div>
               <Label htmlFor="f-from">From (IST)</Label>
               <Input id="f-from" type="date" value={get("from")} max={get("to") || undefined} onChange={(e) => set("from", e.target.value)} />
@@ -338,7 +370,7 @@ export function CallsPage() {
                 </button>
               </Badge>
             ))}
-            <Button variant="ghost" size="sm" onClick={clear}>
+            <Button variant="link" size="sm" onClick={clear}>
               Clear all
             </Button>
           </div>

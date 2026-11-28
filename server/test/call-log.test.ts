@@ -92,6 +92,30 @@ describe("POST /v1/calls/log", () => {
     expect((await t.db.call.findUniqueOrThrow({ where: { id: log.callId } })).status).toBe("UPLOADED");
   });
 
+  it("attaches an incoming recording named by contact (no number, file-name time) to its call-log row", async () => {
+    const s = await t.loginDevice(uniqueEmail());
+    const [log] = (await postLog(s.headers, [{ phoneNumber: "+919866666666", type: "INCOMING", startedAt: at(60), durationS: 20 }])).json().results;
+    // The phone could not match the call log: no number, UNKNOWN direction, start = answer time 40 s after ringing.
+    const answered = new Date(Date.parse(at(60)) + 40_000).toISOString();
+    const { created, put } = await uploadRecording(s.headers, { contactName: "Ravi Client", direction: "UNKNOWN", startedAt: answered });
+    expect(created.json().callId).toBe(log.callId);
+    expect(put.statusCode).toBe(201);
+    const rows = await t.db.call.findMany({ where: { userId: s.user.id } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: "UPLOADED", direction: "INCOMING", phoneE164: "+919866666666", logType: "INCOMING" });
+  });
+
+  it("does not attach a recording to a call with another number or far away in time", async () => {
+    const s = await t.loginDevice(uniqueEmail());
+    await postLog(s.headers, [{ phoneNumber: "+919877777777", type: "INCOMING", startedAt: at(70), durationS: 20 }]);
+    const near = new Date(Date.parse(at(70)) + 10_000).toISOString();
+    await uploadRecording(s.headers, { phoneNumber: "9800000001", direction: "INCOMING", startedAt: near });
+    await uploadRecording(s.headers, { direction: "UNKNOWN", startedAt: at(80) });
+    const rows = await t.db.call.findMany({ where: { userId: s.user.id } });
+    expect(rows).toHaveLength(3);
+    expect(rows.filter((r) => r.status === "NO_RECORDING")).toHaveLength(1);
+  });
+
   it("does not duplicate a call whose recording arrived first", async () => {
     const s = await t.loginDevice(uniqueEmail());
     const { created } = await uploadRecording(s.headers, { phoneNumber: "9822222222", direction: "OUTGOING", startedAt: at(20), durationS: 30 });

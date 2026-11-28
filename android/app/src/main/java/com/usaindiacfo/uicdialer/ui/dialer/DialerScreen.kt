@@ -8,6 +8,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.ripple
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -98,7 +99,8 @@ fun DialerScreen(onOpenContact: (phone: String) -> Unit) {
             val match = state.matches.firstOrNull()
             if (match != null) MatchCard(match) { onOpenContact(match.phoneE164) }
             state.suggestions.filter { s -> match == null || !DialLogic.sameNumber(s.number, match.phoneE164) }.take(4).forEach { s ->
-                SuggestionRow(s, onPick = { vm.setNumber(DialLogic.cleanNumber(s.number).take(40)) }, onCall = { call(s.number) })
+                // Keyed by number so a row that stays in the list keeps its place and state while typing.
+                key(s.number) { SuggestionRow(s, onPick = { vm.setNumber(DialLogic.cleanNumber(s.number).take(40)) }, onCall = { call(s.number) }) }
             }
             if (match == null && canDial) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 TextButton(onClick = { onOpenContact(number) }) { Text("Notes") }

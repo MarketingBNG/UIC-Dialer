@@ -122,7 +122,9 @@ async function attachOrCreate(deps: Deps, userId: string, sha: string, data: Cal
   for (let attempt = 0; ; attempt++) {
     const bySha = await deps.db.call.findUnique({ where: { userId_originalSha256: { userId, originalSha256: sha } } });
     if (bySha) return bySha;
-    const logRow = await deps.db.call.findUnique({ where: { userId_callLogKey: { userId, callLogKey: logKey } } });
+    const logRow =
+      (await deps.db.call.findUnique({ where: { userId_callLogKey: { userId, callLogKey: logKey } } })) ??
+      (await nearbyLogRow(deps, userId, data));
     try {
       if (logRow?.status === "NO_RECORDING") {
         // The call log's own metadata stays; the recording adds the file and its name.
@@ -152,6 +154,46 @@ async function attachOrCreate(deps: Deps, userId: string, sha: string, data: Cal
     // Lost a race with another request for the same file or call: look again.
     if (attempt >= 3) throw new HttpError(409, "Call is being registered; try again");
   }
+}
+
+/** How far a recording's start may sit from its call-log row: ring time (incoming) plus clock skew. */
+const NEAR_BEFORE_MS = 30_000;
+const NEAR_AFTER_MS = 120_000;
+
+/**
+ * A recording the phone could not match to its call log (e.g. an incoming call saved under the contact's name with
+ * no number, timed from the file name) has a slightly different start than the call-log row, so the exact key
+ * misses and the call showed twice: "No recording" plus a stray recording. Find the answered call-log row it
+ * belongs to: same number when both have one; with no number, only when exactly one row fits.
+ */
+async function nearbyLogRow(deps: Deps, userId: string, data: CallData): Promise<CallRow | null> {
+  if (data.direction === "MISSED") return null;
+  const at = data.startedAt.getTime();
+  const rows = await deps.db.call.findMany({
+    where: {
+      userId,
+      status: "NO_RECORDING",
+      durationS: { gt: 0 },
+      direction: data.direction === "UNKNOWN" ? { in: ["INCOMING", "OUTGOING"] } : data.direction,
+      startedAt: { gte: new Date(at - NEAR_AFTER_MS - 6 * 3600_000), lte: new Date(at + NEAR_BEFORE_MS) },
+    },
+    orderBy: { startedAt: "desc" },
+    take: 20,
+  });
+  const digits = (p: string | null) => {
+    const d = (p ?? "").replace(/\D/g, "");
+    return d.length >= 10 ? d.slice(-10) : d;
+  };
+  const mine = digits(data.phoneRaw);
+  const fits = rows.filter((r) => {
+    const start = r.startedAt.getTime();
+    // The recording starts between the row's start and its end plus a ring.
+    if (at < start - NEAR_BEFORE_MS || at > start + (r.durationS ?? 0) * 1000 + NEAR_AFTER_MS) return false;
+    const theirs = digits(r.phoneRaw);
+    return !mine || !theirs || mine === theirs;
+  });
+  if (mine) return fits.find((r) => digits(r.phoneRaw) === mine) ?? (fits.length === 1 ? fits[0]! : null);
+  return fits.length === 1 ? fits[0]! : null;
 }
 
 /** SIMs, via, missed-call tasks and the outcome link: the same for recordings and call-log entries. */

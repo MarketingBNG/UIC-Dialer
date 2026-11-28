@@ -40,6 +40,18 @@ class CallLogMatcherTest {
         assertNull(CallLogMatcher.bestMatch(listOf(next), t0 + 140_000, t0 + 8_000))
     }
 
+    @Test fun incomingShortCallAfterLongRingMatches() {
+        // Rang 45 s, talked 10 s: the log says start t0 / 10 s, the file is named at the answer (t0+45 s)
+        // and last written at the hang-up (t0+55 s). This used to be rejected, so the recording was never linked.
+        val inc = CallLogEntry("+919811111111", INCOMING, t0, 10, null)
+        assertSame(inc, CallLogMatcher.bestMatch(listOf(inc), t0 + 55_000, t0 + 45_000))
+    }
+
+    @Test fun outgoingGetsNoRingAllowance() {
+        val out = CallLogEntry("+919811111111", OUTGOING, t0, 10, null)
+        assertNull(CallLogMatcher.bestMatch(listOf(out), t0 + 55_000, t0 + 45_000))
+    }
+
     @Test fun noMatchOutsideTolerance() {
         assertNull(CallLogMatcher.bestMatch(listOf(a), t0 + 300_000 + CallLogMatcher.TOLERANCE_MS + 1, null))
     }

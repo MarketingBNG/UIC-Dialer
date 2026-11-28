@@ -51,20 +51,25 @@ class DialerViewModel(private val c: AppContainer, private val app: android.cont
     /** Off the main thread: thousands of phone contacts made this freeze the keypad. */
     private fun suggest() {
         suggestJob?.cancel()
-        suggestJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) { suggestNow() }
+        val n = _state.value.number
+        suggestJob = viewModelScope.launch(kotlinx.coroutines.Dispatchers.Default) { suggestNow(n) }
     }
 
-    private fun suggestNow() {
-        val n = _state.value.number
+    private fun suggestNow(n: String) {
         val crm = (_state.value.matches + c.contactCache.recent + c.contactCache.followUps).map { it.name to it.phoneE164 }
         val list = com.usaindiacfo.uicdialer.phonebook.PhoneBookLogic.suggestions(n, phoneContacts, crm, recents)
         val key = com.usaindiacfo.uicdialer.phonebook.PhoneBookLogic.numberKey(n)
         val saved = key != null && phoneContacts.any { com.usaindiacfo.uicdialer.phonebook.PhoneBookLogic.numberKey(it.number) == key }
-        _state.update { it.copy(suggestions = list, savedOnPhone = saved) }
+        // cancel() can't stop a run already in progress, so an older, slower run could land after a newer
+        // one and swap the rows back and forth while typing. Only the run for the current input may write.
+        _state.update { if (it.number != n) it else it.copy(suggestions = list, savedOnPhone = saved) }
     }
 
     fun setNumber(n: String) {
-        _state.update { it.copy(number = n) }
+        // Drop a card that no longer fits right away instead of 250 ms later, so it doesn't flash stale.
+        _state.update { s ->
+            s.copy(number = n, matches = if (lookupTerm(n) == null) emptyList() else s.matches.filter { matchesQuery(it, n) })
+        }
         query.value = n
         suggest()
     }
@@ -86,6 +91,8 @@ class DialerViewModel(private val c: AppContainer, private val app: android.cont
         } catch (e: IOException) {
             c.contactCache.recent.filter { matchesQuery(it, q) } // offline: the saved list
         }
+        // Ignore an answer for input the rep has already changed.
+        if (_state.value.number != q) return
         _state.update { it.copy(matches = found) }
         suggest()
     }
@@ -98,7 +105,8 @@ internal fun lookupTerm(q: String): String? = q.trim().takeIf { it.length >= 3 }
 internal fun matchesQuery(c: ContactDto, q: String): Boolean {
     val t = q.trim()
     if (t.isEmpty()) return true
-    val digits = t.filter(Char::isDigit)
+    // Leading 0 (trunk prefix) isn't in the stored +91 number, so drop it or a typed 098.. never matches.
+    val digits = t.filter(Char::isDigit).trimStart('0')
     return c.name?.contains(t, ignoreCase = true) == true || c.company?.contains(t, ignoreCase = true) == true ||
         (digits.isNotEmpty() && c.phoneE164.filter(Char::isDigit).contains(digits))
 }

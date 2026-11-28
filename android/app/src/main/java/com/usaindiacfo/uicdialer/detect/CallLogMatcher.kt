@@ -38,6 +38,12 @@ object CallLogMatcher {
     private const val WINDOW_BEFORE_MS = 6 * 3600_000L
     /** Clock skew allowed between a file name's start time and the call log. */
     const val NAME_SLACK_MS = 30_000L
+    /**
+     * Incoming calls: CallLog DATE is when the phone started ringing but DURATION counts only talk time, while the
+     * recorder starts (and names the file) when the rep answers. So the file starts up to a ring later than DATE
+     * and ends a ring later than DATE + DURATION. Without this, a short answered call after a long ring was rejected.
+     */
+    const val RING_MS = 90_000L
 
     /**
      * Pure matching. Recorders name files with the call start and write the file until the call ends,
@@ -48,11 +54,12 @@ object CallLogMatcher {
             .filter { it.type != CallLog.Calls.MISSED_TYPE && it.type != CallLog.Calls.REJECTED_TYPE }
             // A recording can't start well before its call or after it ended: without this, the previous call's
             // file (finished just as this call started) matched this call and became a duplicate row.
-            .filter { e -> nameStartMs == null || nameStartMs in (e.dateMs - NAME_SLACK_MS)..(e.endMs + NAME_SLACK_MS) }
+            .filter { e -> nameStartMs == null || nameStartMs in (e.dateMs - NAME_SLACK_MS)..(e.endMs + ring(e) + NAME_SLACK_MS) }
             .map { e ->
+                val r = ring(e)
                 val gaps = buildList {
-                    add(abs(e.endMs - fileModifiedMs))
-                    nameStartMs?.let { add(abs(e.dateMs - it)) }
+                    add(gap(fileModifiedMs, e.endMs, e.endMs + r))
+                    nameStartMs?.let { add(gap(it, e.dateMs, e.dateMs + r)) }
                     // Some recorders stamp the file at call start.
                     add(abs(e.dateMs - fileModifiedMs))
                 }
@@ -60,6 +67,11 @@ object CallLogMatcher {
             }
             .filter { it.second <= TOLERANCE_MS }
             .minByOrNull { it.second }?.first
+
+    private fun ring(e: CallLogEntry) = if (e.direction == Direction.INCOMING) RING_MS else 0L
+
+    /** Distance from [t] to the range [from]..[to] (0 inside it). */
+    private fun gap(t: Long, from: Long, to: Long) = if (t in from..to) 0L else minOf(abs(t - from), abs(t - to))
 
     /** Combines a CallLog match with the file-name fallback. */
     fun resolve(entry: CallLogEntry?, parsed: ParsedName, fileModifiedMs: Long): CallMatch =
