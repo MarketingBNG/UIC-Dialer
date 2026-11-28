@@ -190,10 +190,57 @@ function AdvancedTab() {
                 ? `${settings.data.latestApp.versionName} (${settings.data.latestApp.versionCode}) · ${settings.data.latestApp.fileName}`
                 : "No app version published yet."}
             </Card>
+            <AppUpdateForm key={`${settings.data.deviceConfig.minVersionCode}-${settings.data.deviceConfig.requireLatest}`} initial={settings.data.deviceConfig} />
           </>
         )}
       </div>
     </details>
+  );
+}
+
+/** Force update: phones older than this must update (the app installs it and shows "Update required"). */
+function AppUpdateForm({ initial }: { initial: DeviceConfig }) {
+  const qc = useQueryClient();
+  const [min, setMin] = useState(initial.minVersionCode ? String(initial.minVersionCode) : "");
+  const [requireLatest, setRequireLatest] = useState(initial.requireLatest);
+  const minOk = min.trim() === "" || /^[1-9]\d{0,8}$/.test(min.trim());
+  const body = { minVersionCode: min.trim() ? Number(min.trim()) : null, requireLatest };
+  const dirty = body.minVersionCode !== initial.minVersionCode || requireLatest !== initial.requireLatest;
+  const save = useMutation({
+    mutationFn: () => api<DeviceConfig>("/api/settings/app-update", { method: "PUT", body }),
+    onSuccess: (data) => {
+      toast.success("Saved. Older phones will be asked to update.");
+      qc.setQueryData<Settings>(["settings"], (s) => (s ? { ...s, deviceConfig: data } : s));
+    },
+  });
+  return (
+    <>
+      <h3 className="mb-2 mt-6 font-semibold">Required app version</h3>
+      <Card className="p-4">
+        <form
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (minOk && dirty) save.mutate();
+          }}
+        >
+          <SettingSwitch id="s-require-latest" label="Always require the latest version" hint="Phones must install each new version." checked={requireLatest} onChange={setRequireLatest} />
+          {!requireLatest && (
+            <div>
+              <Label htmlFor="s-min-version">Lowest version allowed (version code)</Label>
+              <Input id="s-min-version" inputMode="numeric" className="w-32" value={min} onChange={(e) => setMin(e.target.value)} aria-describedby="s-min-version-hint" aria-invalid={!minOk} />
+              <Hint id="s-min-version-hint" className={minOk ? "" : "text-destructive"}>
+                Older phones must update. Leave empty for no limit.
+              </Hint>
+            </div>
+          )}
+          <Button type="submit" disabled={!dirty || !minOk || save.isPending}>
+            <Save aria-hidden />
+            Save
+          </Button>
+        </form>
+      </Card>
+    </>
   );
 }
 
@@ -232,6 +279,9 @@ function DeviceConfigForm({ initial }: { initial: DeviceConfig }) {
     compressAudio: form.compressAudio,
     // Set on the Leads & numbers tab; always the saved value here.
     businessOnly: initial.businessOnly,
+    // Set in "Required app version" below; always the saved values here.
+    minVersionCode: initial.minVersionCode,
+    requireLatest: initial.requireLatest,
   };
   const dirty = JSON.stringify(config) !== JSON.stringify(initial);
 

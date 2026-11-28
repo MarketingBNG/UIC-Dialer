@@ -15,6 +15,10 @@ describe("daily phone report", () => {
     const p = phoneProblems({ ...ok, permissionsOk: false, recordings7d: 2, pendingCount: 900, lastSyncAt: new Date("2026-11-24T00:00:00Z"), appVersion: "0.3.84" }, "0.3.131", now);
     expect(p.join(" | ")).toMatch(/permissions missing.*recording off.*900 waiting.*no upload since 2026-11-24.*old app 0.3.84/);
   });
+  it("flags a phone still making duplicate recordings", () => {
+    expect(phoneProblems({ ...ok, dupes7d: 1 }, "0.3.131", now)).toEqual([]);
+    expect(phoneProblems({ ...ok, dupes7d: 3 }, "0.3.131", now)).toEqual(["3 duplicate recordings this week (update the app)"]);
+  });
   it("summarizes only phones that need attention", () => {
     const t = reportText([ok, { ...ok, email: "b@x.com", permissionsOk: false }], "0.3.131", now);
     expect(t).toContain("2 phones, 1 need attention");

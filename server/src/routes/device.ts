@@ -7,7 +7,7 @@ import { z } from "zod";
 import { requireDevice } from "../auth/guards.js";
 import { HttpError, currentDevice, currentUser, type Deps } from "../context.js";
 import { hashKey } from "../privacy/clientNumbers.js";
-import { getSettings } from "../settings.js";
+import { getSettings, updateRequired } from "../settings.js";
 import { SimReport, setSimNumber, upsertSims } from "../devices/sims.js";
 
 const Heartbeat = z.object({
@@ -100,10 +100,13 @@ export async function deviceRoutes(app: FastifyInstance, deps: Deps) {
     return reply.code(204).send();
   });
 
-  app.get("/v1/app/latest", auth, async () => {
-    const { latestApp } = await getSettings(deps.db);
-    if (!latestApp) return { available: false };
-    return { available: true, ...latestApp, downloadPath: "/v1/app/download" };
+  app.get("/v1/app/latest", auth, async (req) => {
+    const { latestApp, deviceConfig } = await getSettings(deps.db);
+    if (!latestApp) return { available: false, required: false };
+    // Phones send their own versionCode (?versionCode=N) so the server can say "you must update".
+    const code = z.coerce.number().int().positive().safeParse((req.query as Record<string, unknown>)?.versionCode);
+    const required = updateRequired(deviceConfig, latestApp, code.success ? code.data : null);
+    return { available: true, ...latestApp, downloadPath: "/v1/app/download", required };
   });
 
   // Public link for first installs (people without the app yet). Sign-in still limits who can use it.

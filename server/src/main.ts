@@ -70,6 +70,7 @@ if (!oidc) app.log.warn("GOOGLE_WEB_CLIENT_SECRET not set: dashboard sign-in dis
 const stopAlerts = config.CLIQ_WEBHOOK_URL
   ? startAlertLoop(db, storage, cliqSender(config.CLIQ_WEBHOOK_URL, (m) => app.log.warn(m)), (err) =>
       app.log.error({ err }, "alert checks failed"),
+      (m) => app.log.info(m),
     )
   : (app.log.warn("CLIQ_WEBHOOK_URL not set: alerts disabled"), () => {});
 

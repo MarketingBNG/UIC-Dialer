@@ -33,6 +33,13 @@ object UpdateStatus {
         e.apply()
     }
 
+    /** Admin requires a newer version than this one (from the last check). */
+    fun setRequired(context: Context, required: Boolean) {
+        if (isRequired(context) != required) prefs(context).edit().putBoolean("required", required).apply()
+    }
+
+    fun isRequired(context: Context): Boolean = prefs(context).getBoolean("required", false)
+
     fun read(context: Context): Snapshot {
         noteCurrentVersion(context)
         val p = prefs(context)

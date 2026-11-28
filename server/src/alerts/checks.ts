@@ -3,6 +3,7 @@ import { firefliesUsage } from "../fireflies/budget.js";
 import type { LocalStorage } from "../storage/local.js";
 import { type AlertSender, resolveAlert, sendAlert } from "./cliq.js";
 import { jobStats } from "./metrics.js";
+import { nightlyDedupe } from "../calls/dedupe.js";
 import { dailyPhoneReport } from "./dailyReport.js";
 import { CALLS_NO_REC_MIN, HEALTH_FRESH_MS, LOW_REC_MIN_CALLS, fewRecordings } from "../devices/health.js";
 import { translationUsage } from "../translation/cost.js";
@@ -236,6 +237,7 @@ export function startAlertLoop(
   storage: LocalStorage,
   send: AlertSender,
   onError: (err: unknown) => void,
+  log: (msg: string) => void = () => {},
 ): () => void {
   let running = false;
   const tick = async () => {
@@ -244,6 +246,7 @@ export function startAlertLoop(
     try {
       await runChecks(db, storage, send);
       await dailyPhoneReport(db, send).catch(() => false);
+      await nightlyDedupe(db, log).catch(onError);
     } catch (err) {
       onError(err);
     } finally {

@@ -19,6 +19,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import com.usaindiacfo.uicdialer.R
 import com.usaindiacfo.uicdialer.container
 import com.usaindiacfo.uicdialer.reminders.Notifications
@@ -36,7 +37,10 @@ object AutoUpdate {
     private const val NOTIF_ID = 9104
     const val ACTION_STATUS = "com.usaindiacfo.uicdialer.UPDATE_STATUS"
 
+    private const val REQUIRED_ONLY = "requiredOnly"
+
     fun schedule(context: Context) {
+        checkRequired(context, ExistingWorkPolicy.KEEP) // app start: a required update shouldn't wait for Wi-Fi
         WorkManager.getInstance(context).enqueueUniquePeriodicWork(
             WORK, ExistingPeriodicWorkPolicy.KEEP,
             PeriodicWorkRequestBuilder<AutoUpdateWorker>(4, TimeUnit.HOURS)
@@ -54,6 +58,35 @@ object AutoUpdate {
                 .build(),
         )
     }
+
+    /**
+     * Required update: check on any network, and only download if the server says this phone must update
+     * (a normal update still waits for Wi-Fi).
+     */
+    fun checkRequired(context: Context, policy: ExistingWorkPolicy = ExistingWorkPolicy.REPLACE) {
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "$WORK-required", policy,
+            OneTimeWorkRequestBuilder<AutoUpdateWorker>()
+                .setInputData(workDataOf(REQUIRED_ONLY to true))
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .build(),
+        )
+    }
+
+    /** While an update is required, keep retrying hourly on any network; stop once it isn't. */
+    internal fun keepRetryingRequired(context: Context, required: Boolean) {
+        val wm = WorkManager.getInstance(context)
+        if (!required) { wm.cancelUniqueWork("$WORK-required-periodic"); return }
+        wm.enqueueUniquePeriodicWork(
+            "$WORK-required-periodic", ExistingPeriodicWorkPolicy.KEEP,
+            PeriodicWorkRequestBuilder<AutoUpdateWorker>(1, TimeUnit.HOURS)
+                .setInputData(workDataOf(REQUIRED_ONLY to true))
+                .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .build(),
+        )
+    }
+
+    internal fun requiredOnly(params: WorkerParameters) = params.inputData.getBoolean(REQUIRED_ONLY, false)
 
     /** Silent install through a PackageInstaller session; the result arrives at [UpdateStatusReceiver]. */
     fun installSession(context: Context, apk: File) {
@@ -75,6 +108,7 @@ object AutoUpdate {
 
     /** "Update ready - tap to install", opening [tap] (the system installer). */
     fun notifyReady(context: Context, tap: Intent) {
+        val required = UpdateStatus.isRequired(context)
         if (Build.VERSION.SDK_INT >= 26) {
             context.getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(CHANNEL, "App updates", NotificationManager.IMPORTANCE_DEFAULT)
@@ -87,9 +121,10 @@ object AutoUpdate {
         )
         val n = NotificationCompat.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat_call)
-            .setContentTitle("Update ready")
+            .setContentTitle(if (required) "Update required" else "Update ready")
             .setContentText("Tap to install the new version of UIC Dialer.")
             .setAutoCancel(true)
+            .setOngoing(required)
             .setContentIntent(pending)
             .build()
         Notifications.notify(context, NOTIF_ID, n)
@@ -101,7 +136,7 @@ object AutoUpdate {
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
 }
 
-class AutoUpdateWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
+class AutoUpdateWorker(context: Context, private val params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val ctx = applicationContext
         UpdateStatus.noteCurrentVersion(ctx)
@@ -110,10 +145,13 @@ class AutoUpdateWorker(context: Context, params: WorkerParameters) : CoroutineWo
             UpdateStatus.record(ctx, "Check failed: ${it.message ?: "no connection"}")
             return Result.success()
         }
+        val required = AppUpdater.isRequired(latest, com.usaindiacfo.uicdialer.BuildConfig.VERSION_CODE)
+        AutoUpdate.keepRetryingRequired(ctx, required)
         if (latest == null) {
             UpdateStatus.record(ctx, "Up to date")
             return Result.success()
         }
+        if (AutoUpdate.requiredOnly(params) && !required) return Result.success() // normal update: waits for Wi-Fi
         val v = "v${latest.versionName ?: latest.versionCode}"
         UpdateStatus.record(ctx, "Downloading $v")
         val apk = runCatching { updater.download(latest) }.getOrElse {

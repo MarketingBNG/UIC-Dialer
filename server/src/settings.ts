@@ -10,6 +10,10 @@ export const DeviceConfig = z.object({
   maxParallelUploads: z.number().int().min(1).max(4),
   compressAudio: z.boolean(),
   businessOnly: z.boolean(),
+  /** Force update: phones below this versionCode must update (null = no forcing). Defaults keep older saved rows valid. */
+  minVersionCode: z.number().int().positive().max(2_000_000_000).nullable().default(null),
+  /** Force update: every newly published version is required. */
+  requireLatest: z.boolean().default(false),
 });
 export type DeviceConfig = z.infer<typeof DeviceConfig>;
 
@@ -32,7 +36,22 @@ export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
   maxParallelUploads: 2,
   compressAudio: true,
   businessOnly: false,
+  minVersionCode: null,
+  requireLatest: false,
 };
+
+export const AppUpdatePolicy = DeviceConfig.pick({ minVersionCode: true, requireLatest: true });
+export type AppUpdatePolicy = z.infer<typeof AppUpdatePolicy>;
+
+/**
+ * Must the phone on [deviceCode] update? Only when a newer build is published (so it can), and that build is
+ * below the minimum. Unknown device version (older apps) is never forced.
+ */
+export function updateRequired(policy: AppUpdatePolicy, latest: { versionCode: number } | null, deviceCode: number | null | undefined): boolean {
+  if (!latest || !deviceCode || deviceCode >= latest.versionCode) return false;
+  const min = policy.requireLatest ? latest.versionCode : policy.minVersionCode;
+  return min != null && deviceCode < min;
+}
 
 export const LatestApp = z.object({
   versionCode: z.number().int().positive(),

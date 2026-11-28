@@ -136,6 +136,8 @@ data class LatestApp(
     val sha256: String? = null,
     val fileName: String? = null,
     val downloadPath: String? = null,
+    /** Admin set a minimum version above this phone's: it must update. Absent from older servers. */
+    val required: Boolean = false,
 )
 
 // ---- Dashboard API (/api, Bearer accepted) -----------------------------------

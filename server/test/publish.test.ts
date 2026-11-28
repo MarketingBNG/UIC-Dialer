@@ -65,3 +65,32 @@ describe("POST /internal/app/publish", () => {
     expect((await t.app.inject({ url: "/v1/app/latest", headers: phone.headers })).json().versionCode).toBe(103);
   });
 });
+
+describe("force update", () => {
+  it("tells phones below the admin minimum they must update, and keeps the policy when other settings are saved", async () => {
+    const admin = await t.loginDevice(uniqueEmail(), "ADMIN");
+    const phone = await t.loginDevice(uniqueEmail());
+    const latest = (code?: number) =>
+      t.app.inject({ url: `/v1/app/latest${code ? `?versionCode=${code}` : ""}`, headers: phone.headers }).then((r) => r.json());
+    try {
+      expect((await latest(90)).required).toBe(false);
+      const put = await t.app.inject({ method: "PUT", url: "/api/settings/app-update", headers: admin.headers, payload: { minVersionCode: 100, requireLatest: false } });
+      expect(put.statusCode).toBe(200);
+      expect((await latest(99)).required).toBe(true);
+      expect((await latest(100)).required).toBe(false);
+      expect((await latest()).required).toBe(false); // older apps don't send their version
+
+      const cfg = (await t.app.inject({ url: "/api/settings", headers: admin.headers })).json().deviceConfig;
+      const { minVersionCode: _m, requireLatest: _r, ...rest } = cfg;
+      await t.app.inject({ method: "PUT", url: "/api/settings/device-config", headers: admin.headers, payload: rest });
+      expect((await latest(99)).required).toBe(true);
+
+      await t.app.inject({ method: "PUT", url: "/api/settings/app-update", headers: admin.headers, payload: { minVersionCode: null, requireLatest: true } });
+      expect((await latest(102)).required).toBe(true);
+      expect((await latest(103)).required).toBe(false);
+      expect((await t.app.inject({ method: "PUT", url: "/api/settings/app-update", headers: phone.headers, payload: { minVersionCode: 1, requireLatest: false } })).statusCode).toBe(403);
+    } finally {
+      await t.app.inject({ method: "PUT", url: "/api/settings/app-update", headers: admin.headers, payload: { minVersionCode: null, requireLatest: false } });
+    }
+  });
+});

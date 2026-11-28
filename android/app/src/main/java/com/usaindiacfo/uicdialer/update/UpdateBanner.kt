@@ -42,9 +42,16 @@ fun UpdateBanner(modifier: Modifier = Modifier, checkKey: Any = Unit) {
     LaunchedEffect(checkKey) { latest = runCatching { updater.check() }.getOrNull() }
     val l = latest ?: return
 
-    Card(modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)) {
+    val required = l.required
+    val colors = if (required) CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
+    else CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer)
+    Card(modifier.fillMaxWidth(), colors = colors) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Update available: ${l.versionName ?: l.versionCode}", style = MaterialTheme.typography.titleSmall)
+            Text(
+                if (required) "Update required - tap to install" else "Update available: ${l.versionName ?: l.versionCode}",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            if (required) Text("Calls and recordings keep working until you update.", style = MaterialTheme.typography.bodySmall)
             if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
             error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -68,7 +75,7 @@ fun UpdateBanner(modifier: Modifier = Modifier, checkKey: Any = Unit) {
                             busy = false
                         }
                     }
-                }) { Text(if (busy) "Downloading..." else "Update") }
+                }) { Text(if (busy) "Downloading..." else if (required) "Install" else "Update") }
             }
         }
     }

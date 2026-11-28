@@ -28,7 +28,9 @@ class AppUpdater(private val context: Context, private val api: ApiClient) {
             }?.forEach { it.delete() }
         }
         val latest = api.latestApp()
-        return latest.takeIf { it.available && (it.versionCode ?: 0) > BuildConfig.VERSION_CODE && !it.sha256.isNullOrBlank() }
+        val newer = latest.takeIf { isNewer(it, BuildConfig.VERSION_CODE) }
+        UpdateStatus.setRequired(context, isRequired(newer, BuildConfig.VERSION_CODE))
+        return newer
     }
 
     /** Downloads and verifies the APK; throws IOException on network error or hash mismatch. */
@@ -79,6 +81,13 @@ class AppUpdater(private val context: Context, private val api: ApiClient) {
         const val UPDATE_DIR = "updates"
         private val APK_RE = Regex("""uic-recorder-(\d+)\.apk""")
         fun authority(context: Context) = "${context.packageName}.updates"
+
+        /** A published build newer than [current] that can be verified. */
+        fun isNewer(latest: LatestApp, current: Int): Boolean =
+            latest.available && (latest.versionCode ?: 0) > current && !latest.sha256.isNullOrBlank()
+
+        /** The server says this phone must update, and there is a newer build to install. */
+        fun isRequired(latest: LatestApp?, current: Int): Boolean = latest != null && latest.required && isNewer(latest, current)
 
         fun sha256(file: File): String {
             val md = MessageDigest.getInstance("SHA-256")

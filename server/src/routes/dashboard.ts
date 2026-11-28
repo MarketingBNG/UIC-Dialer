@@ -3,7 +3,7 @@ import { z } from "zod";
 import { callScope, requireSession } from "../auth/guards.js";
 import { HttpError, currentUser, type Deps } from "../context.js";
 import { Prisma, type AuditAction, type User } from "../generated/prisma/client.js";
-import { DeviceConfig, getSettings } from "../settings.js";
+import { AppUpdatePolicy, DeviceConfig, getSettings } from "../settings.js";
 import { bucketName, callsWithoutRecordings, fewRecordings, isThrottled } from "../devices/health.js";
 import { fromNumbers, isNewSim, setSimNumber } from "../devices/sims.js";
 import { firefliesUsage } from "../fireflies/budget.js";
@@ -701,9 +701,21 @@ export async function dashboardRoutes(app: FastifyInstance, deps: Deps) {
   });
 
   app.put("/api/settings/device-config", admins, async (req) => {
-    const deviceConfig = DeviceConfig.parse(req.body);
+    // Keep the force-update fields when the caller doesn't send them (they have their own endpoint below).
+    const { deviceConfig: cur } = await getSettings(deps.db);
+    const deviceConfig = DeviceConfig.parse({ minVersionCode: cur.minVersionCode, requireLatest: cur.requireLatest, ...(req.body as object) });
     await deps.db.setting.upsert({ where: { id: 1 }, create: { id: 1, deviceConfig }, update: { deviceConfig } });
     await audit(req, "SETTINGS_CHANGE", undefined, { deviceConfig });
+    return deviceConfig;
+  });
+
+  /** Force update: the lowest app version phones may keep using. */
+  app.put("/api/settings/app-update", admins, async (req) => {
+    const policy = AppUpdatePolicy.parse(req.body);
+    const { deviceConfig: cur } = await getSettings(deps.db);
+    const deviceConfig = { ...cur, ...policy };
+    await deps.db.setting.upsert({ where: { id: 1 }, create: { id: 1, deviceConfig }, update: { deviceConfig } });
+    await audit(req, "SETTINGS_CHANGE", undefined, { appUpdate: policy });
     return deviceConfig;
   });
 

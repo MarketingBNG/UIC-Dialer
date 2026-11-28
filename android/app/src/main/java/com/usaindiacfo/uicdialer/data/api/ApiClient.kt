@@ -167,7 +167,8 @@ class ApiClient(
             }
         }
     }
-    suspend fun latestApp(): LatestApp = get("/v1/app/latest")
+    suspend fun latestApp(): LatestApp =
+        get("/v1/app/latest", mapOf("versionCode" to "${com.usaindiacfo.uicdialer.BuildConfig.VERSION_CODE}"))
 
     /** Streams the published APK to [dest]. Verify LatestApp.sha256 before installing. */
     suspend fun downloadApk(dest: File) {

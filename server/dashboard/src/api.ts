@@ -231,6 +231,9 @@ export interface DeviceConfig {
   maxParallelUploads: number;
   compressAudio: boolean;
   businessOnly: boolean;
+  /** Force update: phones below this versionCode must update (null = off). */
+  minVersionCode: number | null;
+  requireLatest: boolean;
 }
 /** Admin privacy settings: retentionMonths null = keep audio forever (default). */
 export interface PrivacySettings {
